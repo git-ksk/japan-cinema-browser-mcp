@@ -6,6 +6,8 @@
 
 navigation、bounded read、click、typing、state checkはCDP primitiveで実装し、provider固有の意味理解は上位adapterへ置きます。
 
+Phase 1では `CinemaBrowserRuntime.evaluateSemanticState()` をprovider-neutral primitiveとして追加し、TOHO固有のDOM knowledgeは `src/providers/toho/adapter.ts` に閉じ込めています。
+
 ### Model判断よりdeterministic code
 
 URL判定、enum、正規表現、state machine、schema validationで決められることはコード側で強制します。
@@ -17,10 +19,13 @@ URL判定、enum、正規表現、state machine、schema validationで決めら�
 - consequential action判定
 - confirmation expiry / one-shot
 - candidate identity check
+- TOHO schedule route / date / theater alias grouping
 
 ### Fail Closed
 
 selector変更、duplicate label、想定外redirect、画面不一致、購入結果不明などはerrorとして扱います。推測して続行しません。
+
+TOHO read adapterでは、上映回を作品に一意に結び付けられない場合やselected dateが曖昧な場合、部分的な上映結果を返しません。
 
 ### Steady-state Latencyを優先
 
@@ -50,6 +55,9 @@ src/
   browser/
     chrome-process.ts
     runtime.ts
+  providers/
+    toho/
+      adapter.ts
 ```
 
 provider実装が増えた後の候補:
@@ -84,7 +92,7 @@ src/
   index.ts
 ```
 
-必要になる前に大規模refactorはしません。
+TOHO Phase 1のためだけにregistry/contract/workflowを大規模refactorせず、必要になった時点で段階的に分離します。
 
 ## Provider Adapterのルール
 
@@ -128,11 +136,15 @@ expected labelを返す
 一致した場合のみclick
 ```
 
+TOHOの日付切替もこの形を使い、click後にselected dateをsemantic readerで再確認します。
+
 ## Visible State Budget
 
 generic readのdefault上限は8,000文字です。
 
 `CINEMA_MAX_READ_CHARS` で変更できますが、provider parserの都合だけでglobal上限を増やさず、provider-specific readerを改善します。
+
+TOHO adapterはfull visible textをNode/modelへ返さず、ブラウザ内の `Runtime.evaluate` で劇場link/date/showtime等の必要factだけに絞ります。1上映回のcontextも上限付きです。
 
 ## Error Taxonomy
 
@@ -150,6 +162,8 @@ generic readのdefault上限は8,000文字です。
 - `PURCHASE_UNKNOWN`
 
 stack traceやbrowser secretをMCP resultへ出しません。
+
+Phase 1では未実装providerのsemantic readへ `UNSUPPORTED_CAPABILITY` を返し、generic readerへ黙ってfallbackしません。
 
 ## Transaction State
 
@@ -171,6 +185,8 @@ PURCHASE_UNKNOWN
 
 `PURCHASE_SUBMITTED`は絶対に自動replayしません。
 
+TOHO Phase 1のread adapterはtransaction stateを進めません。date tabの表示切替以外の購入系操作は行いません。
+
 ## テスト
 
 ### Unit Test
@@ -184,6 +200,9 @@ Chromeを起動せず確認できるpolicyを固定します。
 - confirmation TTL / one-shot
 - transaction state transition
 - provider normalization helper
+- TOHO日付/year rollover
+- TOHO theater route/domain/alias grouping
+- UI構造が崩れた場合のfail-closed
 
 ### Browser Runtime Test
 
@@ -203,7 +222,7 @@ live testは低頻度・非購入を原則とします。
 
 - provider rootが開く
 - 劇場/上映画面へ到達できる
-- bounded showtime readが動く
+- bounded semantic showtime readが動く
 - 想定外domainへescapeしない
 
 CIで避けるもの:
@@ -212,6 +231,14 @@ CIで避けるもの:
 - user account login
 - 高頻度polling
 - payment
+
+TOHO Phase 1には明示実行用のsmokeを用意しています。
+
+```bash
+npm run smoke:toho
+```
+
+通常の `npm test` / CIからは分離し、必要時だけ実ブラウザで実行します。challengeが出た場合は突破せず失敗扱いにします。
 
 ## Performance Review
 
@@ -225,6 +252,8 @@ CIで避けるもの:
 - modelへ不要なtextを返していないか
 
 **小さいstructured factsを1回で返す**ことを優先します。
+
+TOHO Phase 1ではruntime dependencyを追加せず、既存の `chrome-remote-interface` と長寿命CDP sessionをそのまま利用します。
 
 ## Dependency追加ルール
 
@@ -249,6 +278,8 @@ runtime dependency追加時は次を説明できる状態にします。
 
 新しい設定を追加してもsafe defaultは崩しません。
 
+TOHO Phase 1では新しい環境変数を追加していません。
+
 ## Provider CapabilityのDefinition of Done
 
 「一度動いた」だけでは完了ではありません。
@@ -263,3 +294,5 @@ runtime dependency追加時は次を説明できる状態にします。
 8. documentationと実装が一致
 
 purchase submissionの場合は `PURCHASE_UNKNOWN` とduplicate submission防止テストも必須です。
+
+TOHO Phase 1は1〜5、7〜8まで実装し、実ブラウザlive smokeの実行確認を残タスクとして管理します。
