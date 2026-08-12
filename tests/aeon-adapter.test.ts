@@ -7,7 +7,14 @@ import {
   normalizeAeonTheaterSnapshot
 } from "../src/providers/aeon/adapter.js";
 
-function theaterRows(count = 55) {
+interface TheaterRowFixture {
+  label: string;
+  href: string;
+  route?: string;
+  code?: string;
+}
+
+function theaterRows(count = 55): TheaterRowFixture[] {
   return Array.from({ length: count }, (_, index) => ({
     label: `テスト劇場${index + 1}${index % 2 === 0 ? " IMAXレーザー" : " ULTIRA D-BOX"}`,
     href: `https://theater.aeoncinema.com/theaters/test-${index + 1}/`
