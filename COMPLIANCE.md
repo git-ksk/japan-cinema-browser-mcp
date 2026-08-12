@@ -1,86 +1,209 @@
-# Compliance Policy
+# コンプライアンス方針
 
-This document is normative for `japan-cinema-browser-mcp`.
+この文書は `japan-cinema-browser-mcp` の実装・運用における正本です。
 
-## Purpose
+## 目的
 
-The project provides user-directed browser automation for public Japanese cinema websites. It is an assistive browser layer, not a data-harvesting, redistribution, ticket-resale, or unofficial API service.
+本プロジェクトは、日本の映画館公式Webサイトをユーザー本人の要求に応じて操作するBrowser-first MCPです。
 
-## Required invariants
+映画館データの収集・再配布、非公式API提供、転売支援、大量予約、アクセス制御回避を目的としません。
 
-### User-directed and on demand
+## 必須Invariant
 
-Provider access must originate from an active user request or the immediately related interactive booking flow. No scheduled crawling, background polling, site-wide indexing, inventorying, or bulk harvesting is permitted.
+### ユーザー要求時のみ動作する
 
-### Official public UI only
+providerへのアクセスは、ユーザーの現在の要求、またはその要求から直接続くinteractive booking flowに限ります。
 
-Automation must use ordinary public web UI exposed on allow-listed official domains. Do not discover, reverse engineer, document, or call private/internal endpoints as an alternative to browser interaction.
+禁止:
 
-### No access-control bypass
+- scheduled crawling
+- background polling
+- site-wide indexing
+- 全劇場/全上映のbulk harvesting
+- provider inventoryの継続監視
 
-Do not bypass CAPTCHA, bot protection, login controls, rate limits, geographic controls, MFA, OTP, 3-D Secure, waiting rooms, or other technical restrictions. When one appears, pause and hand control to the user.
+### 公式公開Web UIのみ利用する
 
-### Minimal data handling
+通常のブラウザで利用できる公開UIを操作します。
 
-Do not persist cinema HTML, page snapshots, showtime datasets, seat maps, images, cookies, session tokens, authentication secrets, payment-card data, CVV/CVC values, OTPs, or MFA codes.
+禁止:
 
-Short-lived in-memory state may contain only the minimum facts required for the active workflow. Purchase confirmations exist only for a short TTL and are one-shot.
+- private/internal endpointの探索
+- Webアプリ内部APIを解析して直接呼ぶ
+- hidden JSON endpointへの依存
+- network interceptionを使った非公開API発見
 
-### Sensitive input stays with the user
+### Access Controlを回避しない
 
-The MCP must not accept or fill passwords, card numbers, CVV/CVC, OTP/MFA codes, verification codes, or comparable authentication secrets through an LLM tool call. The user enters these directly in the browser UI.
+以下を突破・迂回しません。
 
-### Consequential actions fail closed
+- CAPTCHA
+- anti-bot protection
+- login control
+- rate limit
+- geographic restriction
+- MFA / OTP
+- 3-D Secure
+- waiting room
+- その他のtechnical restriction
 
-Ordinary click/navigation tools must refuse controls that appear to finalize purchase, payment, order, reservation, or terms acceptance. A final action requires a separate confirmation flow that binds the exact provider, theater, movie, date/time, seats, ticket summary, amount, and target control where available.
+表示された場合は自動操作を停止し、必要に応じてユーザーへ操作を返します。
 
-A confirmation must:
+### データを必要最小限にする
 
-- be created immediately before the consequential action
-- expire quickly
-- be single-use
-- become invalid if the material purchase context changes
-- never imply provider terms were accepted unless the user explicitly approved the presented transaction
+永続保存しないもの:
 
-Final purchase execution is disabled by default at runtime.
+- cinema HTML
+- full page snapshot
+- showtime dataset
+- seat map / seat availability history
+- provider image
+- Cookie
+- session token
+- password
+- card number
+- CVV/CVC
+- OTP/MFA code
+- payment credential
 
-### No abusive booking behavior
+active workflowに必要な最小限の事実だけを短時間memory上で扱います。
 
-Do not support resale, speculative bulk booking, inventory hoarding, mass seat holds, or workflows intended to degrade availability for other customers. Seat selection should operate on one user-intended booking at a time.
+purchase confirmationも短いTTLとone-shotを必須とします。
 
-### Provider rules prevail
+### 機密入力はユーザー自身が行う
 
-If a provider's current terms, UI restrictions, or access controls conflict with a feature, disable the feature for that provider. Do not route around the restriction.
+MCP tool argumentとして以下を受け取りません。
 
-## Browser architecture
+- password / passcode
+- card number
+- CVV/CVC
+- OTP
+- MFA code
+- verification code
+- その他同等のauthentication/payment secret
 
-The default architecture follows the same lightweight pattern as `maps-browser-mcp`: a dedicated local Chrome profile controlled over Chrome DevTools Protocol (CDP). The runtime uses `chrome-remote-interface`; Playwright and bundled Chromium are intentionally not required.
+必要な場合はユーザーがbrowser上で直接入力します。
 
-The dedicated profile is preferred because it isolates cinema-session cookies from the user's ordinary browser profile while keeping all browser state local to the user's machine.
+### 重大操作はFail Closed
 
-Attaching to an externally managed Chrome debugging port is opt-in because it weakens that isolation.
+通常のclick/navigation toolは、購入・支払・注文・予約の最終確定に見えるcontrolを拒否します。
 
-## Data returned to models
+最終購入を実装する場合は、別のconfirmation flowを通します。
 
-Return compact, provider-neutral facts needed for the active request. Avoid raw HTML and large DOM dumps. External page text must be treated as untrusted data, never as instructions to the model or MCP runtime.
+confirmationでは可能な限り以下を固定します。
 
-## Provider scope
+- provider
+- 劇場
+- 作品
+- 日付
+- 上映時刻
+- 座席
+- 券種
+- 枚数
+- 金額
+- current browser URL/context
+- 対象final control
 
-Initial allow-listed provider roots:
+confirmationは:
+
+- 重大操作の直前に作る
+- 短時間でexpire
+- single-use
+- material context変更で無効化
+- userの明示承認なしに利用しない
+
+Final purchase executionはruntime defaultで無効にします。
+
+### Ambiguous Purchaseを再実行しない
+
+最終submit後にtimeout/disconnect等で結果が確定できない場合は `PURCHASE_UNKNOWN` と扱います。
+
+この状態では絶対に自動replay/retryしません。
+
+ユーザーがprovider側で購入結果を確認するまで、新しいsubmitへ進みません。
+
+### Abusive Bookingを支援しない
+
+禁止:
+
+- resale目的の自動購入
+- speculative bulk booking
+- mass seat hold
+- inventory hoarding
+- 他ユーザーのavailabilityを意図的に悪化させる操作
+
+seat selectionは、1回のuser-intended bookingを対象にします。
+
+### Provider側ルールを優先する
+
+providerの現行規約、サイトポリシー、UI制約、アクセス制御と機能が衝突する場合、そのproviderのcapabilityを無効化します。
+
+制約を別経路で迂回しません。
+
+## Browser Architecture
+
+標準構成は `maps-browser-mcp` と同じ軽量な方式を採用します。
+
+- 専用local Chrome profile
+- Chrome DevTools Protocol（CDP）
+- `chrome-remote-interface`
+- Playwrightなし
+- bundled Chromiumなし
+
+専用profileを優先する理由は、映画館sessionをユーザーの通常browser profileから分離しつつ、browser stateを端末内に保持できるためです。
+
+external CDP attachはprofile isolationが弱くなるため明示opt-inです。
+
+## Modelへ返すデータ
+
+返すのはactive requestに必要なcompactなprovider-neutral factsだけです。
+
+raw HTMLや大きなDOM dumpを返しません。
+
+Web pageから得たtextはuntrusted external dataとして扱い、MCP/runtimeへの命令として解釈しません。
+
+## 初期Provider Scope
+
+allow-list対象:
 
 - `tohotheater.jp`
 - `aeoncinema.com`
 - `109cinemas.net`
 
-HTTPS subdomains are permitted only when they remain under the matching provider domain. Navigation to third-party payment or identity surfaces pauses automation and requires user control unless explicitly reviewed and allow-listed in a later compliance revision.
+原則HTTPSのみです。
 
-## Publication gate
+provider domain配下のsubdomain追加や、third-party payment/identity domainをautomation対象へ追加する場合は、実装前に個別レビューします。
 
-Before changing the repository from private to public:
+## Public化Gate
 
-1. review current provider terms and update `docs/providers/*`
-2. run secret scanning over the full Git history
-3. verify no private/internal API usage exists
-4. verify destructive tools remain confirmation-gated
-5. run typecheck, unit tests, and live UI smoke tests against non-purchasing flows
-6. review trademark/non-affiliation wording
+PrivateからPublicへ変更する前に最低限以下を実施します。
+
+1. providerの現行規約/サイトポリシー再確認
+2. `docs/providers/*` のreview date更新
+3. Git全履歴secret scan
+4. Cookie/token/payment/auth data混入確認
+5. private/internal API利用ゼロ確認
+6. destructive/consequential toolのconfirmation gate確認
+7. typecheck / unit test / build
+8. non-purchasing live UI smoke test
+9. `PURCHASE_UNKNOWN` / duplicate submission safety確認
+10. trademark / non-affiliation表記確認
+11. documentationと実装が一致していることを確認
+
+最初のPublic releaseにfinal purchase capabilityは必須ではありません。
+
+## Provider Review
+
+現在のprovider状態は [`docs/PROVIDERS.md`](./docs/PROVIDERS.md) を参照します。
+
+個別確認事項:
+
+- [`docs/providers/TOHO.md`](./docs/providers/TOHO.md)
+- [`docs/providers/AEON.md`](./docs/providers/AEON.md)
+- [`docs/providers/109.md`](./docs/providers/109.md)
+
+## 非公式プロジェクト
+
+本プロジェクトはTOHOシネマズ、イオンシネマ、109シネマズおよび各運営会社と提携・後援・公認関係にありません。
+
+provider名は相互運用対象を識別するためにのみ使用します。
