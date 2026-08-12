@@ -88,8 +88,12 @@ Private MVPでは、次の基盤まで実装済みです。
 - 購入確定系コントロールの通常clickからの拒否
 - 短時間・one-shot・URL-boundの購入確認ゲート
 - 最終購入のデフォルト無効化
+- TOHOシネマズの劇場一覧semantic read
+- TOHOシネマズの劇場・日付・作品・上映回semantic read
+- TOHOシネマズの日付切替後のselected-state再検証
+- TOHOシネマズのUI変更/曖昧状態でのfail-closed
 
-次は各社の現在のWeb UIを確認し、劇場・日付・作品・上映回を映画館ドメインの概念として扱うprovider adapterを実装します。
+TOHOのread-only上映取得をPhase 1の最初の縦切りとして実装しています。AEON/109はgeneric bounded readのままで、provider固有semantic adapterはまだ有効化していません。
 
 ## セットアップ
 
@@ -155,17 +159,35 @@ CINEMA_ENABLE_PURCHASE=true npm start
 
 ## 現在のMCP Tools
 
-- `list_cinema_providers` — 対応provider一覧
+- `list_cinema_providers` — 対応provider一覧とcapability
 - `browser_status` — Chrome/CDP状態
 - `open_cinema_provider` — 公式サイトを開く
 - `navigate_cinema_official` — 許可済み公式ドメイン内だけ移動する
 - `read_cinema_page` — 表示中情報を上限付きで読む
 - `extract_showtime_candidates` — 表示中の上映時刻候補を抽出する
+- `list_theaters` — providerの公式公開UIから劇場をsemanticに読む。現在TOHOのみ有効
+- `get_showtimes` — 劇場・日付・作品・上映回をsemanticに読む。現在TOHOのみ有効
 - `click_cinema_control` — 表示中の通常操作を実行する
 - `fill_cinema_field` — 非機密フィールドだけ入力する
 - `prepare_purchase_confirmation` — 現在の購入内容を確認用に固定する
 - `confirm_purchase_action` — 最終購入操作。デフォルト無効
 - `close_browser_session` — MCP所有Chromeを閉じる
+
+## 開発時の確認
+
+```bash
+npm run typecheck
+npm test
+npm run build
+```
+
+TOHOの非購入live smokeは通常CIには含めず、低頻度で明示実行します。
+
+```bash
+npm run smoke:toho
+```
+
+このsmoke testは公式公開UIの劇場一覧・上映画面を読むだけで、座席選択や購入操作は行いません。
 
 ## ドキュメント
 
@@ -176,14 +198,6 @@ CINEMA_ENABLE_PURCHASE=true npm start
 - [`docs/DEVELOPMENT.md`](./docs/DEVELOPMENT.md) — 実装ルール
 - [`docs/PROVIDERS.md`](./docs/PROVIDERS.md) — provider対応状況
 - [`COMPLIANCE.md`](./COMPLIANCE.md) — コンプライアンス方針
-
-## 開発
-
-```bash
-npm run typecheck
-npm test
-npm run build
-```
 
 ## 非公式プロジェクトであることについて
 
