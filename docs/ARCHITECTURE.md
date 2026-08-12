@@ -43,18 +43,37 @@ MCP toolの登録と引数検証を担当します。
 - runtime errorのMCP error化
 - 通常操作と最終購入操作の分離
 - bounded result返却
+- provider capabilityの明示
+
+Phase 1では `list_theaters` / `get_showtimes` を追加し、semantic read capabilityはTOHOだけ有効化しています。未実装providerへgeneric fuzzy fallbackはしません。
 
 ### `src/providers.ts`
 
-現時点ではprovider registryと横断ポリシーを保持します。
+provider registryと横断ポリシーを保持します。
 
 - provider ID
 - 公式root URL
 - domain allow-list
+- granular capability matrix
 - sensitive field判定
 - final purchase control判定
 
-provider固有のDOM/semantic知識は今後adapterへ分離します。
+TOHOは `theaters=true / showtimes=true`、seat/checkout/purchase系はfalseです。AEON/109のsemantic readはまだfalseです。
+
+### `src/providers/toho/adapter.ts`
+
+Phase 1のTOHO read-only adapterです。
+
+- 公式劇場一覧のvisible theater linkをsemanticに抽出
+- 公開schedule routeをschedule groupとして正規化
+- 同じrouteを共有する複数劇場名をaliasesとして保持
+- visible date controlを `YYYY-MM-DD` へ正規化
+- 日付切替後のselected stateを再検証
+- 作品 / 上映時刻 / format / 字幕・吹替 / screen / availabilityを必要な範囲だけ抽出
+- source URLを返却
+- UI変更、曖昧grouping、movie/showtime対応不能時はfail closed
+
+raw HTMLやfull DOMをadapter外へ返さず、CDP `Runtime.evaluate` 内で小さいstructured factへ落としてからNode側へ戻します。
 
 ### `src/browser/chrome-process.ts`
 
@@ -69,18 +88,19 @@ Chrome process lifecycleを管理します。
 
 ### `src/browser/runtime.ts`
 
-現在のCDP targetと、公開UIに対する最小限のbrowser primitiveを担当します。
+CDP targetと、公開UIに対する最小限のbrowser primitiveを担当します。
 
 - official-domain navigation
 - current URL確認
 - bounded visible read
 - visible control検索・click
 - 非機密field入力
-- 上映時刻候補抽出
+- generic上映時刻候補抽出
 - challenge検出
 - fail-closed error
+- provider-neutral semantic evaluation primitive
 
-provider固有ロジックはここに増やさず、上位adapter/controllerへ置きます。
+`evaluateSemanticState()` はprovider IDのdomain checkとchallenge checkを通したうえで、adapterが渡すdeterministicなDOM評価式を既存CDP session上で実行します。provider固有selectorや映画館概念はruntimeへ持ち込みません。
 
 ### `src/purchase-gate.ts`
 
@@ -117,7 +137,7 @@ Cinema Workflow Service
    ▼
 Provider Adapter Interface
    │
-   ├─ TOHO adapter
+   ├─ TOHO adapter      ← read-only Phase 1実装済み
    ├─ AEON adapter
    └─ 109 adapter
    │
@@ -128,9 +148,11 @@ Browser Semantic Primitives
 CDP Runtime
 ```
 
+Phase 1では将来interface全体を先に作り込まず、TOHO read-only縦切りに必要なsurfaceだけを実装します。
+
 ## Provider Adapter
 
-adapterはCSS selectorではなく、映画館の概念を公開します。
+最終形のadapterはCSS selectorではなく、映画館の概念を公開します。
 
 ```ts
 interface CinemaProviderAdapter {
@@ -178,6 +200,8 @@ UI変更や規約上の懸念が出た場合はcapabilityを落とします。�
 
 「近そうな要素」を推測してclickすることはしません。
 
+TOHOの日付切替では、visible date controlを一意に解決してclickした後、同じsemantic readerでもう一度画面を読み、requested dateがselected stateになったことを確認してから上映情報を返します。
+
 ## 購入ステートマシン
 
 ```text
@@ -202,6 +226,8 @@ PURCHASE_COMPLETE / PURCHASE_FAILED / PURCHASE_UNKNOWN
 
 `PURCHASE_UNKNOWN` では最終操作を絶対に自動replayしません。ユーザーがprovider側で確認するまでterminal扱いにします。
 
+Phase 1のTOHO adapterはこのtransaction flowへ入らず、上映回の購入controlもclickしません。
+
 ## Human Intervention
 
 以下では自動操作を停止します。
@@ -225,10 +251,10 @@ PURCHASE_COMPLETE / PURCHASE_FAILED / PURCHASE_UNKNOWN
 - deterministic処理はローカル実行
 - visible readは上限付き
 - screenshotは必要性が確認できるまで使わない
-- provider adapter完成後はsemantic selectorを優先
+- provider adapterではsemantic selectorを優先
 - DOM dumpをmodelへ送らない
 
-複数のdeterministic DOM判定は、可能なら1回の `Runtime.evaluate` にまとめます。
+複数のdeterministic DOM判定は、可能なら1回の `Runtime.evaluate` にまとめます。TOHO Phase 1も劇場一覧/上映画面ごとにcompact semantic snapshotへまとめ、モデルへraw pageを渡しません。
 
 ## 永続化
 

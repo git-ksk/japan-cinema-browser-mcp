@@ -1,30 +1,62 @@
 export type CinemaProviderId = "toho" | "aeon" | "109";
 
+export interface ProviderCapabilities {
+  theaters: boolean;
+  showtimes: boolean;
+  seatMap: boolean;
+  seatSelection: boolean;
+  checkoutPreparation: boolean;
+  purchaseSubmission: boolean;
+}
+
 export interface CinemaProviderDefinition {
   id: CinemaProviderId;
   name: string;
   rootUrl: string;
   allowedDomain: string;
+  capabilities: ProviderCapabilities;
 }
+
+const NO_TRANSACTION_CAPABILITIES = {
+  seatMap: false,
+  seatSelection: false,
+  checkoutPreparation: false,
+  purchaseSubmission: false
+} as const;
 
 export const CINEMA_PROVIDERS: Record<CinemaProviderId, CinemaProviderDefinition> = {
   toho: {
     id: "toho",
     name: "TOHO Cinemas",
     rootUrl: "https://www.tohotheater.jp/",
-    allowedDomain: "tohotheater.jp"
+    allowedDomain: "tohotheater.jp",
+    capabilities: {
+      theaters: true,
+      showtimes: true,
+      ...NO_TRANSACTION_CAPABILITIES
+    }
   },
   aeon: {
     id: "aeon",
     name: "AEON Cinema",
     rootUrl: "https://www.aeoncinema.com/",
-    allowedDomain: "aeoncinema.com"
+    allowedDomain: "aeoncinema.com",
+    capabilities: {
+      theaters: false,
+      showtimes: false,
+      ...NO_TRANSACTION_CAPABILITIES
+    }
   },
   "109": {
     id: "109",
     name: "109 Cinemas",
     rootUrl: "https://109cinemas.net/",
-    allowedDomain: "109cinemas.net"
+    allowedDomain: "109cinemas.net",
+    capabilities: {
+      theaters: false,
+      showtimes: false,
+      ...NO_TRANSACTION_CAPABILITIES
+    }
   }
 };
 
@@ -38,6 +70,7 @@ export class ProviderPolicyError extends Error {
   constructor(
     public readonly code:
       | "UNSUPPORTED_PROVIDER"
+      | "UNSUPPORTED_CAPABILITY"
       | "URL_NOT_ALLOWED"
       | "SENSITIVE_FIELD"
       | "FINAL_ACTION_REQUIRES_CONFIRMATION",

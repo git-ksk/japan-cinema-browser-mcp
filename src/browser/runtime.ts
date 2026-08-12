@@ -247,6 +247,21 @@ export class CinemaBrowserRuntime {
     return { url, provider: providerForUrl(url)?.id ?? null, candidates };
   }
 
+  async evaluateSemanticState<T>(expectedProvider: CinemaProviderId, expression: string): Promise<{ url: string; value: T }> {
+    const url = await this.assertOfficialCurrentUrl(expectedProvider);
+    await this.assertNoChallenge();
+    const client = await this.getClient();
+    const result = await client.Runtime.evaluate({
+      expression,
+      returnByValue: true,
+      awaitPromise: true
+    });
+    if (result.exceptionDetails) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "Provider semantic reader failed against the current rendered public UI.");
+    }
+    return { url, value: result.result.value as T };
+  }
+
   async clickControl(query: string): Promise<Record<string, unknown>> {
     const before = await this.assertOfficialCurrentUrl();
     await this.assertNoChallenge();

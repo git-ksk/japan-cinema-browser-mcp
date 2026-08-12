@@ -29,7 +29,7 @@
 - ✅ final purchaseデフォルト無効
 - ✅ baseline compliance policy
 - ✅ unit test / CI定義
-- 🟡 ドキュメント整備
+- ✅ ドキュメント整備
 - 🟡 ローカルlive smoke確認
 
 Exit criteria:
@@ -43,17 +43,31 @@ Exit criteria:
 
 目的: generic page readから、映画館ドメインを理解するread-only adapterへ移行する。
 
-状態: 🟡 次
+状態: 🟡 TOHO実装済み、AEONが次
 
-各providerごとに:
+### TOHOシネマズ
+
+- ✅ 現行公式導線を確認
+- ✅ 劇場一覧semantic
+- ✅ 日付semantic / selected-state再検証
+- ✅ 作品/上映回semantic
+- ✅ IMAX等の上映方式を正規化
+- ✅ 字幕/吹替表示を正規化
+- ✅ provider-specific bounded semantic reader
+- ✅ stale/ambiguous stateでfail closed
+- ✅ unit test
+- ✅ 非購入live smoke script追加
+- 🟡 実ブラウザでのlive smoke実行確認
+
+TOHOでは `list_theaters` / `get_showtimes` を有効化します。1つのschedule routeを複数劇場名が共有する公開UIもalias groupとして扱い、単純な「ID = 1劇場名」前提には依存しません。
+
+### AEON / 109
 
 - 🟡 現行公式導線を確認
-- 🟡 利用規約/サイトポリシーを再確認
 - ⬜ 劇場選択semanticを特定
 - ⬜ 日付選択semanticを特定
 - ⬜ 作品/上映カードsemanticを特定
-- ⬜ IMAX等の上映方式を正規化
-- ⬜ 字幕/吹替/言語表示を正規化
+- ⬜ format/language正規化
 - ⬜ provider-specific bounded reader
 - ⬜ stale-state check
 - ⬜ unit test
@@ -61,9 +75,9 @@ Exit criteria:
 
 目標tools:
 
-- `list_theaters`
-- `get_showtimes`
-- `find_showtimes`
+- `list_theaters` — TOHO有効
+- `get_showtimes` — TOHO有効
+- `find_showtimes` — 3社横断normalization後に追加予定
 
 Exit criteria:
 
@@ -220,7 +234,7 @@ providerごとに必須:
 
 ## 推奨実装順
 
-1. TOHO read adapter
+1. ✅ TOHO read adapter
 2. AEON read adapter
 3. 109 read adapter
 4. cross-provider normalized search
