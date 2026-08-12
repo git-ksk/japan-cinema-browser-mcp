@@ -36,7 +36,9 @@ https://www.tohotheater.jp/theater/find.html
 https://hlo.tohotheater.jp/net/schedule/036/TNPI2000J01.do
 ```
 
-`036` はTOHOシネマズ ららぽーと横浜の劇場識別子としてvisible theater linkから取得します。
+`036` はTOHOシネマズ ららぽーと横浜のschedule識別子としてvisible theater linkから取得します。
+
+また、1つのschedule routeを複数の劇場名が共有する公開UIもあります。確認済みの例では、TOHOシネマズ 日比谷 / TOHOシネマズ シャンテが同じschedule groupとして表示されます。このためadapterはschedule IDを単一劇場名と決め打ちせず、同じrouteに結び付くvisible theater nameを`aliases`として保持します。
 
 adapterはこの公開Web UIのrendered DOMだけを読みます。network interception、XHR/fetchの解析、hidden JSON endpoint、private/internal APIの直接利用は行いません。
 
@@ -49,12 +51,12 @@ adapterはこの公開Web UIのrendered DOMだけを読みます。network inter
 採用条件:
 
 - HTTPS
-- `tohotheater.jp` 配下
+- `tohotheater.jp` またはそのsubdomainに厳密一致
 - visible theater link
 - `/net/schedule/{3桁}/TNPI2000J01.do` 形式の公開schedule route
 - `TOHOシネマズ ...` として読める劇場名
 
-同じ劇場IDが設備別一覧などで重複していても、URL/名称が一致すればdeduplicateします。同一IDで異なるURL/名称が観測された場合は `UI_STATE_CHANGED` で停止します。
+同じschedule ID / routeが設備別一覧などで重複していてもdeduplicateします。同じrouteに複数の劇場名が結び付く場合は、公開UIのgroupingとして`aliases`へまとめます。同一IDが異なるschedule routeを指すなど整合しない状態では `UI_STATE_CHANGED` で停止します。
 
 劇場一覧の抽出数が極端に少ない場合も、UI変更とみなしてfail closedします。
 
@@ -113,9 +115,9 @@ Unit test:
 
 - TOHO日付正規化
 - 年末年始year rollover
-- theater link validation
+- official domain / lookalike domain判定
 - duplicate theater dedupe
-- conflicting duplicate idのfail-closed
+- shared schedule routeのalias grouping
 - theater list構造崩れのfail-closed
 
 非購入live smoke:
