@@ -6,6 +6,7 @@ import { BrowserRuntimeError, CinemaBrowserRuntime } from "./browser/runtime.js"
 import {
   CINEMA_PROVIDERS,
   ProviderPolicyError,
+  assertProviderCapability,
   isFinalPurchaseLabel,
   type CinemaProviderId
 } from "./providers.js";
@@ -52,14 +53,13 @@ async function safe<T>(task: () => Promise<T> | T): Promise<CallToolResult> {
   }
 }
 
-function requireReadAdapter(provider: CinemaProviderId): TohoReadAdapter {
-  if (provider !== "toho") {
-    throw new ProviderPolicyError(
-      "UNSUPPORTED_CAPABILITY",
-      `${CINEMA_PROVIDERS[provider].name} semantic theater/showtime reading is not enabled yet.`
-    );
-  }
-  return tohoReadAdapter;
+function requireReadAdapter(provider: CinemaProviderId, capability: "theaters" | "showtimes"): TohoReadAdapter {
+  assertProviderCapability(provider, capability);
+  if (provider === "toho") return tohoReadAdapter;
+  throw new ProviderPolicyError(
+    "UNSUPPORTED_CAPABILITY",
+    `${CINEMA_PROVIDERS[provider].name} ${capability} adapter is not available.`
+  );
 }
 
 export function buildServer(): McpServer {
@@ -141,7 +141,7 @@ export function buildServer(): McpServer {
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true }
     },
-    async ({ provider, query }) => safe(() => requireReadAdapter(provider).listTheaters(query))
+    async ({ provider, query }) => safe(() => requireReadAdapter(provider, "theaters").listTheaters(query))
   );
 
   server.registerTool(
@@ -157,7 +157,7 @@ export function buildServer(): McpServer {
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true }
     },
-    async ({ provider, theater, date, movie }) => safe(() => requireReadAdapter(provider).getShowtimes({
+    async ({ provider, theater, date, movie }) => safe(() => requireReadAdapter(provider, "showtimes").getShowtimes({
       theater,
       ...(date ? { date } : {}),
       ...(movie ? { movie } : {})
@@ -229,7 +229,8 @@ export function buildServer(): McpServer {
         ...confirmation,
         summary,
         requiresExplicitUserConfirmation: true,
-        purchaseExecutionEnabled: config.policy.enablePurchase
+        purchaseExecutionEnabled:
+          config.policy.enablePurchase && CINEMA_PROVIDERS[input.provider].capabilities.purchaseSubmission
       };
     })
   );
@@ -250,6 +251,7 @@ export function buildServer(): McpServer {
         );
       }
       const confirmation = purchaseGate.consume(confirmationId);
+      assertProviderCapability(confirmation.summary.provider, "purchaseSubmission");
       const status = await runtime.status();
       if (status.url !== confirmation.expectedUrl || status.provider !== confirmation.summary.provider) {
         throw new BrowserRuntimeError(

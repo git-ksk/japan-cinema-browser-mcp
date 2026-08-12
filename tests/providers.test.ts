@@ -2,7 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   CINEMA_PROVIDERS,
+  ProviderPolicyError,
   assertOfficialUrl,
+  assertProviderCapability,
   isFinalPurchaseLabel,
   isSensitiveFieldLabel,
   providerForUrl
@@ -33,6 +35,28 @@ test("TOHO Phase 1 exposes only read capabilities while purchase remains disable
   assert.equal(CINEMA_PROVIDERS.toho.capabilities.purchaseSubmission, false);
   for (const provider of Object.values(CINEMA_PROVIDERS)) {
     assert.equal(provider.capabilities.purchaseSubmission, false, provider.id);
+  }
+});
+
+test("provider capability matrix is enforced as a runtime policy boundary", () => {
+  assert.doesNotThrow(() => assertProviderCapability("toho", "theaters"));
+  assert.doesNotThrow(() => assertProviderCapability("toho", "showtimes"));
+
+  assert.throws(
+    () => assertProviderCapability("aeon", "showtimes"),
+    (error) => error instanceof ProviderPolicyError && error.code === "UNSUPPORTED_CAPABILITY"
+  );
+  assert.throws(
+    () => assertProviderCapability("109", "theaters"),
+    (error) => error instanceof ProviderPolicyError && error.code === "UNSUPPORTED_CAPABILITY"
+  );
+
+  for (const provider of Object.values(CINEMA_PROVIDERS)) {
+    assert.throws(
+      () => assertProviderCapability(provider.id, "purchaseSubmission"),
+      (error) => error instanceof ProviderPolicyError && error.code === "UNSUPPORTED_CAPABILITY",
+      provider.id
+    );
   }
 });
 

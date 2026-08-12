@@ -9,6 +9,8 @@ export interface ProviderCapabilities {
   purchaseSubmission: boolean;
 }
 
+export type ProviderCapability = keyof ProviderCapabilities;
+
 export interface CinemaProviderDefinition {
   id: CinemaProviderId;
   name: string;
@@ -79,6 +81,17 @@ export class ProviderPolicyError extends Error {
     super(message);
     this.name = "ProviderPolicyError";
   }
+}
+
+export function assertProviderCapability(providerId: CinemaProviderId, capability: ProviderCapability): CinemaProviderDefinition {
+  const provider = CINEMA_PROVIDERS[providerId];
+  if (!provider.capabilities[capability]) {
+    throw new ProviderPolicyError(
+      "UNSUPPORTED_CAPABILITY",
+      `${provider.name} capability '${capability}' is not enabled.`
+    );
+  }
+  return provider;
 }
 
 export function providerForUrl(value: string): CinemaProviderDefinition | undefined {
