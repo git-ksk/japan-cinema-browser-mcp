@@ -17,6 +17,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "check": "npm run typecheck && npm test",
     "smoke:toho": "tsx tests/toho-live.smoke.ts",
+    "smoke:aeon": "tsx tests/aeon-live.smoke.ts",
     "prepack": "npm run check && npm run build"
   },
   "dependencies": {
