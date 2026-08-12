@@ -57,6 +57,8 @@ MCP tools:
 
 `get_showtimes` は劇場・日付・作品・上映時刻をcompact structured factsへ正規化します。日付切替後はselected stateを再確認し、movie/showtime groupingやUI stateが曖昧なら部分結果を推測せずfail closedします。
 
+TOHOの公開UIには、複数の劇場名が1つのschedule routeを共有するケースがあります。Phase 1 adapterはこれをaliasを持つschedule groupとして扱い、単純な「schedule ID = 1劇場名」前提には依存しません。
+
 非購入live smokeは `npm run smoke:toho` として低頻度・明示実行用に分離し、通常CIには含めません。
 
 ## Provider Capabilityを上げる前のチェック
