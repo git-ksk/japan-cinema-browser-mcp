@@ -1,72 +1,103 @@
 # japan-cinema-browser-mcp
 
-Browser-first MCP server for interacting with Japanese cinema websites on behalf of the user.
+日本の映画館公式サイトを、ユーザー本人のブラウザ上で安全に操作するための Browser-first MCP です。
 
-Initial providers:
+当面の対応対象は次の3社です。
 
-- TOHO Cinemas
-- AEON Cinema
-- 109 Cinemas
+- TOHOシネマズ
+- イオンシネマ
+- 109シネマズ
 
-## Positioning
+## このプロジェクトが目指すもの
 
-This project is **not** a cinema-data aggregation service. It automates the same public web UI a user can operate in their own browser, on demand.
+映画館ごとに異なるWeb UIを、MCPから共通の概念で扱えるようにします。
 
-Core rules:
-
-- browser UI first; do not reverse engineer or call private/internal APIs
-- only official cinema domains are navigable
-- no scheduled crawling or cinema-wide aggregation
-- no persistent storage of showtimes, seat maps, HTML, images, cookies, or payment data
-- authentication, CAPTCHA, MFA, and 3-D Secure stay under user control
-- checkout-changing actions fail closed
-- final purchase actions are disabled by default and require an explicit one-shot confirmation gate when enabled
-- provider terms and access restrictions take precedence over this project
-- keep the runtime lightweight: reuse one Chrome session and return compact structured facts instead of raw DOM/HTML
-
-See [COMPLIANCE.md](./COMPLIANCE.md) for the normative policy.
-
-## Architecture
-
-The browser layer follows the same lightweight pattern as `maps-browser-mcp`:
+最終的には、次のような一連の操作を対象にします。
 
 ```text
-MCP client
-   |
-   | stdio
-   v
-japan-cinema-browser-mcp
-   |
-   | Chrome DevTools Protocol (CDP)
-   v
-Dedicated local Google Chrome
-   |
-   +-- TOHO Cinemas
-   +-- AEON Cinema
-   +-- 109 Cinemas
+上映を探す
+  ↓
+劇場・日時・上映方式を比較する
+  ↓
+座席を確認する
+  ↓
+座席を選ぶ
+  ↓
+購入直前まで進む
+  ↓
+ユーザーが内容を明示確認する
+  ↓
+購入を確定する
 ```
 
-There is no Playwright dependency and no bundled Chromium download. Browser control uses `chrome-remote-interface` directly against installed Chrome/Chromium.
+ただし、これは映画館データを収集・再配布するサービスではありません。ユーザーの要求時に、公式サイト上で通常のブラウザ操作を行うことを基本とします。
 
-## Status
+## 基本方針
 
-Early private MVP. The current implementation provides:
+- 公式Web UIを優先し、非公開・内部APIを解析して直接利用しない
+- 定期クロールや全国上映データのDB化を行わない
+- 上映情報、座席表、HTML、画像、Cookie、決済情報を永続保存しない
+- CAPTCHA、MFA、OTP、3-D Secureなどを自動突破しない
+- パスワードやカード番号などの機密情報をMCP経由で入力しない
+- 購入確定などの重大操作は通常のclick toolから分離する
+- 最終購入はデフォルト無効とし、明示確認を必須にする
+- UIが変わった、対象が曖昧、状態が不明な場合は推測せず停止する
+- 軽量・高速を維持し、ブラウザセッションを再利用する
 
-- a reusable local Chrome/CDP session
-- reviewed official-domain navigation
-- bounded visible-page reading
-- provider-neutral showtime candidate extraction
-- visible control interaction with ambiguity checks
-- sensitive-field refusal
-- a short-lived, URL-bound, one-shot purchase confirmation gate
+詳細は [`COMPLIANCE.md`](./COMPLIANCE.md) を正本とします。
 
-Provider-specific semantic booking adapters are the next layer and will be added only after each current public UI is validated.
+## アーキテクチャ
 
-## Requirements
+`maps-browser-mcp` と同じ思想で、Playwrightを使わずChrome DevTools Protocol（CDP）を直接利用します。
+
+```text
+MCPクライアント
+      │
+      │ stdio
+      ▼
+japan-cinema-browser-mcp
+      │
+      │ CDP
+      ▼
+専用ローカルChrome
+      │
+      ├─ TOHOシネマズ
+      ├─ イオンシネマ
+      └─ 109シネマズ
+```
+
+ランタイム依存は現在3つだけです。
+
+- `@modelcontextprotocol/server`
+- `chrome-remote-interface`
+- `zod`
+
+PlaywrightやChromium本体は同梱しません。
+
+## 現在の状態
+
+Private MVPでは、次の基盤まで実装済みです。
+
+- 専用Chromeプロファイルの起動・再利用
+- CDP接続
+- 3社公式ドメインのallow-list
+- 表示中ページのbounded read
+- 表示中コントロールの操作
+- 上映時刻候補の簡易抽出
+- 機密入力フィールドの拒否
+- 購入確定系コントロールの通常clickからの拒否
+- 短時間・one-shot・URL-boundの購入確認ゲート
+- 最終購入のデフォルト無効化
+
+次は各社の現在のWeb UIを確認し、劇場・日付・作品・上映回を映画館ドメインの概念として扱うprovider adapterを実装します。
+
+## セットアップ
+
+必要環境:
 
 - Node.js 20+
 - npm
-- Google Chrome installed on the Mac
+- Google Chrome
 
 ```bash
 npm install
@@ -74,23 +105,23 @@ npm run build
 npm start
 ```
 
-The server uses stdio and logs only to stderr.
+MCPはstdioで動作し、ログはstderrに出します。
 
-## Browser modes
+## Chromeの使い方
 
-### Default: dedicated Chrome profile
+### 標準: 専用Chromeプロファイル
 
-No browser configuration is needed. The MCP finds installed Chrome, starts it once, and reuses a dedicated persistent profile at:
+特別な設定は不要です。インストール済みChromeを起動し、次の専用プロファイルを再利用します。
 
 ```text
 ~/.japan-cinema-browser-mcp/chrome-profile
 ```
 
-This keeps cinema login/session state local and isolated from the user's normal Chrome profile.
+映画館サイトのログイン状態を通常のChromeプロファイルから分離できます。
 
-### Optional: attach to an existing local CDP port
+### 任意: 既存CDPポートへ接続
 
-This is opt-in because it weakens profile isolation:
+通常のChromeセッションへの接続はアクセス範囲が広がるため、明示的なopt-inが必要です。
 
 ```bash
 CINEMA_ALLOW_EXTERNAL_CDP=true \
@@ -98,67 +129,55 @@ CINEMA_CDP_PORT=9222 \
 npm start
 ```
 
-The MCP only connects to loopback CDP (`127.0.0.1`).
+## 購入機能
 
-### Final purchase execution
-
-Disabled by default:
+最終購入はデフォルトで無効です。
 
 ```bash
 CINEMA_ENABLE_PURCHASE=true npm start
 ```
 
-Enabling this flag does **not** bypass the confirmation gate. The exact provider/page and transaction summary must first be bound by `prepare_purchase_confirmation`; the token expires quickly and can be used only once.
+この設定を有効にしても、購入確認ゲートは省略できません。
 
-## Tools
+購入前には少なくとも以下を確認対象として固定します。
 
-- `list_cinema_providers` — provider definitions and official roots
-- `browser_status` — current Chrome/CDP session and provider surface
-- `open_cinema_provider` — open an official provider root
-- `navigate_cinema_official` — navigate only within reviewed official domains
-- `read_cinema_page` — bounded visible-text snapshot; no raw HTML persistence
-- `extract_showtime_candidates` — visible HH:MM candidates plus short context
-- `click_cinema_control` — click one unique visible link/button; final actions are blocked
-- `fill_cinema_field` — fill one non-sensitive field; auth/payment secrets are blocked
-- `prepare_purchase_confirmation` — bind current URL and material transaction summary
-- `confirm_purchase_action` — consequential one-shot final action, disabled by default
-- `close_browser_session` — close MCP-owned Chrome; externally managed Chrome is left running
+- provider
+- 劇場
+- 作品
+- 日付
+- 上映時刻
+- 座席
+- 券種
+- 合計金額
+- 現在の購入ページ
 
-## Safety model
+確認は短時間で失効し、1回しか使えません。画面や購入内容が変わった場合は再確認が必要です。
 
-The runtime fails closed:
+## 現在のMCP Tools
 
-1. **Domain guard** — only HTTPS pages under `tohotheater.jp`, `aeoncinema.com`, and `109cinemas.net` are automatable.
-2. **Visible-UI guard** — operations target ordinary visible controls; no private/internal API path exists in the architecture.
-3. **Sensitive-data guard** — password, card number, CVV/CVC, OTP/MFA, verification-code and similar fields are rejected.
-4. **Challenge guard** — visible CAPTCHA/challenge surfaces stop automation for human handling.
-5. **Purchase guard** — normal click tools cannot click final purchase/payment/booking controls.
-6. **State guard** — purchase confirmation is bound to the exact current URL; navigation invalidates it.
+- `list_cinema_providers` — 対応provider一覧
+- `browser_status` — Chrome/CDP状態
+- `open_cinema_provider` — 公式サイトを開く
+- `navigate_cinema_official` — 許可済み公式ドメイン内だけ移動する
+- `read_cinema_page` — 表示中情報を上限付きで読む
+- `extract_showtime_candidates` — 表示中の上映時刻候補を抽出する
+- `click_cinema_control` — 表示中の通常操作を実行する
+- `fill_cinema_field` — 非機密フィールドだけ入力する
+- `prepare_purchase_confirmation` — 現在の購入内容を確認用に固定する
+- `confirm_purchase_action` — 最終購入操作。デフォルト無効
+- `close_browser_session` — MCP所有Chromeを閉じる
 
-If a target is missing, ambiguous, sensitive, changed, or outside the reviewed surface, the server returns an error instead of guessing.
+## ドキュメント
 
-## Performance model
+- [`docs/PROJECT.md`](./docs/PROJECT.md) — プロジェクト定義・非目標
+- [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) — 設計・状態境界
+- [`docs/ROADMAP.md`](./docs/ROADMAP.md) — 開発ロードマップ
+- [`docs/SECURITY.md`](./docs/SECURITY.md) — セキュリティモデル
+- [`docs/DEVELOPMENT.md`](./docs/DEVELOPMENT.md) — 実装ルール
+- [`docs/PROVIDERS.md`](./docs/PROVIDERS.md) — provider対応状況
+- [`COMPLIANCE.md`](./COMPLIANCE.md) — コンプライアンス方針
 
-- only three runtime dependencies: MCP server SDK, `chrome-remote-interface`, and Zod
-- one long-lived Chrome/controller per MCP process
-- no browser launch per tool call
-- no browser binary bundled or downloaded by the package
-- system Google Chrome reused locally
-- bounded visible-text reads instead of DOM/HTML dumps
-- compact provider-neutral JSON
-- no background polling, crawling, or indexing
-- provider-specific semantic selectors will replace generic scanning on validated flows
-
-## Compliance
-
-See:
-
-- [COMPLIANCE.md](./COMPLIANCE.md)
-- [docs/PROVIDERS.md](./docs/PROVIDERS.md)
-
-Before public release, current provider terms, live UI behavior, full Git history, secrets, destructive-action gates, and non-affiliation wording must be reviewed again.
-
-## Development
+## 開発
 
 ```bash
 npm run typecheck
@@ -166,6 +185,6 @@ npm test
 npm run build
 ```
 
-## Non-affiliation
+## 非公式プロジェクトであることについて
 
-This project is not affiliated with, endorsed by, or sponsored by TOHO Cinemas, AEON Cinema, 109 Cinemas, or their parent companies. Provider names are used only to identify interoperability targets.
+本プロジェクトはTOHOシネマズ、イオンシネマ、109シネマズおよび各運営会社とは提携・後援・公認関係にありません。provider名は相互運用対象を示すためにのみ使用します。
