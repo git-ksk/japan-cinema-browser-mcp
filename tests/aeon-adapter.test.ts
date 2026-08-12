@@ -25,23 +25,28 @@ function hakusanTheater() {
   };
 }
 
-test("AEON theater snapshot normalizes visible theater labels and reviewed public schedule routes", () => {
+test("AEON theater snapshot normalizes visible labels and adopts only explicit reviewed public schedule routes", () => {
   const rows = theaterRows();
   rows.push({
     label: "悪性lookalike",
     href: "https://evil-aeoncinema.com/theaters/evil/"
   });
+  rows.push({
+    label: "URL未確定劇場",
+    href: "",
+    code: "must-not-be-guessed"
+  });
   const result = normalizeAeonTheaterSnapshot(
     { headingCount: 1, rows },
     "https://www.aeoncinema.com/theater/"
   );
-  assert.equal(result.length, 56);
+  assert.equal(result.length, 57);
   assert.equal(result[0]?.provider, "aeon");
   const first = result.find((theater) => theater.id === "test-1");
   assert.equal(first?.name, "イオンシネマ テスト劇場1");
   assert.equal(first?.scheduleUrl, "https://theater.aeoncinema.com/theaters/test-1/");
-  const lookalike = result.find((theater) => theater.name.includes("悪性lookalike"));
-  assert.equal(lookalike?.scheduleUrl, undefined);
+  assert.equal(result.find((theater) => theater.name.includes("悪性lookalike"))?.scheduleUrl, undefined);
+  assert.equal(result.find((theater) => theater.name.includes("URL未確定劇場"))?.scheduleUrl, undefined);
 });
 
 test("AEON theater snapshot fails closed when the public theater list shape collapses", () => {
@@ -75,6 +80,7 @@ test("AEON schedule snapshot returns compact movie/showtime facts without treati
       title: "上映スケジュール｜白山｜イオンシネマ",
       scheduleHeadingCount: 1,
       theaterNames: ["イオンシネマ 白山"],
+      ambiguousTimeGroups: 0,
       showtimes: [
         {
           movie: "FouRTe Project 1st LIVE ALL IN",
@@ -105,7 +111,27 @@ test("AEON schedule snapshot refuses partial results when a time range has no mo
         title: "上映スケジュール｜白山｜イオンシネマ",
         scheduleHeadingCount: 1,
         theaterNames: ["イオンシネマ 白山"],
+        ambiguousTimeGroups: 0,
         showtimes: [{ movie: "", label: "18:30~21:00", context: "スクリーン9 予約購入" }],
+        emptySchedule: false
+      },
+      hakusanTheater(),
+      "2026-08-14",
+      "https://theater.aeoncinema.com/theaters/hakusan/?date=20260814"
+    ),
+    (error) => error instanceof BrowserRuntimeError && error.code === "UI_STATE_CHANGED"
+  );
+});
+
+test("AEON schedule snapshot fails closed when one rendered group contains multiple inseparable time ranges", () => {
+  assert.throws(
+    () => normalizeAeonScheduleSnapshot(
+      {
+        title: "上映スケジュール｜白山｜イオンシネマ",
+        scheduleHeadingCount: 1,
+        theaterNames: ["イオンシネマ 白山"],
+        ambiguousTimeGroups: 1,
+        showtimes: [],
         emptySchedule: false
       },
       hakusanTheater(),
