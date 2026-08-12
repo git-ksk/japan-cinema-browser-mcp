@@ -19,6 +19,10 @@ export interface AeonTheater {
   scheduleUrl?: string;
 }
 
+export interface AeonTheaterCandidate extends AeonTheater {
+  selectionLabel: string;
+}
+
 export interface AeonShowtime {
   provider: "aeon";
   theaterId: string;
@@ -38,7 +42,6 @@ interface TheaterSnapshotRow {
   label?: unknown;
   href?: unknown;
   route?: unknown;
-  code?: unknown;
 }
 
 interface TheaterSnapshot {
@@ -62,10 +65,6 @@ interface ScheduleSnapshot {
   emptySchedule?: unknown;
 }
 
-interface AeonTheaterCandidate extends AeonTheater {
-  selectionLabel: string;
-}
-
 const THEATER_LIST_EXPRESSION = `(() => {
   const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
   const visible = (el) => {
@@ -82,7 +81,6 @@ const THEATER_LIST_EXPRESSION = `(() => {
     .find((el) => /^STEP2上映日を選択/.test(normalize(el.textContent))) || null;
   const controls = Array.from(document.querySelectorAll('a,button,[role="button"],[role="link"]')).filter(visible);
   const dataKeys = ['data-url','data-href','data-theater-url','data-cinema-url','data-link'];
-  const codeKeys = ['data-code','data-theater','data-theater-code','data-cinema','data-cinema-code'];
   const rows = [];
   for (const control of controls) {
     if (boundary && !before(control, boundary)) continue;
@@ -90,30 +88,20 @@ const THEATER_LIST_EXPRESSION = `(() => {
     if (!label || label.length > 140) continue;
     let nearestHeading = null;
     for (const heading of headings) {
-      if (!before(heading, control)) continue;
-      nearestHeading = heading;
+      if (before(heading, control)) nearestHeading = heading;
     }
     if (!nearestHeading || !prefectures.has(normalize(nearestHeading.textContent))) continue;
-    let href = '';
-    if (control.matches('a[href]')) href = control.href || '';
+    const href = control.matches('a[href]') ? control.href || '' : '';
     let route = '';
-    let code = '';
     let node = control;
     for (let depth = 0; node && depth < 4; depth += 1, node = node.parentElement) {
-      if (!route) {
-        for (const key of dataKeys) {
-          const value = normalize(node.getAttribute?.(key));
-          if (value) { route = value; break; }
-        }
-      }
-      if (!code) {
-        for (const key of codeKeys) {
-          const value = normalize(node.getAttribute?.(key));
-          if (value) { code = value; break; }
-        }
+      if (route) break;
+      for (const key of dataKeys) {
+        const value = normalize(node.getAttribute?.(key));
+        if (value) { route = value; break; }
       }
     }
-    rows.push({ label, href, route, code });
+    rows.push({ label, href, route });
     if (rows.length >= 160) break;
   }
   return { headingCount, rows };
@@ -131,7 +119,7 @@ const SCHEDULE_EXPRESSION = `(() => {
   const scheduleHeadingCount = headings.filter((el) => /^上映スケジュール(?:\\s|$)/.test(normalize(el.textContent))).length;
   const theaterNames = headings
     .map((el) => normalize(el.textContent))
-    .filter((text) => /^イオンシネマ\\s+/.test(text))
+    .filter((text) => /^イオンシネマ(?:\\s|$)/.test(text) && text.length > 'イオンシネマ'.length)
     .slice(0, 4);
 
   const datePattern = /(?:本日|(?:\\d{1,2})\\/(?:\\d{1,2})[（(][^）)]{1,4}[）)])/;
@@ -147,7 +135,7 @@ const SCHEDULE_EXPRESSION = `(() => {
   const titleNodes = Array.from(document.querySelectorAll('a[href*="/movie/"],h2,h3,h4,h5,h6'))
     .filter(visible)
     .map((el) => ({ el, text: normalize(el.textContent), preferred: el.matches('a[href*="/movie/"]') }))
-    .filter((item) => item.text.length >= 2 && item.text.length <= 180 && !titleRejected.test(item.text) && !/^イオンシネマ\\s+/.test(item.text));
+    .filter((item) => item.text.length >= 2 && item.text.length <= 180 && !titleRejected.test(item.text) && !/^イオンシネマ(?:\\s|$)/.test(item.text));
 
   const candidateElements = Array.from(document.querySelectorAll('a,button,div,p,span,li')).filter(visible);
   const timeItems = candidateElements
@@ -161,14 +149,10 @@ const SCHEDULE_EXPRESSION = `(() => {
   const titleFor = (control) => {
     let parent = control.parentElement;
     for (let depth = 0; parent && depth < 8; depth += 1, parent = parent.parentElement) {
-      const candidates = titleNodes
-        .filter((item) => parent.contains(item.el) && before(item.el, control))
-        .sort((a, b) => {
-          if (a.preferred !== b.preferred) return a.preferred ? 1 : -1;
-          return before(a.el, b.el) ? -1 : 1;
-        });
-      const chosen = candidates[candidates.length - 1];
-      if (chosen) return chosen.text;
+      const candidates = titleNodes.filter((item) => parent.contains(item.el) && before(item.el, control));
+      const preferred = candidates.filter((item) => item.preferred);
+      const pool = preferred.length > 0 ? preferred : candidates;
+      if (pool.length > 0) return pool[pool.length - 1].text;
     }
     return '';
   };
@@ -216,8 +200,7 @@ function normalizeTheaterQuery(value: string): string {
 }
 
 function stripFacilitySuffix(label: string): string {
-  const normalized = normalizeText(label);
-  return normalized.replace(
+  return normalizeText(label).replace(
     /\s+(?=(?:4DX|Dolby\s+Atmos|IMAX(?:レーザー)?|MX4D|THX|ULTI(?:RA|LA)|GRAN\s+THEATER|D-BOX|VSound|VIVE\s+AUDIO|dts\s+surround\s+cinema|dtsX|Christie\s+RealLaser|MULTIPLEX)(?:\s|$)).*$/i,
     ""
   ).trim();
@@ -246,10 +229,9 @@ function tokyoTodayIso(now = new Date()): string {
 
 function scheduleRouteFromValue(value: unknown): string | undefined {
   if (typeof value !== "string" || !value.trim()) return undefined;
-  const raw = value.trim();
   let url: URL;
   try {
-    url = new URL(raw, AEON_THEATER_LIST_URL);
+    url = new URL(value.trim(), AEON_THEATER_LIST_URL);
   } catch {
     return undefined;
   }
@@ -258,18 +240,10 @@ function scheduleRouteFromValue(value: unknown): string | undefined {
   } catch {
     return undefined;
   }
-  if (url.hostname !== "theater.aeoncinema.com") return undefined;
-  const match = url.pathname.match(AEON_SCHEDULE_PATH);
-  if (!match) return undefined;
+  if (url.hostname !== "theater.aeoncinema.com" || !AEON_SCHEDULE_PATH.test(url.pathname)) return undefined;
   url.search = "";
   url.hash = "";
   return url.href;
-}
-
-function candidateCode(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const code = value.trim().toLowerCase();
-  return /^[a-z0-9_-]{2,48}$/.test(code) ? code : undefined;
 }
 
 function publicTheater(candidate: AeonTheaterCandidate): AeonTheater {
@@ -288,9 +262,7 @@ export function normalizeAeonTheaterSnapshot(snapshot: TheaterSnapshot, sourceUr
     const baseName = stripFacilitySuffix(selectionLabel);
     if (!baseName || baseName.length > 60) continue;
     if (/^(?:全て|現在地から探す|変更|閉じる|今すぐ予約|北海道|東北|関東|北越|中部|近畿|中国・四国|九州)$/.test(baseName)) continue;
-    const direct = scheduleRouteFromValue(raw.href) ?? scheduleRouteFromValue(raw.route);
-    const code = candidateCode(raw.code);
-    const scheduleUrl = direct ?? (code ? `https://theater.aeoncinema.com/theaters/${code}/` : undefined);
+    const scheduleUrl = scheduleRouteFromValue(raw.href) ?? scheduleRouteFromValue(raw.route);
     const id = scheduleUrl ? new URL(scheduleUrl).pathname.match(AEON_SCHEDULE_PATH)?.[1] ?? baseName : baseName;
     const key = normalizeTheaterQuery(baseName);
     if (!key) continue;
@@ -358,8 +330,7 @@ function normalizeFormats(text: string): string[] {
   for (const [pattern, label] of checks) {
     if (pattern.test(text) && !values.includes(label)) values.push(label);
   }
-  if (values.includes("IMAX LASER")) return values.filter((value) => value !== "IMAX");
-  return values;
+  return values.includes("IMAX LASER") ? values.filter((value) => value !== "IMAX") : values;
 }
 
 function timeRange(label: string): [string, string] | undefined {
@@ -386,9 +357,7 @@ export function normalizeAeonScheduleSnapshot(
   sourceUrl: string
 ): AeonShowtime[] {
   if (snapshot.scheduleHeadingCount !== 1) {
-    throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON schedule heading is missing or ambiguous.", {
-      count: snapshot.scheduleHeadingCount
-    });
+    throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON schedule heading is missing or ambiguous.", { count: snapshot.scheduleHeadingCount });
   }
   if (!scheduleIdentityMatches(snapshot, theater)) {
     throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON schedule page theater identity does not match the requested theater.", {
@@ -467,7 +436,7 @@ export function normalizeAeonScheduleSnapshot(
 function isTheaterListUrl(value: string): boolean {
   try {
     const url = assertOfficialUrl(value, "aeon");
-    return url.hostname === "www.aeoncinema.com" && (url.pathname === "/theater" || url.pathname === "/theater/" || url.pathname === "/theater/index.html");
+    return url.hostname === "www.aeoncinema.com" && ["/theater", "/theater/", "/theater/index.html"].includes(url.pathname);
   } catch {
     return false;
   }
@@ -516,7 +485,12 @@ export class AeonReadAdapter {
     const targetUrl = buildAeonScheduleUrl(baseScheduleUrl, date);
     const sourceUrl = await this.runtime.navigate(targetUrl, "aeon");
     const current = new URL(sourceUrl);
-    if (current.hostname !== "theater.aeoncinema.com" || current.pathname !== new URL(baseScheduleUrl).pathname || current.searchParams.get("date") !== date.replaceAll("-", "")) {
+    const expectedPath = new URL(baseScheduleUrl).pathname;
+    if (
+      current.hostname !== "theater.aeoncinema.com" ||
+      current.pathname !== expectedPath ||
+      current.searchParams.get("date") !== date.replaceAll("-", "")
+    ) {
       throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON redirected away from the requested reviewed schedule route/date.", {
         expected: targetUrl,
         actual: sourceUrl
@@ -528,13 +502,12 @@ export class AeonReadAdapter {
       const needle = normalizeText(input.movie).toLocaleLowerCase("ja-JP");
       showtimes = showtimes.filter((showtime) => showtime.movie.toLocaleLowerCase("ja-JP").includes(needle));
     }
-    const availableDates = this.normalizeAvailableDates(semantic.value.dateLabels, date);
     return {
       provider: "aeon",
       theater: publicTheater({ ...theater, scheduleUrl: baseScheduleUrl }),
       date,
       dateAvailable: showtimes.length > 0 || semantic.value.emptySchedule === true,
-      availableDates,
+      availableDates: this.normalizeAvailableDates(semantic.value.dateLabels, date),
       sourceUrl: semantic.url,
       showtimes
     };
@@ -574,11 +547,6 @@ export class AeonReadAdapter {
     const direct = await this.waitForScheduleUrl(6, 180);
     if (direct) return direct;
 
-    try {
-      await this.runtime.clickControl("変更する");
-    } catch (error) {
-      if (!(error instanceof BrowserRuntimeError) || error.code !== "UI_ELEMENT_NOT_FOUND") throw error;
-    }
     await this.runtime.clickControl("上映スケジュールを確認する");
     const scheduleUrl = await this.waitForScheduleUrl(24, 180);
     if (!scheduleUrl) {
@@ -617,9 +585,9 @@ export class AeonReadAdapter {
       const day = Number(match[2]);
       const candidates = [refYear - 1, refYear, refYear + 1]
         .map((year) => {
-          const date = new Date(Date.UTC(year, month - 1, day));
-          if (date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return undefined;
-          return { year, distance: Math.abs(date.getTime() - reference.getTime()) };
+          const candidate = new Date(Date.UTC(year, month - 1, day));
+          if (candidate.getUTCMonth() !== month - 1 || candidate.getUTCDate() !== day) return undefined;
+          return { year, distance: Math.abs(candidate.getTime() - reference.getTime()) };
         })
         .filter((item): item is { year: number; distance: number } => Boolean(item))
         .sort((a, b) => a.distance - b.distance);
