@@ -43,9 +43,9 @@ MCP toolの登録と引数検証を担当します。
 - runtime errorのMCP error化
 - 通常操作と最終購入操作の分離
 - bounded result返却
-- provider capabilityの明示
+- provider capabilityのruntime強制
 
-Phase 1では `list_theaters` / `get_showtimes` を追加し、semantic read capabilityはTOHOだけ有効化しています。未実装providerへgeneric fuzzy fallbackはしません。
+Phase 1では `list_theaters` / `get_showtimes` のsemantic read capabilityをTOHOとAEONで有効化しています。109など未実装providerへgeneric fuzzy fallbackはしません。
 
 ### `src/providers.ts`
 
@@ -55,10 +55,11 @@ provider registryと横断ポリシーを保持します。
 - 公式root URL
 - domain allow-list
 - granular capability matrix
+- capability enforcement
 - sensitive field判定
 - final purchase control判定
 
-TOHOは `theaters=true / showtimes=true`、seat/checkout/purchase系はfalseです。AEON/109のsemantic readはまだfalseです。
+TOHO/AEONは `theaters=true / showtimes=true`、seat/checkout/purchase系はfalseです。109のsemantic readはまだfalseです。`CINEMA_ENABLE_PURCHASE=true` でも、providerの `purchaseSubmission` がfalseなら最終submitは実行できません。
 
 ### `src/providers/toho/adapter.ts`
 
@@ -73,7 +74,21 @@ Phase 1のTOHO read-only adapterです。
 - source URLを返却
 - UI変更、曖昧grouping、movie/showtime対応不能時はfail closed
 
-raw HTMLやfull DOMをadapter外へ返さず、CDP `Runtime.evaluate` 内で小さいstructured factへ落としてからNode側へ戻します。
+### `src/providers/aeon/adapter.ts`
+
+Phase 1のAEON read-only adapterです。
+
+- 公式 `https://www.aeoncinema.com/theater/` のvisible theater controlsをsemanticに抽出
+- facility labelを劇場名本体から分離
+- DOMに明示された `https://theater.aeoncinema.com/theaters/{slug}/` だけをschedule routeとして採用
+- routeが明示されない場合はslugを推測せず、公式劇場選択UIからschedule pageへ進む
+- public schedule pageの `?date=YYYYMMDD` でrequested dateを表示
+- navigation後にhostname/path/date queryを再検証
+- rendered DOMから作品 / start-end time / format / 字幕・吹替 / screen / explicit availabilityを抽出
+- 1 DOM groupから複数time rangeが分離できない、またはmovie/time identityが曖昧ならfail closed
+- `予約購入` controlはread contextに含まれてもadapterからclickしない
+
+TOHO/AEONともraw HTMLやfull DOMをadapter外へ返さず、CDP `Runtime.evaluate` 内で小さいstructured factへ落としてからNode側へ戻します。AEONでも `schedule.json` 等のprivate/internal endpointは直接利用しません。
 
 ### `src/browser/chrome-process.ts`
 
@@ -138,7 +153,7 @@ Cinema Workflow Service
 Provider Adapter Interface
    │
    ├─ TOHO adapter      ← read-only Phase 1実装済み
-   ├─ AEON adapter
+   ├─ AEON adapter      ← read-only Phase 1実装済み
    └─ 109 adapter
    │
    ▼
@@ -148,7 +163,7 @@ Browser Semantic Primitives
 CDP Runtime
 ```
 
-Phase 1では将来interface全体を先に作り込まず、TOHO read-only縦切りに必要なsurfaceだけを実装します。
+Phase 1では将来interface全体を先に作り込まず、provider read-only縦切りに必要なsurfaceだけを実装します。
 
 ## Provider Adapter
 
@@ -185,7 +200,7 @@ interface ProviderCapabilities {
 }
 ```
 
-`showtimes=true` でも `purchaseSubmission=false` なら、上映検索だけ安全に提供できます。
+capability matrixは表示用metadataではなくruntime policy boundaryです。`showtimes=true` でも `purchaseSubmission=false` なら、上映検索だけを提供し、最終購入は拒否します。
 
 UI変更や規約上の懸念が出た場合はcapabilityを落とします。無効化された機能をgeneric fuzzy automationで無理に代替しません。
 
@@ -201,6 +216,8 @@ UI変更や規約上の懸念が出た場合はcapabilityを落とします。�
 「近そうな要素」を推測してclickすることはしません。
 
 TOHOの日付切替では、visible date controlを一意に解決してclickした後、同じsemantic readerでもう一度画面を読み、requested dateがselected stateになったことを確認してから上映情報を返します。
+
+AEONでは、劇場routeがDOM上で明示できない場合だけvisible theater controlを一意にclickし、公式の「上映スケジュールを確認する」導線からreviewed schedule routeへ到達したことを検証します。requested dateのpublic URLへ遷移した後もpath/queryを再検証します。
 
 ## 購入ステートマシン
 
@@ -226,7 +243,7 @@ PURCHASE_COMPLETE / PURCHASE_FAILED / PURCHASE_UNKNOWN
 
 `PURCHASE_UNKNOWN` では最終操作を絶対に自動replayしません。ユーザーがprovider側で確認するまでterminal扱いにします。
 
-Phase 1のTOHO adapterはこのtransaction flowへ入らず、上映回の購入controlもclickしません。
+Phase 1のTOHO/AEON adapterはこのtransaction flowへ入らず、上映回の購入controlもclickしません。
 
 ## Human Intervention
 
@@ -254,7 +271,7 @@ Phase 1のTOHO adapterはこのtransaction flowへ入らず、上映回の購入
 - provider adapterではsemantic selectorを優先
 - DOM dumpをmodelへ送らない
 
-複数のdeterministic DOM判定は、可能なら1回の `Runtime.evaluate` にまとめます。TOHO Phase 1も劇場一覧/上映画面ごとにcompact semantic snapshotへまとめ、モデルへraw pageを渡しません。
+複数のdeterministic DOM判定は、可能なら1回の `Runtime.evaluate` にまとめます。TOHO/AEONとも劇場一覧/上映画面ごとにcompact semantic snapshotへまとめ、モデルへraw pageを渡しません。
 
 ## 永続化
 

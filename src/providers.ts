@@ -44,8 +44,8 @@ export const CINEMA_PROVIDERS: Record<CinemaProviderId, CinemaProviderDefinition
     rootUrl: "https://www.aeoncinema.com/",
     allowedDomain: "aeoncinema.com",
     capabilities: {
-      theaters: false,
-      showtimes: false,
+      theaters: true,
+      showtimes: true,
       ...NO_TRANSACTION_CAPABILITIES
     }
   },

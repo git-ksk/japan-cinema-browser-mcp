@@ -87,13 +87,17 @@ Private MVPでは、次の基盤まで実装済みです。
 - 機密入力フィールドの拒否
 - 購入確定系コントロールの通常clickからの拒否
 - 短時間・one-shot・URL-boundの購入確認ゲート
+- provider capabilityの実行時強制
 - 最終購入のデフォルト無効化
 - TOHOシネマズの劇場一覧semantic read
 - TOHOシネマズの劇場・日付・作品・上映回semantic read
 - TOHOシネマズの日付切替後のselected-state再検証
-- TOHOシネマズのUI変更/曖昧状態でのfail-closed
+- イオンシネマの公式「劇場を探す」UIからの劇場一覧semantic read
+- イオンシネマの公開 `theater.aeoncinema.com/theaters/{slug}` schedule route利用
+- イオンシネマの日付・作品・上映時間・screen・format/language semantic read
+- TOHO/AEONともUI変更・曖昧状態でfail closed
 
-TOHOのread-only上映取得をPhase 1の最初の縦切りとして実装しています。AEON/109はgeneric bounded readのままで、provider固有semantic adapterはまだ有効化していません。
+Phase 1ではTOHOとAEONのread-only adapterを有効化しています。109はgeneric bounded readのままで、provider固有semantic adapterはまだ有効化していません。
 
 ## セットアップ
 
@@ -141,7 +145,7 @@ npm start
 CINEMA_ENABLE_PURCHASE=true npm start
 ```
 
-この設定を有効にしても、購入確認ゲートは省略できません。
+この設定だけでは購入実行は有効になりません。providerごとの `purchaseSubmission` capabilityもtrueである必要があり、現在はTOHO/AEON/109すべてfalseです。購入確認ゲートも省略できません。
 
 購入前には少なくとも以下を確認対象として固定します。
 
@@ -165,12 +169,12 @@ CINEMA_ENABLE_PURCHASE=true npm start
 - `navigate_cinema_official` — 許可済み公式ドメイン内だけ移動する
 - `read_cinema_page` — 表示中情報を上限付きで読む
 - `extract_showtime_candidates` — 表示中の上映時刻候補を抽出する
-- `list_theaters` — providerの公式公開UIから劇場をsemanticに読む。現在TOHOのみ有効
-- `get_showtimes` — 劇場・日付・作品・上映回をsemanticに読む。現在TOHOのみ有効
+- `list_theaters` — providerの公式公開UIから劇場をsemanticに読む。現在TOHO/AEON有効
+- `get_showtimes` — 劇場・日付・作品・上映回をsemanticに読む。現在TOHO/AEON有効
 - `click_cinema_control` — 表示中の通常操作を実行する
 - `fill_cinema_field` — 非機密フィールドだけ入力する
 - `prepare_purchase_confirmation` — 現在の購入内容を確認用に固定する
-- `confirm_purchase_action` — 最終購入操作。デフォルト無効
+- `confirm_purchase_action` — 最終購入操作。provider capabilityが必要で、現在全provider無効
 - `close_browser_session` — MCP所有Chromeを閉じる
 
 ## 開発時の確認
@@ -181,13 +185,14 @@ npm test
 npm run build
 ```
 
-TOHOの非購入live smokeは通常CIには含めず、低頻度で明示実行します。
+providerの非購入live smokeは通常CIには含めず、低頻度で明示実行します。
 
 ```bash
 npm run smoke:toho
+npm run smoke:aeon
 ```
 
-このsmoke testは公式公開UIの劇場一覧・上映画面を読むだけで、座席選択や購入操作は行いません。
+これらのsmoke testは公式公開UIの劇場一覧・上映画面を読むだけで、座席選択や購入操作は行いません。
 
 ## ドキュメント
 

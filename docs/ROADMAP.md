@@ -26,6 +26,7 @@
 - ✅ sensitive field拒否
 - ✅ final purchase controlの通常click拒否
 - ✅ 短時間・one-shot purchase confirmation
+- ✅ provider capabilityのruntime強制
 - ✅ final purchaseデフォルト無効
 - ✅ baseline compliance policy
 - ✅ unit test / CI定義
@@ -43,7 +44,7 @@ Exit criteria:
 
 目的: generic page readから、映画館ドメインを理解するread-only adapterへ移行する。
 
-状態: 🟡 TOHO実装済み、AEONが次
+状態: 🟡 TOHO / AEON実装済み、109が次
 
 ### TOHOシネマズ
 
@@ -61,7 +62,24 @@ Exit criteria:
 
 TOHOでは `list_theaters` / `get_showtimes` を有効化します。1つのschedule routeを複数劇場名が共有する公開UIもalias groupとして扱い、単純な「ID = 1劇場名」前提には依存しません。
 
-### AEON / 109
+### イオンシネマ
+
+- ✅ 現行公式導線を確認
+- ✅ 公式「劇場を探す」UIの劇場semantic
+- ✅ public schedule route `theater.aeoncinema.com/theaters/{slug}` を確認
+- ✅ public `?date=YYYYMMDD` 表示導線を確認
+- ✅ 作品/上映時間range/screen semantic
+- ✅ format/language正規化
+- ✅ provider-specific bounded semantic reader
+- ✅ explicit routeがない場合はslugを推測せず公式UI click経由
+- ✅ redirect / theater identity / ambiguous time groupでfail closed
+- ✅ unit test
+- ✅ 非購入live smoke script追加
+- 🟡 実ブラウザでのlive smoke実行確認
+
+AEONではrendered public UIだけを読みます。`schedule.json` 等のprivate/internal endpointを直接利用せず、network interceptionもしません。`予約購入` controlはcontextとして読めてもread adapterからclickしません。
+
+### 109シネマズ
 
 - 🟡 現行公式導線を確認
 - ⬜ 劇場選択semanticを特定
@@ -75,8 +93,8 @@ TOHOでは `list_theaters` / `get_showtimes` を有効化します。1つのsche
 
 目標tools:
 
-- `list_theaters` — TOHO有効
-- `get_showtimes` — TOHO有効
+- `list_theaters` — TOHO / AEON有効
+- `get_showtimes` — TOHO / AEON有効
 - `find_showtimes` — 3社横断normalization後に追加予定
 
 Exit criteria:
@@ -181,7 +199,7 @@ providerごとに必須:
 
 - `confirm_purchase`
 
-購入対応はproviderごとに個別解禁します。3社同時ONは前提にしません。
+購入対応はproviderごとに個別解禁します。3社同時ONは前提にしません。`CINEMA_ENABLE_PURCHASE=true` だけでは不十分で、providerの `purchaseSubmission` capabilityも明示的にtrueである必要があります。
 
 ## Phase 6 — Public化前Hardening
 
@@ -235,7 +253,7 @@ providerごとに必須:
 ## 推奨実装順
 
 1. ✅ TOHO read adapter
-2. AEON read adapter
+2. ✅ AEON read adapter
 3. 109 read adapter
 4. cross-provider normalized search
 5. seat mapをproviderごとに追加
