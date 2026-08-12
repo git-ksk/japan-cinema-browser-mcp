@@ -1,7 +1,8 @@
 # Provider対応方針・レビュー状況
 
 初回Private MVPレビュー日: 2026-08-12  
-TOHO Phase 1 read adapterレビュー日: 2026-08-13
+TOHO Phase 1 read adapterレビュー日: 2026-08-13  
+AEON Phase 1 read adapterレビュー日: 2026-08-13
 
 この文書は実装上の対応範囲と確認状況を管理するためのものです。法的助言を目的としたものではありません。購入機能を有効化する前、およびPublic化前には、各providerの現行利用規約・サイトポリシー・実際のUIを再確認します。
 
@@ -10,7 +11,7 @@ TOHO Phase 1 read adapterレビュー日: 2026-08-13
 | Provider | 公式root | 現在の自動化範囲 | 購入 |
 |---|---|---|---|
 | TOHOシネマズ | `https://www.tohotheater.jp/` | 公式domain内navigation / bounded read / 劇場・日付・作品・上映回semantic read | 無効。seat/checkout未レビュー |
-| イオンシネマ | `https://www.aeoncinema.com/` | 公式domain内navigation / bounded read | 無効。live flow確認前 |
+| イオンシネマ | `https://www.aeoncinema.com/` | 公式domain内navigation / bounded read / 劇場・日付・作品・上映回semantic read | 無効。seat/checkout未レビュー |
 | 109シネマズ | `https://109cinemas.net/` | 公式domain内navigation / bounded read | 無効。live flow確認前 |
 
 ## 共通ルール
@@ -23,6 +24,7 @@ TOHO Phase 1 read adapterレビュー日: 2026-08-13
 - generic clickから最終購入/決済/予約確定を実行しない
 - provider-specific selectorはvisible public UIに限定する
 - UI構造が変わったら推測せずfail closed
+- provider capability matrixをruntime policy boundaryとして強制する
 
 ## Capability Matrix
 
@@ -30,8 +32,8 @@ TOHO Phase 1 read adapterレビュー日: 2026-08-13
 |---|---:|---:|---:|
 | 公式rootを開く | ✅ | ✅ | ✅ |
 | Generic bounded read | ✅ | ✅ | ✅ |
-| 劇場一覧/選択semantic | ✅ | 🟡 | 🟡 |
-| 上映情報semantic | ✅ | 🟡 | 🟡 |
+| 劇場一覧/選択semantic | ✅ | ✅ | 🟡 |
+| 上映情報semantic | ✅ | ✅ | 🟡 |
 | 座席表read | ⬜ | ⬜ | ⬜ |
 | 座席選択 | ⬜ | ⬜ | ⬜ |
 | Checkout preparation | ⬜ | ⬜ | ⬜ |
@@ -39,7 +41,7 @@ TOHO Phase 1 read adapterレビュー日: 2026-08-13
 
 `✅` はそのcapabilityについて実装済み、`🟡` は次に確認/実装する項目、`⬜` は未着手を表します。
 
-TOHOの`✅`はread-only adapterの実装を表し、seat selectionやpurchase capabilityの解禁を意味しません。
+TOHO/AEONの`✅`はread-only adapterの実装を表し、seat selectionやpurchase capabilityの解禁を意味しません。現在は全providerで `purchaseSubmission=false` です。
 
 ## TOHO Phase 1 Read Adapter
 
@@ -50,16 +52,38 @@ TOHOの`✅`はread-only adapterの実装を表し、seat selectionやpurchase c
 
 実装はChrome + CDPでrendered public DOMだけを読みます。network interceptionやprivate/internal API直接利用はありません。
 
-MCP tools:
-
-- `list_theaters` — 現在TOHOのみsemantic capability有効
-- `get_showtimes` — 現在TOHOのみsemantic capability有効
-
 `get_showtimes` は劇場・日付・作品・上映時刻をcompact structured factsへ正規化します。日付切替後はselected stateを再確認し、movie/showtime groupingやUI stateが曖昧なら部分結果を推測せずfail closedします。
 
 TOHOの公開UIには、複数の劇場名が1つのschedule routeを共有するケースがあります。Phase 1 adapterはこれをaliasを持つschedule groupとして扱い、単純な「schedule ID = 1劇場名」前提には依存しません。
 
 非購入live smokeは `npm run smoke:toho` として低頻度・明示実行用に分離し、通常CIには含めません。
+
+## AEON Phase 1 Read Adapter
+
+2026-08-13時点で以下の公開導線を確認しています。
+
+- 劇場一覧: `https://www.aeoncinema.com/theater/`
+- 各劇場の上映スケジュール: `https://theater.aeoncinema.com/theaters/{slug}/`
+- 日付指定: public schedule pageの `?date=YYYYMMDD`
+
+公式公開UI上で、劇場一覧、日付、作品名、上映時間range、screen表示、`予約購入` controlがrendered stateとして確認できるため、read-only adapterはこれらのvisible factsだけを対象にします。
+
+重要な境界:
+
+- `schedule.json` 等のprivate/internal endpointを直接利用しない
+- routeがDOMから明示確定できない場合はslugを推測せず、公式劇場選択UIからschedule pageへ進む
+- requested date navigation後にhostname/path/queryを再検証
+- movie/time groupingが曖昧なら部分結果を返さずfail closed
+- `予約購入` はread contextに含まれてもadapterからclickしない
+
+非購入live smokeは `npm run smoke:aeon` として通常CIから分離します。
+
+## MCP Tools
+
+- `list_theaters` — TOHO / AEON semantic capability有効
+- `get_showtimes` — TOHO / AEON semantic capability有効
+
+109で同じtoolを呼んだ場合は `UNSUPPORTED_CAPABILITY` へfail closedし、generic fuzzy automationへfallbackしません。
 
 ## Provider Capabilityを上げる前のチェック
 
@@ -84,6 +108,6 @@ TOHOの公開UIには、複数の劇場名が1つのschedule routeを共有す�
 
 3社で同じ機能を同時に提供することは必須ではありません。
 
-TOHOでshowtimesが有効でも、AEON/109はgeneric bounded readのまま維持できます。無効化されたcapabilityをgeneric fuzzy automationで黙って代替しません。
+TOHO/AEONでshowtimesが有効でも、109はgeneric bounded readのまま維持できます。無効化されたcapabilityをgeneric fuzzy automationで黙って代替しません。
 
 無理に同等機能へ揃えるより、providerごとに安全に使えるcapabilityだけを正確にadvertiseする方針です。
