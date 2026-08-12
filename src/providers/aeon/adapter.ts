@@ -4,6 +4,9 @@ import { assertOfficialUrl } from "../../providers.js";
 const AEON_THEATER_LIST_URL = "https://www.aeoncinema.com/theater/";
 const AEON_SCHEDULE_PATH = /^\/theaters\/([a-z0-9_-]+)\/?$/;
 const MIN_REVIEWED_THEATER_COUNT = 50;
+const THEATER_READY_ATTEMPTS = 20;
+const SCHEDULE_READY_ATTEMPTS = 30;
+const READY_POLL_MS = 180;
 
 const PREFECTURES = [
   "北海道", "青森", "秋田", "岩手", "宮城", "山形", "福島", "群馬", "茨城", "埼玉", "東京", "千葉", "神奈川",
@@ -251,6 +254,14 @@ function publicTheater(candidate: AeonTheaterCandidate): AeonTheater {
   return theater;
 }
 
+function resolvedTheater(candidate: AeonTheaterCandidate, scheduleUrl: string): AeonTheaterCandidate {
+  const id = new URL(scheduleUrl).pathname.match(AEON_SCHEDULE_PATH)?.[1];
+  if (!id) {
+    throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON reviewed schedule route no longer exposes a theater slug.", { scheduleUrl });
+  }
+  return { ...candidate, id, scheduleUrl };
+}
+
 export function normalizeAeonTheaterSnapshot(snapshot: TheaterSnapshot, sourceUrl: string): AeonTheaterCandidate[] {
   if (snapshot.headingCount !== 1 || !Array.isArray(snapshot.rows)) {
     throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON theater list no longer exposes the reviewed public theater-selection structure.");
@@ -348,6 +359,16 @@ function scheduleIdentityMatches(snapshot: ScheduleSnapshot, theater: AeonTheate
     ? snapshot.theaterNames.filter((value): value is string => typeof value === "string").map(normalizeTheaterQuery)
     : [];
   return names.includes(expected);
+}
+
+function theaterSnapshotReady(snapshot: TheaterSnapshot): boolean {
+  return snapshot.headingCount === 1 && Array.isArray(snapshot.rows) && snapshot.rows.length >= MIN_REVIEWED_THEATER_COUNT;
+}
+
+function scheduleSnapshotReady(snapshot: ScheduleSnapshot): boolean {
+  if (snapshot.scheduleHeadingCount !== 1) return false;
+  if (typeof snapshot.ambiguousTimeGroups === "number" && snapshot.ambiguousTimeGroups > 0) return true;
+  return (Array.isArray(snapshot.showtimes) && snapshot.showtimes.length > 0) || snapshot.emptySchedule === true;
 }
 
 export function normalizeAeonScheduleSnapshot(
@@ -479,8 +500,9 @@ export class AeonReadAdapter {
     sourceUrl: string;
     showtimes: AeonShowtime[];
   }> {
-    const theater = await this.resolveTheater(input.theater);
-    const baseScheduleUrl = theater.scheduleUrl ?? await this.openScheduleThroughPublicUi(theater);
+    const candidate = await this.resolveTheater(input.theater);
+    const baseScheduleUrl = candidate.scheduleUrl ?? await this.openScheduleThroughPublicUi(candidate);
+    const theater = resolvedTheater(candidate, baseScheduleUrl);
     const date = input.date ?? tokyoTodayIso();
     const targetUrl = buildAeonScheduleUrl(baseScheduleUrl, date);
     const sourceUrl = await this.runtime.navigate(targetUrl, "aeon");
@@ -496,7 +518,7 @@ export class AeonReadAdapter {
         actual: sourceUrl
       });
     }
-    const semantic = await this.runtime.evaluateSemanticState<ScheduleSnapshot>("aeon", SCHEDULE_EXPRESSION);
+    const semantic = await this.readScheduleSemantic();
     let showtimes = normalizeAeonScheduleSnapshot(semantic.value, theater, date, semantic.url);
     if (input.movie?.trim()) {
       const needle = normalizeText(input.movie).toLocaleLowerCase("ja-JP");
@@ -504,7 +526,7 @@ export class AeonReadAdapter {
     }
     return {
       provider: "aeon",
-      theater: publicTheater({ ...theater, scheduleUrl: baseScheduleUrl }),
+      theater: publicTheater(theater),
       date,
       dateAvailable: showtimes.length > 0 || semantic.value.emptySchedule === true,
       availableDates: this.normalizeAvailableDates(semantic.value.dateLabels, date),
@@ -519,13 +541,34 @@ export class AeonReadAdapter {
     if (!isTheaterListUrl(currentUrl)) {
       await this.runtime.navigate(AEON_THEATER_LIST_URL, "aeon");
     }
-    const semantic = await this.runtime.evaluateSemanticState<TheaterSnapshot>("aeon", THEATER_LIST_EXPRESSION);
+    let semantic: { url: string; value: TheaterSnapshot } | undefined;
+    for (let attempt = 0; attempt < THEATER_READY_ATTEMPTS; attempt += 1) {
+      semantic = await this.runtime.evaluateSemanticState<TheaterSnapshot>("aeon", THEATER_LIST_EXPRESSION);
+      if (theaterSnapshotReady(semantic.value)) break;
+      await sleep(READY_POLL_MS);
+    }
+    if (!semantic || !theaterSnapshotReady(semantic.value)) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON theater list did not reach the reviewed semantic ready state.");
+    }
     let theaters = normalizeAeonTheaterSnapshot(semantic.value, semantic.url);
     if (query?.trim()) {
       const needle = normalizeTheaterQuery(query);
       theaters = theaters.filter((theater) => normalizeTheaterQuery(theater.name).includes(needle));
     }
     return { sourceUrl: semantic.url, theaters };
+  }
+
+  private async readScheduleSemantic(): Promise<{ url: string; value: ScheduleSnapshot }> {
+    let semantic: { url: string; value: ScheduleSnapshot } | undefined;
+    for (let attempt = 0; attempt < SCHEDULE_READY_ATTEMPTS; attempt += 1) {
+      semantic = await this.runtime.evaluateSemanticState<ScheduleSnapshot>("aeon", SCHEDULE_EXPRESSION);
+      if (scheduleSnapshotReady(semantic.value)) return semantic;
+      await sleep(READY_POLL_MS);
+    }
+    throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON schedule did not reach a recognizable rendered semantic state.", {
+      scheduleHeadingCount: semantic?.value.scheduleHeadingCount,
+      showtimeCount: Array.isArray(semantic?.value.showtimes) ? semantic.value.showtimes.length : undefined
+    });
   }
 
   private async resolveTheater(query: string): Promise<AeonTheaterCandidate> {
@@ -544,17 +587,35 @@ export class AeonReadAdapter {
 
   private async openScheduleThroughPublicUi(theater: AeonTheaterCandidate): Promise<string> {
     await this.runtime.clickControl(theater.selectionLabel);
-    const direct = await this.waitForScheduleUrl(6, 180);
+    const direct = await this.waitForScheduleUrl(6, READY_POLL_MS);
     if (direct) return direct;
 
-    await this.runtime.clickControl("上映スケジュールを確認する");
-    const scheduleUrl = await this.waitForScheduleUrl(24, 180);
+    await this.clickControlWhenAvailable("上映スケジュールを確認する", 20);
+    const scheduleUrl = await this.waitForScheduleUrl(24, READY_POLL_MS);
     if (!scheduleUrl) {
       throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON public theater selection did not resolve to a reviewed schedule page.", {
         theater: theater.name
       });
     }
     return scheduleUrl;
+  }
+
+  private async clickControlWhenAvailable(label: string, attempts: number): Promise<void> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      try {
+        await this.runtime.clickControl(label);
+        return;
+      } catch (error) {
+        lastError = error;
+        if (!(error instanceof BrowserRuntimeError) || error.code !== "UI_ELEMENT_NOT_FOUND") throw error;
+        await sleep(READY_POLL_MS);
+      }
+    }
+    throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON expected public navigation control did not become uniquely available.", {
+      label,
+      cause: lastError instanceof Error ? lastError.message : String(lastError)
+    });
   }
 
   private async waitForScheduleUrl(attempts: number, delayMs: number): Promise<string | undefined> {
