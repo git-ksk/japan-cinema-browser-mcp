@@ -1,4 +1,5 @@
 import { BrowserRuntimeError, CinemaBrowserRuntime } from "../../browser/runtime.js";
+import { assertOfficialUrl } from "../../providers.js";
 
 const TOHO_THEATER_LIST_URL = "https://www.tohotheater.jp/theater/find.html";
 const TOHO_SCHEDULE_PATH = /^\/net\/schedule\/(\d{3})\/TNPI2000J01\.do$/;
@@ -192,9 +193,8 @@ function normalizeTheaterQuery(value: string): string {
   return normalizeText(value).replace(/^TOHOシネマズ\s*/i, "").toLocaleLowerCase("ja-JP");
 }
 
-function isOfficialTohoHostname(hostname: string): boolean {
-  const host = hostname.toLowerCase().replace(/\.$/, "");
-  return host === "tohotheater.jp" || host.endsWith(".tohotheater.jp");
+function routeKey(url: URL): string {
+  return `${url.origin}${url.pathname}`;
 }
 
 function stringArray(value: unknown, limit: number): string[] {
@@ -213,6 +213,12 @@ function tokyoTodayIso(now = new Date()): string {
   return `${take("year")}-${take("month")}-${take("day")}`;
 }
 
+function validCalendarDate(year: number, month: number, day: number): boolean {
+  if (month < 1 || month > 12 || day < 1 || day > 31) return false;
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
+
 export function normalizeTohoDateLabel(label: string, referenceIso = tokyoTodayIso()): string | undefined {
   const normalized = normalizeText(label).replace(/：/g, ":");
   const full = normalized.match(/(20\d{2})[.\/年-](\d{1,2})[.\/月-](\d{1,2})(?:日)?/);
@@ -220,22 +226,22 @@ export function normalizeTohoDateLabel(label: string, referenceIso = tokyoTodayI
     const year = Number(full[1]);
     const month = Number(full[2]);
     const day = Number(full[3]);
-    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+    if (validCalendarDate(year, month, day)) {
       return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
     }
+    return undefined;
   }
   const short = normalized.match(/(?:^|\s)(\d{1,2})[.\/月-](\d{1,2})(?:日)?(?:\s|\(|（|$)/);
   if (!short) return undefined;
   const month = Number(short[1]);
   const day = Number(short[2]);
-  if (month < 1 || month > 12 || day < 1 || day > 31) return undefined;
   const reference = new Date(`${referenceIso}T00:00:00Z`);
   if (Number.isNaN(reference.getTime())) return undefined;
   const refYear = reference.getUTCFullYear();
   const candidates = [refYear - 1, refYear, refYear + 1]
     .map((year) => {
+      if (!validCalendarDate(year, month, day)) return undefined;
       const date = new Date(Date.UTC(year, month - 1, day));
-      if (date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return undefined;
       return { year, distance: Math.abs(date.getTime() - reference.getTime()) };
     })
     .filter((value): value is { year: number; distance: number } => Boolean(value))
@@ -253,13 +259,13 @@ export function normalizeTohoTheaterSnapshot(snapshot: TheaterSnapshot, sourceUr
   for (const raw of snapshot.rows.slice(0, 160) as TheaterSnapshotRow[]) {
     if (typeof raw?.id !== "string" || typeof raw.name !== "string" || typeof raw.url !== "string") continue;
     let url: URL;
-    try { url = new URL(raw.url); } catch { continue; }
+    try { url = assertOfficialUrl(raw.url, "toho"); } catch { continue; }
     const pathMatch = url.pathname.match(TOHO_SCHEDULE_PATH);
-    if (!pathMatch || pathMatch[1] !== raw.id || url.protocol !== "https:" || !isOfficialTohoHostname(url.hostname)) continue;
+    if (!pathMatch || pathMatch[1] !== raw.id) continue;
     const name = normalizeText(raw.name);
     if (!/^TOHOシネマズ\s+/.test(name)) continue;
     const existing = groups.get(raw.id);
-    if (existing && new URL(existing.url).pathname !== url.pathname) {
+    if (existing && routeKey(new URL(existing.url)) !== routeKey(url)) {
       throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO theater id points to conflicting public schedule routes.", { theaterId: raw.id });
     }
     const group = existing ?? { id: raw.id, url: url.href, aliases: new Set<string>() };
@@ -312,10 +318,13 @@ function chooseMovieTitle(value: unknown): string | undefined {
 }
 
 function timeParts(label: string): string[] {
-  return [...label.replace(/：/g, ":").matchAll(/(?:^|\D)((?:[01]?\d|2[0-3]):[0-5]\d)(?!\d)/g)]
-    .map((match) => match[1]?.padStart(5, "0"))
-    .filter((value): value is string => Boolean(value))
-    .slice(0, 2);
+  const normalized = label.replace(/：/g, ":");
+  const first = normalized.match(/(?:^|\D)((?:[01]?\d|2[0-3]):[0-5]\d)(?!\d)/)?.[1];
+  if (!first) return [];
+  const start = first.padStart(5, "0");
+  const range = normalized.match(/((?:[01]?\d|2[0-3]):[0-5]\d)\s*(?:~|〜|～|–|—|-|→)\s*((?:[01]?\d|2[0-3]):[0-5]\d)/);
+  if (!range?.[1] || !range[2] || range[1].padStart(5, "0") !== start) return [start];
+  return [start, range[2].padStart(5, "0")];
 }
 
 function scheduleIdentityMatches(theater: TohoTheater, observedNames: string[]): boolean {
@@ -324,14 +333,32 @@ function scheduleIdentityMatches(theater: TohoTheater, observedNames: string[]):
   return theater.aliases.every((alias) => observed.includes(normalizeTheaterQuery(alias)));
 }
 
-function normalizeScheduleRows(snapshot: ScheduleSnapshot, theater: TohoTheater, date: string, sourceUrl: string): TohoShowtime[] {
+function assertScheduleIdentity(snapshot: ScheduleSnapshot, theater: TohoTheater, sourceUrl: string): void {
   if (snapshot.scheduleHeadingCount !== 1) {
     throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO schedule heading is missing or ambiguous.", { count: snapshot.scheduleHeadingCount });
+  }
+  let observedUrl: URL;
+  let expectedUrl: URL;
+  try {
+    observedUrl = assertOfficialUrl(sourceUrl, "toho");
+    expectedUrl = assertOfficialUrl(theater.url, "toho");
+  } catch {
+    throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO schedule source URL no longer matches the reviewed official provider boundary.");
+  }
+  if (routeKey(observedUrl) !== routeKey(expectedUrl)) {
+    throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO schedule route changed after the theater was resolved.", {
+      expected: routeKey(expectedUrl),
+      observed: routeKey(observedUrl)
+    });
   }
   const theaterNames = stringArray(snapshot.theaterNames, 4).filter((name) => /^TOHOシネマズ\s+/.test(name));
   if (!scheduleIdentityMatches(theater, theaterNames)) {
     throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO schedule page theater identity does not match the requested theater group.", { expected: theater.aliases, observed: theaterNames });
   }
+}
+
+function normalizeScheduleRows(snapshot: ScheduleSnapshot, theater: TohoTheater, date: string, sourceUrl: string): TohoShowtime[] {
+  assertScheduleIdentity(snapshot, theater, sourceUrl);
   if (!Array.isArray(snapshot.showtimes)) {
     throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO schedule rows are unavailable from the rendered public UI.");
   }
@@ -352,7 +379,7 @@ function normalizeScheduleRows(snapshot: ScheduleSnapshot, theater: TohoTheater,
     }
     const context = typeof raw.context === "string" ? normalizeText(raw.context).slice(0, 650) : "";
     const semanticText = `${movie} ${context}`;
-    const screenMatch = semanticText.match(/(?:スクリーン|SCREEN)\s*([A-Z0-9-]+)/i);
+    const screenMatch = semanticText.match(/(?:スクリーン|SCREEN)\s*(?:No\.?\s*)?(\d{1,2}[A-Z]?)/i);
     const language = /字幕|SUBTITLED/i.test(semanticText)
       ? "subtitled" as const
       : /吹替|DUBBED/i.test(semanticText)
@@ -446,6 +473,7 @@ export class TohoReadAdapter {
     const theater = await this.resolveTheater(input.theater);
     await this.runtime.navigate(theater.url, "toho");
     let semantic = await this.runtime.evaluateSemanticState<ScheduleSnapshot>("toho", SCHEDULE_EXPRESSION);
+    assertScheduleIdentity(semantic.value, theater, semantic.url);
     let dates = normalizeDateCandidates(semantic.value);
     if (dates.length === 0) {
       throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO date controls could not be read from the rendered public schedule UI.");
