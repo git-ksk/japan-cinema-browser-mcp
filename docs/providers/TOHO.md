@@ -4,7 +4,8 @@ Provider ID: `toho`
 
 公式root: `https://www.tohotheater.jp/`
 
-初回Private MVPレビュー日: 2026-08-12
+初回Private MVPレビュー日: 2026-08-12  
+Phase 1 read adapterレビュー日: 2026-08-13
 
 ## 現在のCapability
 
@@ -12,45 +13,139 @@ Provider ID: `toho`
 |---|---|---|
 | 公式rootを開く | 有効 | domain allow-listあり |
 | Generic bounded read | 有効 | page内容は永続保存しない |
-| 劇場選択semantic | 未実装 | live UI確認が必要 |
-| 上映情報semantic | 未実装 | live UI確認が必要 |
+| 劇場一覧/選択semantic | 有効 | 公式劇場一覧のvisible linkのみ |
+| 上映情報semantic | 有効 | 劇場・日付・作品・上映回をrendered UIから抽出 |
 | Seat map read | 無効 | 未レビュー |
 | Seat selection | 無効 | 未レビュー |
 | Checkout preparation | 無効 | 未レビュー |
 | Final purchase | 無効 | 別途厳格レビューが必要 |
 
-## 実装境界
+## Phase 1で確認した公式導線
 
-TOHO adapterは、通常ユーザーが操作できる公開Web UIだけを対象にします。
+劇場一覧:
 
-やらないこと:
+```text
+https://www.tohotheater.jp/theater/find.html
+```
 
-- private/internal endpointへ依存する
-- 上映/座席inventoryを蓄積する
-- access challengeを回避する
-- 位置だけを頼りにfinal purchase controlを推測clickする
-- password/card/OTP等をMCP引数で扱う
+劇場の上映スケジュールは、劇場一覧のvisible linkから同じallow-list対象である `*.tohotheater.jp` 配下へ遷移します。
 
-## Read Adapter確認項目
+2026-08-13時点で確認した例:
 
-1. 現在の劇場選択導線を確認
-2. visible UI上でstableな劇場識別方法を確認
-3. 日付切り替え挙動を確認
-4. 作品と上映回のgroupingを確認
-5. IMAX等の上映方式、字幕/吹替表記を確認
-6. 共通 `Showtime` schemaへ正規化
-7. duplicate/ambiguous/missing stateでfail closed
-8. 別domainへの遷移が必要な場合はallow-list変更前に個別レビュー
+```text
+https://hlo.tohotheater.jp/net/schedule/036/TNPI2000J01.do
+```
 
-## Seat Map確認項目
+`036` はTOHOシネマズ ららぽーと横浜の劇場識別子としてvisible theater linkから取得します。
+
+adapterはこの公開Web UIのrendered DOMだけを読みます。network interception、XHR/fetchの解析、hidden JSON endpoint、private/internal APIの直接利用は行いません。
+
+## Read Adapter実装
+
+### 劇場一覧
+
+`list_theaters` では、公式劇場一覧画面上のvisible anchorを対象にします。
+
+採用条件:
+
+- HTTPS
+- `tohotheater.jp` 配下
+- visible theater link
+- `/net/schedule/{3桁}/TNPI2000J01.do` 形式の公開schedule route
+- `TOHOシネマズ ...` として読める劇場名
+
+同じ劇場IDが設備別一覧などで重複していても、URL/名称が一致すればdeduplicateします。同一IDで異なるURL/名称が観測された場合は `UI_STATE_CHANGED` で停止します。
+
+劇場一覧の抽出数が極端に少ない場合も、UI変更とみなしてfail closedします。
+
+### 日付
+
+`get_showtimes` はvisible date controlから日付を正規化します。
+
+- MCP inputは `YYYY-MM-DD`
+- UI上の `M/D` 等はAsia/Tokyoの現在日付を基準に年を補完
+- 年末年始のyear rolloverを考慮
+- selected stateは `aria-current` / `aria-selected` / active/current/selected系のvisible stateから確認
+- requested dateへ切り替えた後、同じ日付がselectedになったことを再読して確認
+- selected stateが0件または複数など曖昧なら停止
+
+公開されていない日付は推測せず、`dateAvailable=false` と現在visibleな `availableDates` を返します。
+
+### 作品・上映回
+
+上映スケジュール領域だけを対象に、visible showtime controlを短いsemantic snapshotへ変換します。
+
+返却する主なfact:
+
+- provider
+- theater / theaterId
+- date
+- movie
+- startTime / endTime（visible control上で確認できる場合）
+- format（IMAX / IMAX LASER / MX4D / DOLBY CINEMA / SCREEN X / TCX等）
+- subtitle / dub表示
+- screen表示（明示されている場合）
+- availability表示（明示されている場合のみ）
+- sourceUrl
+
+movie titleを1件に結び付けられない上映回が1つでもある場合、部分的に推測して返さず `UI_STATE_CHANGED` で全体を停止します。
+
+raw HTML、DOM dump、showtime datasetをMCP resultへ返したり永続保存したりしません。
+
+## Safety Boundary
+
+Phase 1 adapterで有効化するのはread-only上映取得だけです。
+
+変更していないInvariant:
+
+- domain allow-list
+- sensitive field拒否
+- generic clickのfinal purchase拒否
+- CAPTCHA/anti-bot challengeで停止
+- purchase confirmation TTL / one-shot / URL binding
+- final purchaseのruntime default無効
+
+`get_showtimes` は日付タブのような可逆な表示切替のみ行います。上映回の購入リンク、座席、券種、checkout、final submitには進みません。
+
+## テスト
+
+Unit test:
+
+- TOHO日付正規化
+- 年末年始year rollover
+- theater link validation
+- duplicate theater dedupe
+- conflicting duplicate idのfail-closed
+- theater list構造崩れのfail-closed
+
+非購入live smoke:
+
+```bash
+npm run smoke:toho
+```
+
+smokeは低頻度・明示実行とし、CIの通常testには含めません。
+
+確認対象:
+
+1. 公式劇場一覧へ到達
+2. ららぽーと横浜をvisible theater linkとして1件に解決
+3. 上映スケジュール画面へ到達
+4. selected dateとavailable datesをsemanticに読む
+5. showtime resultがofficial `tohotheater.jp` source URLに紐づく
+6. seat selection / purchaseを実行しない
+
+CAPTCHA/anti-bot等が表示された環境では突破せずsmokeを失敗させます。
+
+## 今後の確認項目
+
+Seat Mapへ進む前に別途確認します。
 
 - どの操作時点で座席仮押さえが発生するか
 - available/unavailable等をvisible UIから識別できるか
 - row/seat labelを正規化できるか
 - 可能な限りseat click前にrecommendationを計算できるか
 - seat state変更をどう検出するか
-
-## Checkout / Purchase確認項目
 
 Checkout automation前:
 
@@ -69,4 +164,4 @@ Final purchase前:
 
 ## 方針
 
-他providerとfeature parityを無理に揃えません。TOHOで安全に確認できたcapabilityだけを有効化します。
+TOHOについてはまずread-only上映取得だけを有効化します。seat map以降はPhase 1の成功と切り離し、provider UI・規約・仮押さえ挙動を個別確認した後にcapability単位で昇格させます。
