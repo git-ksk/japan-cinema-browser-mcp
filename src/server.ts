@@ -9,16 +9,19 @@ import {
   isFinalPurchaseLabel,
   type CinemaProviderId
 } from "./providers.js";
+import { TohoReadAdapter } from "./providers/toho/adapter.js";
 import { PurchaseGate, PurchaseGateError, type PurchaseSummary } from "./purchase-gate.js";
 
 const SERVER_VERSION = "0.1.0";
 export const config = loadConfig();
 const chrome = new ChromeProcess(config.browser);
 const runtime = new CinemaBrowserRuntime(chrome, config.policy.maxReadChars);
+const tohoReadAdapter = new TohoReadAdapter(runtime);
 const purchaseGate = new PurchaseGate(config.policy.confirmationTtlMs);
 
 const providerSchema = z.enum(["toho", "aeon", "109"]);
 const shortText = z.string().trim().min(1).max(240);
+const isoDate = z.string().regex(/^20\d{2}-\d{2}-\d{2}$/, "date must be YYYY-MM-DD");
 
 function jsonResult(value: unknown): CallToolResult {
   return { content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }] };
@@ -49,6 +52,16 @@ async function safe<T>(task: () => Promise<T> | T): Promise<CallToolResult> {
   }
 }
 
+function requireReadAdapter(provider: CinemaProviderId): TohoReadAdapter {
+  if (provider !== "toho") {
+    throw new ProviderPolicyError(
+      "UNSUPPORTED_CAPABILITY",
+      `${CINEMA_PROVIDERS[provider].name} semantic theater/showtime reading is not enabled yet.`
+    );
+  }
+  return tohoReadAdapter;
+}
+
 export function buildServer(): McpServer {
   const server = new McpServer({ name: "japan-cinema-browser-mcp", version: SERVER_VERSION });
 
@@ -56,7 +69,7 @@ export function buildServer(): McpServer {
     "list_cinema_providers",
     {
       title: "List Japanese cinema providers",
-      description: "List reviewed Japanese cinema providers and their official roots.",
+      description: "List reviewed Japanese cinema providers, official roots, and currently enabled granular capabilities.",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true }
     },
     async () => jsonResult(Object.values(CINEMA_PROVIDERS))
@@ -115,6 +128,40 @@ export function buildServer(): McpServer {
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true }
     },
     async () => safe(() => runtime.extractShowtimeCandidates())
+  );
+
+  server.registerTool(
+    "list_theaters",
+    {
+      title: "List cinema theaters",
+      description: "Read reviewed theater links from the provider's current official public UI. TOHO Cinemas is enabled in Phase 1; unsupported provider capabilities fail closed.",
+      inputSchema: z.object({
+        provider: providerSchema,
+        query: shortText.optional()
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true }
+    },
+    async ({ provider, query }) => safe(() => requireReadAdapter(provider).listTheaters(query))
+  );
+
+  server.registerTool(
+    "get_showtimes",
+    {
+      title: "Get cinema showtimes",
+      description: "Read theater/date/movie/showtime facts from the provider's rendered official public UI. This never calls private/internal APIs and never enters the purchase flow.",
+      inputSchema: z.object({
+        provider: providerSchema,
+        theater: shortText,
+        date: isoDate.optional(),
+        movie: shortText.optional()
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true }
+    },
+    async ({ provider, theater, date, movie }) => safe(() => requireReadAdapter(provider).getShowtimes({
+      theater,
+      ...(date ? { date } : {}),
+      ...(movie ? { movie } : {})
+    }))
   );
 
   server.registerTool(
