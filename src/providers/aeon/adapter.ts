@@ -58,6 +58,7 @@ interface ScheduleSnapshot {
   theaterNames?: unknown;
   dateLabels?: unknown;
   showtimes?: unknown;
+  ambiguousTimeGroups?: unknown;
   emptySchedule?: unknown;
 }
 
@@ -141,6 +142,7 @@ const SCHEDULE_EXPRESSION = `(() => {
     .slice(0, 48);
 
   const timeRange = /(?:^|\\D)((?:[01]?\\d|2\\d)[:：][0-5]\\d)\\s*[~〜～ー-]\\s*((?:[01]?\\d|2\\d)[:：][0-5]\\d)(?!\\d)/;
+  const allTimeRanges = (text) => Array.from(text.matchAll(/((?:[01]?\\d|2\\d)[:：][0-5]\\d)\\s*[~〜～ー-]\\s*((?:[01]?\\d|2\\d)[:：][0-5]\\d)/g));
   const titleRejected = /^(?:上映スケジュール|劇場情報|作品から探す|上映時間から探す|販売開始日時について|すべてを読む|予約購入|Coming soon)$/i;
   const titleNodes = Array.from(document.querySelectorAll('a[href*="/movie/"],h2,h3,h4,h5,h6'))
     .filter(visible)
@@ -148,10 +150,13 @@ const SCHEDULE_EXPRESSION = `(() => {
     .filter((item) => item.text.length >= 2 && item.text.length <= 180 && !titleRejected.test(item.text) && !/^イオンシネマ\\s+/.test(item.text));
 
   const candidateElements = Array.from(document.querySelectorAll('a,button,div,p,span,li')).filter(visible);
-  const timeNodes = candidateElements
+  const timeItems = candidateElements
     .map((el) => ({ el, text: normalize(el.getAttribute('aria-label') || el.textContent) }))
-    .filter((item) => item.text.length > 0 && item.text.length <= 220 && timeRange.test(item.text))
+    .filter((item) => item.text.length > 0 && item.text.length <= 260 && timeRange.test(item.text))
+    .map((item) => ({ ...item, ranges: allTimeRanges(item.text) }))
     .filter((item) => !Array.from(item.el.children).some((child) => visible(child) && timeRange.test(normalize(child.textContent))));
+  const ambiguousTimeGroups = timeItems.filter((item) => item.ranges.length !== 1).length;
+  const timeNodes = timeItems.filter((item) => item.ranges.length === 1);
 
   const titleFor = (control) => {
     let parent = control.parentElement;
@@ -180,8 +185,8 @@ const SCHEDULE_EXPRESSION = `(() => {
   const showtimes = [];
   const seen = new Set();
   for (const item of timeNodes) {
-    const match = item.text.match(timeRange);
-    if (!match) continue;
+    const match = item.ranges[0];
+    if (!match?.[1] || !match[2]) continue;
     const movie = titleFor(item.el);
     const key = movie + '|' + match[1] + '|' + match[2];
     if (seen.has(key)) continue;
@@ -197,8 +202,8 @@ const SCHEDULE_EXPRESSION = `(() => {
     theaterNames,
     dateLabels,
     showtimes,
-    emptySchedule: /(?:上映スケジュールはありません|上映予定はありません|上映回はありません)/.test(bodyText) ||
-      (/Coming soon/i.test(bodyText) && showtimes.length === 0)
+    ambiguousTimeGroups,
+    emptySchedule: /(?:上映スケジュールはありません|上映予定はありません|上映回はありません)/.test(bodyText)
   };
 })()`;
 
@@ -213,7 +218,7 @@ function normalizeTheaterQuery(value: string): string {
 function stripFacilitySuffix(label: string): string {
   const normalized = normalizeText(label);
   return normalized.replace(
-    /\s+(?=(?:4DX|Dolby\s+Atmos|IMAX(?:レーザー)?|MX4D|THX|ULTI(?:RA|LA)|GRAN\s+THEATER|D-BOX|VSound|VIVE\s+AUDIO|dts\s+surround\s+cinema|dtsX|Christie\s+RealLaser|MULTIPLEX)\b).*$/i,
+    /\s+(?=(?:4DX|Dolby\s+Atmos|IMAX(?:レーザー)?|MX4D|THX|ULTI(?:RA|LA)|GRAN\s+THEATER|D-BOX|VSound|VIVE\s+AUDIO|dts\s+surround\s+cinema|dtsX|Christie\s+RealLaser|MULTIPLEX)(?:\s|$)).*$/i,
     ""
   ).trim();
 }
@@ -392,6 +397,11 @@ export function normalizeAeonScheduleSnapshot(
       observed: snapshot.theaterNames
     });
   }
+  if (typeof snapshot.ambiguousTimeGroups === "number" && snapshot.ambiguousTimeGroups > 0) {
+    throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON rendered time ranges could not be separated into unique showtime rows.", {
+      ambiguousTimeGroups: snapshot.ambiguousTimeGroups
+    });
+  }
   if (!Array.isArray(snapshot.showtimes)) {
     throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON showtime rows are unavailable from the rendered public UI.");
   }
@@ -457,7 +467,7 @@ export function normalizeAeonScheduleSnapshot(
 function isTheaterListUrl(value: string): boolean {
   try {
     const url = assertOfficialUrl(value, "aeon");
-    return url.hostname === "www.aeoncinema.com" && (url.pathname === "/theater/" || url.pathname === "/theater/index.html");
+    return url.hostname === "www.aeoncinema.com" && (url.pathname === "/theater" || url.pathname === "/theater/" || url.pathname === "/theater/index.html");
   } catch {
     return false;
   }
