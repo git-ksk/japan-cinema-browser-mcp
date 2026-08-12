@@ -5,7 +5,8 @@ Provider ID: `aeon`
 公式root: `https://www.aeoncinema.com/`
 
 初回Private MVPレビュー日: 2026-08-12  
-Phase 1 read adapterレビュー日: 2026-08-13
+Phase 1 read adapterレビュー日: 2026-08-13  
+公式サイトポリシー再確認日: 2026-08-13
 
 ## 現在のCapability
 
@@ -19,6 +20,20 @@ Phase 1 read adapterレビュー日: 2026-08-13
 | Seat selection | 無効 | 未レビュー |
 | Checkout preparation | 無効 | 未レビュー |
 | Final purchase | 無効 | `purchaseSubmission=false` をruntimeでも強制 |
+
+## 公式サイトポリシー確認
+
+2026-08-13にイオンシネマ公式サイトポリシーとe席リザーブ利用規約を再確認しました。
+
+明示されている主な境界:
+
+- 権利侵害をしない
+- 当社の承認なく営利目的の行為またはその準備を行わない
+- 本サイト/e席リザーブの運営を妨げない
+- 劇場および運営会社の営業を妨げない
+- その他不適切と判断される行為を行わない
+
+この確認は法的判断ではありません。Phase 1ではリスクを広げないため、ユーザー要求時の低頻度な公式公開UI readに限定し、定期クロール、全国上映DB化、素材の再配布、private/internal endpoint利用、challenge回避、購入自動化を行いません。Public化や営利利用、transaction capabilityの解禁前には再レビューします。
 
 ## Phase 1で確認した公開導線
 
@@ -40,6 +55,7 @@ Phase 1 adapterはこれらのrendered public factsだけを読みます。`sche
 - `IMAXレーザー`、`4DX`、`ULTIRA`、`Dolby Atmos` 等の施設labelを劇場名本体から分離
 - explicitなpublic schedule URLがDOMに存在する場合だけ採用
 - routeがDOMから確定できない場合はslugを推測せず、後続の公式UI選択経路を使う
+- 劇場一覧がSPA/JS描画途中ならbounded pollingでreviewed semantic ready-stateを待つ
 - 劇場件数がreviewed structureから大きく外れた場合はfail closed
 
 ### `get_showtimes`
@@ -49,7 +65,8 @@ Phase 1 adapterはこれらのrendered public factsだけを読みます。`sche
 3. URLが確定していない場合は公式劇場選択controlをclickし、公式の「上映スケジュールを確認する」導線からschedule pageへ進む
 4. requested dateは同じpublic schedule routeの `?date=YYYYMMDD` で表示
 5. current hostname/path/date queryを再検証
-6. rendered DOMから movie / start / end / screen / format / 字幕・吹替 / explicit availabilityだけをcompact structured factsへ変換
+6. SPAのrendered showtime stateが揃うまでbounded polling
+7. rendered DOMから movie / start / end / screen / format / 字幕・吹替 / explicit availabilityだけをcompact structured factsへ変換
 
 `予約購入` はcontextとして読めても、Phase 1 adapterからclickしません。
 
@@ -58,6 +75,7 @@ Phase 1 adapterはこれらのrendered public factsだけを読みます。`sche
 以下では部分結果を推測して返しません。
 
 - 劇場一覧heading/件数がreviewed structureと一致しない
+- semantic ready-stateがbounded polling内に成立しない
 - 劇場名が一意に解決できない
 - schedule routeが `theater.aeoncinema.com/theaters/{slug}` から外れる
 - requested date navigation後にpath/queryが一致しない
@@ -88,10 +106,11 @@ raw HTML、full DOM、Cookie、token、private API responseは返却・永続保
 Unit:
 
 - 劇場label / facility suffix正規化
-- official public schedule URL validation
+- explicit official public schedule URL validation / route非推測
 - invalid calendar date拒否
 - movie/showtime/screen/format/language正規化
 - unresolved movie grouping fail closed
+- ambiguous time group fail closed
 - capability matrix / purchase disabled invariant
 
 Manual non-purchase smoke:
