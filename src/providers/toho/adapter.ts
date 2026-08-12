@@ -7,6 +7,7 @@ export interface TohoTheater {
   provider: "toho";
   id: string;
   name: string;
+  aliases: string[];
   url: string;
   sourceUrl: string;
 }
@@ -111,7 +112,7 @@ const SCHEDULE_EXPRESSION = `(() => {
   };
   const clickable = (el) => el.matches('a,button,[role="button"],[role="tab"],[role="link"]');
   const dateNodes = Array.from(document.querySelectorAll('a,button,[role="button"],[role="tab"],[role="link"],li,span,time'))
-    .filter(visible)
+    .filter((el) => visible(el) && (clickable(el) || selectedSignal(el)))
     .map((el) => ({ el, label: normalize(el.getAttribute('aria-label') || el.textContent) }))
     .filter(({ label }) => label.length > 0 && label.length <= 48 && datePattern.test(label));
   const dates = [];
@@ -191,6 +192,11 @@ function normalizeTheaterQuery(value: string): string {
   return normalizeText(value).replace(/^TOHOシネマズ\s*/i, "").toLocaleLowerCase("ja-JP");
 }
 
+function isOfficialTohoHostname(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/\.$/, "");
+  return host === "tohotheater.jp" || host.endsWith(".tohotheater.jp");
+}
+
 function stringArray(value: unknown, limit: number): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is string => typeof item === "string").map(normalizeText).filter(Boolean).slice(0, limit);
@@ -243,25 +249,36 @@ export function normalizeTohoTheaterSnapshot(snapshot: TheaterSnapshot, sourceUr
   if (!Array.isArray(snapshot.rows)) {
     throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO theater list did not expose the reviewed public theater-link structure.");
   }
-  const byId = new Map<string, TohoTheater>();
+  const groups = new Map<string, { id: string; url: string; aliases: Set<string> }>();
   for (const raw of snapshot.rows.slice(0, 160) as TheaterSnapshotRow[]) {
     if (typeof raw?.id !== "string" || typeof raw.name !== "string" || typeof raw.url !== "string") continue;
     let url: URL;
     try { url = new URL(raw.url); } catch { continue; }
     const pathMatch = url.pathname.match(TOHO_SCHEDULE_PATH);
-    if (!pathMatch || pathMatch[1] !== raw.id || url.protocol !== "https:" || !url.hostname.endsWith("tohotheater.jp")) continue;
+    if (!pathMatch || pathMatch[1] !== raw.id || url.protocol !== "https:" || !isOfficialTohoHostname(url.hostname)) continue;
     const name = normalizeText(raw.name);
     if (!/^TOHOシネマズ\s+/.test(name)) continue;
-    const candidate: TohoTheater = { provider: "toho", id: raw.id, name, url: url.href, sourceUrl };
-    const existing = byId.get(raw.id);
-    if (existing && (existing.name !== candidate.name || existing.url !== candidate.url)) {
-      throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO theater list contains conflicting entries for the same theater id.", { theaterId: raw.id });
+    const existing = groups.get(raw.id);
+    if (existing && new URL(existing.url).pathname !== url.pathname) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO theater id points to conflicting public schedule routes.", { theaterId: raw.id });
     }
-    byId.set(raw.id, candidate);
+    const group = existing ?? { id: raw.id, url: url.href, aliases: new Set<string>() };
+    group.aliases.add(name);
+    groups.set(raw.id, group);
   }
-  const theaters = [...byId.values()].sort((a, b) => a.name.localeCompare(b.name, "ja"));
+  const theaters = [...groups.values()].map((group): TohoTheater => {
+    const aliases = [...group.aliases].sort((a, b) => a.localeCompare(b, "ja"));
+    return {
+      provider: "toho",
+      id: group.id,
+      name: aliases.join(" / "),
+      aliases,
+      url: group.url,
+      sourceUrl
+    };
+  }).sort((a, b) => a.name.localeCompare(b.name, "ja"));
   if (theaters.length < 20) {
-    throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO theater list extraction returned too few theaters; the public UI may have changed.", { count: theaters.length });
+    throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO theater list extraction returned too few schedule groups; the public UI may have changed.", { count: theaters.length });
   }
   return theaters;
 }
@@ -301,13 +318,19 @@ function timeParts(label: string): string[] {
     .slice(0, 2);
 }
 
+function scheduleIdentityMatches(theater: TohoTheater, observedNames: string[]): boolean {
+  if (observedNames.length !== 1) return false;
+  const observed = normalizeTheaterQuery(observedNames[0]!);
+  return theater.aliases.every((alias) => observed.includes(normalizeTheaterQuery(alias)));
+}
+
 function normalizeScheduleRows(snapshot: ScheduleSnapshot, theater: TohoTheater, date: string, sourceUrl: string): TohoShowtime[] {
   if (snapshot.scheduleHeadingCount !== 1) {
     throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO schedule heading is missing or ambiguous.", { count: snapshot.scheduleHeadingCount });
   }
   const theaterNames = stringArray(snapshot.theaterNames, 4).filter((name) => /^TOHOシネマズ\s+/.test(name));
-  if (theaterNames.length !== 1 || normalizeTheaterQuery(theaterNames[0]!) !== normalizeTheaterQuery(theater.name)) {
-    throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO schedule page theater identity does not match the requested theater.", { expected: theater.name, observed: theaterNames });
+  if (!scheduleIdentityMatches(theater, theaterNames)) {
+    throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO schedule page theater identity does not match the requested theater group.", { expected: theater.aliases, observed: theaterNames });
   }
   if (!Array.isArray(snapshot.showtimes)) {
     throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO schedule rows are unavailable from the rendered public UI.");
@@ -396,14 +419,17 @@ export class TohoReadAdapter {
   async listTheaters(query?: string): Promise<{ provider: "toho"; sourceUrl: string; theaters: TohoTheater[] }> {
     const status = await this.runtime.status();
     const currentUrl = typeof status.url === "string" ? status.url : "";
-    const sourceUrl = currentUrl.startsWith(TOHO_THEATER_LIST_URL)
-      ? currentUrl
-      : await this.runtime.navigate(TOHO_THEATER_LIST_URL, "toho");
+    if (!currentUrl.startsWith(TOHO_THEATER_LIST_URL)) {
+      await this.runtime.navigate(TOHO_THEATER_LIST_URL, "toho");
+    }
     const semantic = await this.runtime.evaluateSemanticState<TheaterSnapshot>("toho", THEATER_LIST_EXPRESSION);
     let theaters = normalizeTohoTheaterSnapshot(semantic.value, semantic.url);
     if (query?.trim()) {
       const needle = normalizeTheaterQuery(query);
-      theaters = theaters.filter((theater) => normalizeTheaterQuery(theater.name).includes(needle));
+      theaters = theaters.filter((theater) =>
+        normalizeTheaterQuery(theater.name).includes(needle) ||
+        theater.aliases.some((alias) => normalizeTheaterQuery(alias).includes(needle))
+      );
     }
     return { provider: "toho", sourceUrl: semantic.url, theaters };
   }
@@ -439,11 +465,11 @@ export class TohoReadAdapter {
           showtimes: []
         };
       }
-      const selectedMatches = matches.filter((candidate) => candidate.selected);
-      if (selectedMatches.length > 1) {
-        throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO marks multiple controls for the requested date as selected.", { date: requestedDate });
+      const selectedDateSet = new Set(dates.filter((candidate) => candidate.selected).map((candidate) => candidate.date));
+      if (selectedDateSet.size > 1) {
+        throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO marks multiple dates as selected.", { selectedDates: [...selectedDateSet] });
       }
-      if (selectedMatches.length === 0) {
+      if (!selectedDateSet.has(requestedDate)) {
         const clickableLabels = [...new Set(matches.filter((candidate) => candidate.clickable).map((candidate) => candidate.label))];
         if (clickableLabels.length !== 1) {
           throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO requested date is not represented by one unique visible date control.", { date: requestedDate, candidates: clickableLabels });
@@ -493,10 +519,13 @@ export class TohoReadAdapter {
   private async resolveTheater(query: string): Promise<TohoTheater> {
     const result = await this.listTheaters(query);
     const needle = normalizeTheaterQuery(query);
-    const exact = result.theaters.filter((theater) => normalizeTheaterQuery(theater.name) === needle);
+    const exact = result.theaters.filter((theater) =>
+      normalizeTheaterQuery(theater.name) === needle ||
+      theater.aliases.some((alias) => normalizeTheaterQuery(alias) === needle)
+    );
     const candidates = exact.length > 0 ? exact : result.theaters;
     if (candidates.length !== 1) {
-      throw new BrowserRuntimeError("UI_ELEMENT_NOT_FOUND", "TOHO theater name did not resolve to one unique reviewed theater link.", {
+      throw new BrowserRuntimeError("UI_ELEMENT_NOT_FOUND", "TOHO theater name did not resolve to one unique reviewed public schedule group.", {
         query,
         candidates: candidates.slice(0, 12).map((theater) => theater.name)
       });
