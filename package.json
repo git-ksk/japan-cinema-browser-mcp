@@ -18,6 +18,7 @@
     "check": "npm run typecheck && npm test",
     "smoke:toho": "tsx tests/toho-live.smoke.ts",
     "smoke:aeon": "tsx tests/aeon-live.smoke.ts",
+    "smoke:109": "tsx tests/109-live.smoke.ts",
     "prepack": "npm run check && npm run build"
   },
   "dependencies": {

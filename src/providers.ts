@@ -55,8 +55,8 @@ export const CINEMA_PROVIDERS: Record<CinemaProviderId, CinemaProviderDefinition
     rootUrl: "https://109cinemas.net/",
     allowedDomain: "109cinemas.net",
     capabilities: {
-      theaters: false,
-      showtimes: false,
+      theaters: true,
+      showtimes: true,
       ...NO_TRANSACTION_CAPABILITIES
     }
   }
