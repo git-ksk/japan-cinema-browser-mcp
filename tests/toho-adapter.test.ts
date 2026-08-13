@@ -108,7 +108,7 @@ test("TOHO showtime normalization returns compact semantic facts and does not mi
           {
             label: "13:00 販売開始 12:00",
             titleCandidates: ["映画B"],
-            context: "SCREEN X"
+            context: "SCREEN X 販売期間外"
           }
         ],
         emptySchedule: false
@@ -138,6 +138,7 @@ test("TOHO showtime normalization returns compact semantic facts and does not mi
   assert.equal(result.showtimes[1]?.endTime, undefined);
   assert.deepEqual(result.showtimes[1]?.formats, ["SCREEN X"]);
   assert.equal(result.showtimes[1]?.screen, undefined);
+  assert.equal(result.showtimes[1]?.availability, "unavailable");
 });
 
 test("TOHO accepts the observed official schedule subdomain redirect only when the reviewed theater path is unchanged", async () => {

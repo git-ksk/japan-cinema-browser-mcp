@@ -220,7 +220,7 @@ const SCHEDULE_EXPRESSION = `(() => {
       const end = normalize(el.querySelector('.time .end')?.textContent);
       const timeNode = el.querySelector('.time');
       const label = start && end
-        ? `${start} ～ ${end}`
+        ? start + ' ～ ' + end
         : normalize(timeNode?.textContent || el.getAttribute('aria-label') || el.textContent);
       return { el, label };
     })
