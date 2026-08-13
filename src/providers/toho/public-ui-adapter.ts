@@ -12,49 +12,45 @@ interface TheaterRegionExpansionState {
 
 const EXPAND_THEATER_REGIONS_EXPRESSION = `(() => {
   const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
-  const visible = (el) => {
-    const r = el.getBoundingClientRect();
+  const rendered = (el) => {
     const s = getComputedStyle(el);
-    return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
+    return s.visibility !== 'hidden' && s.display !== 'none';
   };
   const schedulePath = /^\\/net\\/schedule\\/\\d{3}\\/TNPI2000J01\\.do$/;
   const regionHeading = /^(?:北海道|東北|関東|中部|関西|中国|四国|九州)地区(?:\\s|$)/;
-  const sections = Array.from(document.querySelectorAll('.theater-list-section'));
-  const regions = [];
-  for (const section of sections) {
-    const heading = Array.from(section.querySelectorAll('h2,h3,h4,h5,h6'))
-      .find((el) => visible(el) && regionHeading.test(normalize(el.textContent)));
-    if (!heading) continue;
-    regions.push({ section, heading });
-  }
-  const visibleScheduleLinks = () => Array.from(document.querySelectorAll('a[href]')).filter((anchor) => {
-    if (!visible(anchor)) return false;
-    try {
-      const url = new URL(anchor.href, location.href);
-      return schedulePath.test(url.pathname);
-    } catch {
-      return false;
-    }
-  }).length;
-  const clicked = [];
-  if (visibleScheduleLinks() < ${MIN_THEATER_SCHEDULE_LINKS}) {
-    for (const { section, heading } of regions) {
-      const alreadyOpen = Array.from(section.querySelectorAll('a[href]')).some((anchor) => {
-        if (!visible(anchor)) return false;
+  const headings = Array.from(document.querySelectorAll('h3.theater-list-title.js-toggle-button'))
+    .filter((el) => rendered(el) && regionHeading.test(normalize(el.textContent)));
+  const regions = headings.map((heading) => {
+    const panel = heading.nextElementSibling;
+    const validPanel = panel && panel.matches('.theater-list-toggle-panel.js-toggle-panel') ? panel : null;
+    return { heading, panel: validPanel };
+  });
+  const scheduleLinksInOpenPanels = () => {
+    let count = 0;
+    for (const { panel } of regions) {
+      if (!panel || !rendered(panel)) continue;
+      for (const anchor of Array.from(panel.querySelectorAll('a[href]'))) {
         try {
-          return schedulePath.test(new URL(anchor.href, location.href).pathname);
+          const url = new URL(anchor.href, location.href);
+          if (schedulePath.test(url.pathname)) count += 1;
         } catch {
-          return false;
+          // Ignore malformed hrefs; the strict adapter validates accepted routes later.
         }
-      });
-      if (alreadyOpen) continue;
+      }
+    }
+    return count;
+  };
+  const clicked = [];
+  if (scheduleLinksInOpenPanels() < ${MIN_THEATER_SCHEDULE_LINKS}) {
+    for (const { heading, panel } of regions) {
+      if (!panel || rendered(panel)) continue;
       heading.click();
       clicked.push(normalize(heading.textContent).slice(0, 80));
     }
   }
   return {
-    regionCount: regions.length,
-    visibleScheduleLinks: visibleScheduleLinks(),
+    regionCount: regions.filter(({ panel }) => Boolean(panel)).length,
+    visibleScheduleLinks: scheduleLinksInOpenPanels(),
     clicked
   };
 })()`;
@@ -69,8 +65,8 @@ function expansionCount(value: unknown): number {
 
 /**
  * Current TOHO public theater UI keeps regional theater lists collapsed by default.
- * This adapter only opens the visible reviewed region headings, then delegates all
- * theater/schedule parsing and identity checks to the existing fail-closed adapter.
+ * This adapter opens only rendered reviewed region toggles whose adjacent public
+ * theater panel is closed, then delegates parsing and identity checks unchanged.
  */
 export class TohoPublicUiReadAdapter extends TohoReadAdapter {
   constructor(private readonly uiRuntime: CinemaBrowserRuntime) {
