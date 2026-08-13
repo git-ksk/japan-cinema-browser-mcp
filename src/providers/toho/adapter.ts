@@ -44,6 +44,11 @@ interface TheaterRegionExpansionState {
   visibleScheduleLinks?: unknown;
 }
 
+interface DateClickState {
+  matched?: unknown;
+  clicked?: unknown;
+}
+
 interface ScheduleDateCandidate {
   label?: unknown;
   selected?: unknown;
@@ -151,28 +156,23 @@ const SCHEDULE_EXPRESSION = `(() => {
     .filter((text) => /^TOHOシネマズ\\s+/.test(text))
     .slice(0, 4);
 
-  const datePattern = /(?:^|\\s)(?:20\\d{2}[.\\/年-])?(\\d{1,2})[.\\/月-](\\d{1,2})(?:日)?(?:\\s|\\(|（|$)/;
-  const selectedSignal = (el) => {
-    const own = [el.getAttribute('aria-current'), el.getAttribute('aria-selected'), el.className].map(normalize).join(' ');
-    const parent = el.parentElement
-      ? [el.parentElement.getAttribute('aria-current'), el.parentElement.getAttribute('aria-selected'), el.parentElement.className].map(normalize).join(' ')
-      : '';
-    return /(?:^|[\\s_-])(?:active|current|selected|on)(?:$|[\\s_-])/i.test(own + ' ' + parent) ||
-      /^(?:true|date|page)$/i.test(normalize(el.getAttribute('aria-current'))) ||
-      /^true$/i.test(normalize(el.getAttribute('aria-selected')));
-  };
-  const clickable = (el) => el.matches('a,button,[role="button"],[role="tab"],[role="link"]');
-  const dateNodes = Array.from(document.querySelectorAll('a,button,[role="button"],[role="tab"],[role="link"],li,span,time'))
-    .filter((el) => visible(el) && (clickable(el) || selectedSignal(el)))
-    .map((el) => ({ el, label: normalize(el.getAttribute('aria-label') || el.textContent) }))
-    .filter(({ label }) => label.length > 0 && label.length <= 48 && datePattern.test(label));
+  const dateItems = Array.from(document.querySelectorAll('.schedule-tab-wrapper .schedule-tab-item'))
+    .filter(visible)
+    .map((el) => {
+      const dateNode = el.querySelector('.schedule-tab-dates');
+      return {
+        label: normalize(dateNode?.textContent),
+        selected: el.classList.contains('is-selected'),
+        clickable: !el.classList.contains('is-selected')
+      };
+    })
+    .filter(({ label }) => label.length > 0 && label.length <= 48);
   const dates = [];
   const dateSeen = new Set();
-  for (const item of dateNodes) {
-    const key = item.label + '|' + selectedSignal(item.el) + '|' + clickable(item.el);
-    if (dateSeen.has(key)) continue;
-    dateSeen.add(key);
-    dates.push({ label: item.label, selected: selectedSignal(item.el), clickable: clickable(item.el) });
+  for (const item of dateItems) {
+    if (dateSeen.has(item.label)) continue;
+    dateSeen.add(item.label);
+    dates.push(item);
     if (dates.length >= 40) break;
   }
 
@@ -588,7 +588,7 @@ export class TohoReadAdapter {
         if (clickableLabels.length !== 1) {
           throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO requested date is not represented by one unique visible date control.", { date: requestedDate, candidates: clickableLabels });
         }
-        await this.runtime.clickControl(clickableLabels[0]!);
+        await this.clickDateControl(clickableLabels[0]!);
         let selected = false;
         for (let attempt = 0; attempt < 16; attempt += 1) {
           semantic = await this.runtime.evaluateSemanticState<ScheduleSnapshot>("toho", SCHEDULE_EXPRESSION);
@@ -628,6 +628,33 @@ export class TohoReadAdapter {
       sourceUrl: semantic.url,
       showtimes
     };
+  }
+
+  private async clickDateControl(label: string): Promise<void> {
+    const targetLabel = JSON.stringify(label);
+    const semantic = await this.runtime.evaluateSemanticState<DateClickState>("toho", `(() => {
+      const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+      const rendered = (el) => {
+        const r = el.getBoundingClientRect();
+        const s = getComputedStyle(el);
+        return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
+      };
+      const target = ${targetLabel};
+      const matches = Array.from(document.querySelectorAll('.schedule-tab-wrapper .schedule-tab-item'))
+        .filter(rendered)
+        .filter((el) => normalize(el.querySelector('.schedule-tab-dates')?.textContent) === target);
+      if (matches.length !== 1) return { matched: matches.length, clicked: false };
+      const item = matches[0];
+      if (!item.classList.contains('is-selected')) item.click();
+      return { matched: 1, clicked: true };
+    })()`);
+    if (semantic.value.matched !== 1 || semantic.value.clicked !== true) {
+      throw new BrowserRuntimeError(
+        "UI_STATE_CHANGED",
+        "TOHO requested date is not represented by one unique reviewed public schedule tab.",
+        { label, matched: semantic.value.matched }
+      );
+    }
   }
 
   private async resolveTheater(query: string): Promise<TohoTheater> {
