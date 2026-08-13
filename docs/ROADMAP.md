@@ -44,7 +44,7 @@ Exit criteria:
 
 目的: generic page readから、映画館ドメインを理解するread-only adapterへ移行する。
 
-状態: 🟡 TOHO / AEON実装済み、109が次
+状態: ✅ TOHO / AEON / 109実装済み。live smoke実行確認は低頻度の別タスク
 
 ### TOHOシネマズ
 
@@ -81,21 +81,27 @@ AEONではrendered public UIだけを読みます。`schedule.json` 等のprivat
 
 ### 109シネマズ
 
-- 🟡 現行公式導線を確認
-- ⬜ 劇場選択semanticを特定
-- ⬜ 日付選択semanticを特定
-- ⬜ 作品/上映カードsemanticを特定
-- ⬜ format/language正規化
-- ⬜ provider-specific bounded reader
-- ⬜ stale-state check
-- ⬜ unit test
-- ⬜ 非購入live smoke test
+- ✅ 現行公式導線を確認
+- ✅ 公式rootの劇場blockから劇場選択semanticを特定
+- ✅ 劇場ページのexplicit date hrefから日付semanticを特定
+- ✅ `/[slug]/schedules/YYYYMMDD.html...` のpublic routeを確認
+- ✅ 通常館とプレミアム新宿でquery形が異なることを考慮し、queryを推測しない
+- ✅ 作品/上映時間range/screen semantic
+- ✅ format/language/availability正規化
+- ✅ provider-specific bounded semantic reader
+- ✅ route / theater / date / grouping stale-state check
+- ✅ wrong route / ambiguous grouping / unresolved movie-screenでfail closed
+- ✅ unit test
+- ✅ 非購入live smoke script追加
+- 🟡 実ブラウザでのlive smoke実行確認
+
+109ではrootや劇場名からschedule URLを合成せず、rendered public UIに明示された劇場link・日付linkだけを利用します。`オンラインチケット購入` 等の購入導線はread adapterからclickしません。
 
 目標tools:
 
-- `list_theaters` — TOHO / AEON有効
-- `get_showtimes` — TOHO / AEON有効
-- `find_showtimes` — 3社横断normalization後に追加予定
+- `list_theaters` — TOHO / AEON / 109有効
+- `get_showtimes` — TOHO / AEON / 109有効
+- `find_showtimes` — Phase 2の共通normalization後に追加
 
 Exit criteria:
 
@@ -108,18 +114,44 @@ Exit criteria:
 
 目的: 3つの個別adapterを、1つの映画館検索体験にする。
 
-状態: ⬜ 予定
+状態: 🟡 次に着手
 
-- ⬜ 共通 `Theater` schema
-- ⬜ 共通 `Showtime` schema
-- ⬜ format/language normalization
+### P2.1 共通schema
+
+- 🟡 共通 `Theater` schema
+- 🟡 共通 `Showtime` schema
+- 🟡 provider-specific ID / aliases / display nameの整理
+- 🟡 `dateAvailable` / `availableDates` contract
+- 🟡 start/end timeのoptional/required整理
+- 🟡 format vocabulary統一
+- 🟡 language統一
+- 🟡 screen表現統一
+- 🟡 availability `unknown / limited / sold_out / unavailable` の意味固定
+- 🟡 source URL / provenance固定
+- 🟡 movie display titleのprovider差を壊さない方針
+
+schemaは「各providerの最小公倍数を雑に文字列化する」のではなく、現在すでに返しているsemantic factsを明示contractへ移す。provider固有route/selectorは共通schemaへ漏らさない。
+
+### P2.2 `find_showtimes`
+
 - ⬜ TOHO / AEON / 109横断検索
 - ⬜ area / movie / date / before / after / format filter
 - ⬜ deterministic ranking
-- ⬜ providerアクセス数の上限
+- ⬜ provider fan-out数の上限
+- ⬜ 1 provider failure / ambiguous parseを明示するresult model
+- ⬜ request単位のbounded concurrency
+- ⬜ same Chrome/CDP sessionを維持
 - ⬜ `maps-browser-mcp`等とのcomposition hook
 
 横断検索も毎回オンデマンドです。定期クロールによるindexは作りません。
+
+特に以下は先に設計します。
+
+1. provider failureを「上映なし」と同一視しない
+2. 一社でfail closedした場合に、他社のpartial resultだけを完全結果のように返さない
+3. provider-wide全劇場scanをdefaultにしない
+4. area解決を本MCP内の巨大な地理DBへ発展させない
+5. browser sessionをproviderごとに再起動しない
 
 ## Phase 3 — 座席表
 
@@ -254,11 +286,12 @@ providerごとに必須:
 
 1. ✅ TOHO read adapter
 2. ✅ AEON read adapter
-3. 109 read adapter
-4. cross-provider normalized search
-5. seat mapをproviderごとに追加
-6. checkout preparationをproviderごとに追加
-7. final purchaseはprovider監査後のみ
-8. Public release hardening
+3. ✅ 109 read adapter
+4. 🟡 common Theater / Showtime schema
+5. `find_showtimes` bounded cross-provider search
+6. seat mapをproviderごとに追加
+7. checkout preparationをproviderごとに追加
+8. final purchaseはprovider監査後のみ
+9. Public release hardening
 
 providerごとに難易度や利用条件が違うため、feature parityを無理に揃えません。capability単位で安全にdegradeできる設計を優先します。

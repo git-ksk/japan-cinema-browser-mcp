@@ -2,7 +2,8 @@
 
 初回Private MVPレビュー日: 2026-08-12  
 TOHO Phase 1 read adapterレビュー日: 2026-08-13  
-AEON Phase 1 read adapterレビュー日: 2026-08-13
+AEON Phase 1 read adapterレビュー日: 2026-08-13  
+109 Phase 1 read adapterレビュー日: 2026-08-13
 
 この文書は実装上の対応範囲と確認状況を管理するためのものです。法的助言を目的としたものではありません。購入機能を有効化する前、およびPublic化前には、各providerの現行利用規約・サイトポリシー・実際のUIを再確認します。
 
@@ -12,7 +13,7 @@ AEON Phase 1 read adapterレビュー日: 2026-08-13
 |---|---|---|---|
 | TOHOシネマズ | `https://www.tohotheater.jp/` | 公式domain内navigation / bounded read / 劇場・日付・作品・上映回semantic read | 無効。seat/checkout未レビュー |
 | イオンシネマ | `https://www.aeoncinema.com/` | 公式domain内navigation / bounded read / 劇場・日付・作品・上映回semantic read | 無効。seat/checkout未レビュー |
-| 109シネマズ | `https://109cinemas.net/` | 公式domain内navigation / bounded read | 無効。live flow確認前 |
+| 109シネマズ | `https://109cinemas.net/` | 公式domain内navigation / bounded read / 劇場・日付・作品・上映回semantic read | 無効。seat/checkout未レビュー |
 
 ## 共通ルール
 
@@ -32,16 +33,16 @@ AEON Phase 1 read adapterレビュー日: 2026-08-13
 |---|---:|---:|---:|
 | 公式rootを開く | ✅ | ✅ | ✅ |
 | Generic bounded read | ✅ | ✅ | ✅ |
-| 劇場一覧/選択semantic | ✅ | ✅ | 🟡 |
-| 上映情報semantic | ✅ | ✅ | 🟡 |
+| 劇場一覧/選択semantic | ✅ | ✅ | ✅ |
+| 上映情報semantic | ✅ | ✅ | ✅ |
 | 座席表read | ⬜ | ⬜ | ⬜ |
 | 座席選択 | ⬜ | ⬜ | ⬜ |
 | Checkout preparation | ⬜ | ⬜ | ⬜ |
 | Final purchase | ⬜ | ⬜ | ⬜ |
 
-`✅` はそのcapabilityについて実装済み、`🟡` は次に確認/実装する項目、`⬜` は未着手を表します。
+`✅` はそのcapabilityについて実装済み、`⬜` は未着手を表します。
 
-TOHO/AEONの`✅`はread-only adapterの実装を表し、seat selectionやpurchase capabilityの解禁を意味しません。現在は全providerで `purchaseSubmission=false` です。
+3社のread-only `✅` はseat selectionやpurchase capabilityの解禁を意味しません。現在は全providerで `seatMap=false / seatSelection=false / checkoutPreparation=false / purchaseSubmission=false` です。
 
 ## TOHO Phase 1 Read Adapter
 
@@ -78,12 +79,51 @@ TOHOの公開UIには、複数の劇場名が1つのschedule routeを共有す�
 
 非購入live smokeは `npm run smoke:aeon` として通常CIから分離します。
 
+## 109 Phase 1 Read Adapter
+
+2026-08-13時点で以下の公式公開導線・policyを確認しています。
+
+- 劇場一覧: `https://109cinemas.net/` の「109シネマズの劇場」block
+- 劇場ページ: rootのvisible linkから `https://109cinemas.net/{slug}/`
+- schedule: 劇場ページの日付controlに明示された `https://109cinemas.net/{slug}/schedules/YYYYMMDD.html...`
+- 109シネマズ公式サイトポリシー
+- 東急レクリエーションの全般サイトポリシー
+- チケット購入方法
+
+通常館では `?theater_code=...` の例を確認していますが、プレミアム新宿ではquery形が異なります。adapterはquery仕様を推測・生成せず、rendered public UIのhrefをそのまま採用し、navigation後にhostname/path/query/date/theater identityを再検証します。
+
+公開schedule pageから以下をcompact factへ正規化します。
+
+- movie
+- start/end time
+- screen
+- format
+- 字幕/吹替
+- explicit availability
+
+`オンラインチケット購入` や上映回の購入導線はvisible read contextとして存在してもadapterからclickしません。
+
+重要なfail-closed条件:
+
+- theater block / schedule sectionがreviewed shapeから外れた
+- explicit theater/date routeがofficial exact host/pathから外れた
+- lookalike / credentials / non-default port
+- wrong theater / wrong date / redirect
+- visible date labelとhrefのdate mismatch
+- ambiguous time grouping
+- movie/screenを一意にbindingできない
+- rowsなし + explicit empty stateなし
+
+非購入live smokeは `npm run smoke:109` として通常CIから分離します。
+
+詳細は [`providers/109.md`](./providers/109.md) を参照してください。
+
 ## MCP Tools
 
-- `list_theaters` — TOHO / AEON semantic capability有効
-- `get_showtimes` — TOHO / AEON semantic capability有効
+- `list_theaters` — TOHO / AEON / 109 semantic capability有効
+- `get_showtimes` — TOHO / AEON / 109 semantic capability有効
 
-109で同じtoolを呼んだ場合は `UNSUPPORTED_CAPABILITY` へfail closedし、generic fuzzy automationへfallbackしません。
+無効化されたseat/checkout/purchase capabilityをgeneric fuzzy automationへfallbackしません。
 
 ## Provider Capabilityを上げる前のチェック
 
@@ -106,8 +146,6 @@ TOHOの公開UIには、複数の劇場名が1つのschedule routeを共有す�
 
 ## Feature Parityについて
 
-3社で同じ機能を同時に提供することは必須ではありません。
+3社のread-only Phase 1 capabilityは揃いましたが、内部UI・route・provider固有schemaまで同一という意味ではありません。
 
-TOHO/AEONでshowtimesが有効でも、109はgeneric bounded readのまま維持できます。無効化されたcapabilityをgeneric fuzzy automationで黙って代替しません。
-
-無理に同等機能へ揃えるより、providerごとに安全に使えるcapabilityだけを正確にadvertiseする方針です。
+次は共通 `Theater` / `Showtime` schemaを明示し、そのcontractを通して `find_showtimes` を実装します。横断検索でもproviderごとのfail-closed境界を維持し、一社失敗を曖昧な部分結果として隠しません。

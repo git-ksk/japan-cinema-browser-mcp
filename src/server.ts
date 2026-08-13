@@ -10,6 +10,7 @@ import {
   isFinalPurchaseLabel,
   type CinemaProviderId
 } from "./providers.js";
+import { Cinemas109ReadAdapter } from "./providers/109/adapter.js";
 import { AeonReadAdapter } from "./providers/aeon/adapter.js";
 import { TohoReadAdapter } from "./providers/toho/adapter.js";
 import { PurchaseGate, PurchaseGateError, type PurchaseSummary } from "./purchase-gate.js";
@@ -20,6 +21,7 @@ const chrome = new ChromeProcess(config.browser);
 const runtime = new CinemaBrowserRuntime(chrome, config.policy.maxReadChars);
 const tohoReadAdapter = new TohoReadAdapter(runtime);
 const aeonReadAdapter = new AeonReadAdapter(runtime);
+const cinemas109ReadAdapter = new Cinemas109ReadAdapter(runtime);
 const purchaseGate = new PurchaseGate(config.policy.confirmationTtlMs);
 
 const providerSchema = z.enum(["toho", "aeon", "109"]);
@@ -64,9 +66,10 @@ function requireReadAdapter(provider: CinemaProviderId, capability: "theaters" |
   assertProviderCapability(provider, capability);
   if (provider === "toho") return tohoReadAdapter;
   if (provider === "aeon") return aeonReadAdapter;
+  if (provider === "109") return cinemas109ReadAdapter;
   throw new ProviderPolicyError(
     "UNSUPPORTED_CAPABILITY",
-    `${CINEMA_PROVIDERS[provider].name} ${capability} adapter is not available.`
+    `Read adapter for '${capability}' is not available.`
   );
 }
 
@@ -142,7 +145,7 @@ export function buildServer(): McpServer {
     "list_theaters",
     {
       title: "List cinema theaters",
-      description: "Read reviewed theater controls from the provider's current official public UI. TOHO Cinemas and AEON Cinema are enabled in Phase 1; unsupported provider capabilities fail closed.",
+      description: "Read reviewed theater controls from the provider's current official public UI. TOHO Cinemas, AEON Cinema, and 109 Cinemas are enabled in Phase 1; unsupported provider capabilities fail closed.",
       inputSchema: z.object({
         provider: providerSchema,
         query: shortText.optional()
@@ -156,7 +159,7 @@ export function buildServer(): McpServer {
     "get_showtimes",
     {
       title: "Get cinema showtimes",
-      description: "Read theater/date/movie/showtime facts from the provider's rendered official public UI. TOHO Cinemas and AEON Cinema are enabled. This never calls private/internal APIs and never enters the purchase flow.",
+      description: "Read theater/date/movie/showtime facts from the provider's rendered official public UI. TOHO Cinemas, AEON Cinema, and 109 Cinemas are enabled. This never calls private/internal APIs and never enters the purchase flow.",
       inputSchema: z.object({
         provider: providerSchema,
         theater: shortText,

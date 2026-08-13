@@ -95,9 +95,14 @@ Private MVPでは、次の基盤まで実装済みです。
 - イオンシネマの公式「劇場を探す」UIからの劇場一覧semantic read
 - イオンシネマの公開 `theater.aeoncinema.com/theaters/{slug}` schedule route利用
 - イオンシネマの日付・作品・上映時間・screen・format/language semantic read
-- TOHO/AEONともUI変更・曖昧状態でfail closed
+- 109シネマズ公式トップの劇場ブロックからの劇場一覧semantic read
+- 109シネマズ各劇場ページに表示された公開日付linkからのschedule route discovery
+- 109シネマズの日付・作品・上映時間・screen・format/language/availability semantic read
+- TOHO / AEON / 109ともUI変更・曖昧状態・identity mismatchでfail closed
 
-Phase 1ではTOHOとAEONのread-only adapterを有効化しています。109はgeneric bounded readのままで、provider固有semantic adapterはまだ有効化していません。
+Phase 1ではTOHO / AEON / 109の3社read-only adapterを有効化しています。seat map / seat selection / checkout preparation / purchase submissionは全社falseのままです。
+
+109は `https://109cinemas.net/` の表示中劇場linkと、各劇場ページに表示された `/[theater]/schedules/YYYYMMDD.html...` の明示hrefだけを利用します。slug・日付route・query値を推測して生成しません。`オンラインチケット購入` 等の購入導線はread contextとして表示されてもadapterからclickしません。
 
 ## セットアップ
 
@@ -169,8 +174,8 @@ CINEMA_ENABLE_PURCHASE=true npm start
 - `navigate_cinema_official` — 許可済み公式ドメイン内だけ移動する
 - `read_cinema_page` — 表示中情報を上限付きで読む
 - `extract_showtime_candidates` — 表示中の上映時刻候補を抽出する
-- `list_theaters` — providerの公式公開UIから劇場をsemanticに読む。現在TOHO/AEON有効
-- `get_showtimes` — 劇場・日付・作品・上映回をsemanticに読む。現在TOHO/AEON有効
+- `list_theaters` — providerの公式公開UIから劇場をsemanticに読む。TOHO / AEON / 109有効
+- `get_showtimes` — 劇場・日付・作品・上映回をsemanticに読む。TOHO / AEON / 109有効
 - `click_cinema_control` — 表示中の通常操作を実行する
 - `fill_cinema_field` — 非機密フィールドだけ入力する
 - `prepare_purchase_confirmation` — 現在の購入内容を確認用に固定する
@@ -190,9 +195,16 @@ providerの非購入live smokeは通常CIには含めず、低頻度で明示実
 ```bash
 npm run smoke:toho
 npm run smoke:aeon
+npm run smoke:109
 ```
 
 これらのsmoke testは公式公開UIの劇場一覧・上映画面を読むだけで、座席選択や購入操作は行いません。
+
+## 次の段階
+
+3社のread capabilityが揃ったため、次はprovider固有resultを直接結合せず、共通 `Theater` / `Showtime` schemaを先に定義してから `find_showtimes` を追加します。
+
+残る主な差分は、劇場ID/alias表現、`dateAvailable`、format語彙、availabilityの解釈、作品名表示の差です。横断検索はオンデマンドのbounded fan-outに限定し、provider-wide indexやbackground crawlは導入しません。
 
 ## ドキュメント
 
