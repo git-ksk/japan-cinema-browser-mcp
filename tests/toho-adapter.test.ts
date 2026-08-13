@@ -72,7 +72,7 @@ test("TOHO theater snapshot groups multiple visible theater aliases sharing one 
   rows.push({
     id: "001",
     name: "TOHOシネマズ 別館",
-    url: "https://hlo.tohotheater.jp/net/schedule/001/TNPI2000J01.do"
+    url: "https://www.tohotheater.jp/net/schedule/001/TNPI2000J01.do"
   });
   const result = normalizeTohoTheaterSnapshot({ rows }, THEATER_LIST_URL);
   const grouped = result.find((theater) => theater.id === "001");
@@ -138,6 +138,35 @@ test("TOHO showtime normalization returns compact semantic facts and does not mi
   assert.equal(result.showtimes[1]?.endTime, undefined);
   assert.deepEqual(result.showtimes[1]?.formats, ["SCREEN X"]);
   assert.equal(result.showtimes[1]?.screen, undefined);
+});
+
+test("TOHO accepts the observed official schedule subdomain redirect only when the reviewed theater path is unchanged", async () => {
+  const rows = theaterRows();
+  rows[0] = {
+    id: "001",
+    name: "TOHOシネマズ テスト1",
+    url: "https://www.tohotheater.jp/net/schedule/001/TNPI2000J01.do"
+  };
+  const observedScheduleUrl = "https://hlo.tohotheater.jp/net/schedule/001/TNPI2000J01.do";
+  const runtime = fakeRuntime([
+    { url: THEATER_LIST_URL, value: { rows } },
+    {
+      url: observedScheduleUrl,
+      value: {
+        theaterNames: ["TOHOシネマズ テスト1"],
+        scheduleHeadingCount: 1,
+        dates: [{ label: "2026年8月13日", selected: true, clickable: false }],
+        showtimes: [{ label: "10:00 ～ 12:05", titleCandidates: ["映画A"], context: "スクリーン 1" }],
+        emptySchedule: false
+      }
+    }
+  ]);
+  const adapter = new TohoReadAdapter(runtime);
+  const result = await adapter.getShowtimes({ theater: "テスト1" });
+
+  assert.equal(result.theater.id, "001");
+  assert.equal(result.sourceUrl, observedScheduleUrl);
+  assert.equal(result.showtimes[0]?.sourceUrl, observedScheduleUrl);
 });
 
 test("TOHO showtime normalization fails closed when a visible showtime cannot be tied to a movie", async () => {
