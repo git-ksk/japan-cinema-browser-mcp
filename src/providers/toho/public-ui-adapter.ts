@@ -79,7 +79,25 @@ export class TohoPublicUiReadAdapter extends TohoReadAdapter {
 
   override async listTheaters(query?: string) {
     await this.ensureTheaterRegionsExpanded();
-    return super.listTheaters(query);
+    const result = await super.listTheaters(query);
+    if (result.theaters.length !== 1) return result;
+
+    const theater = result.theaters[0]!;
+    const expected = new URL(theater.url);
+    const observedHref = await this.uiRuntime.navigate(theater.url, "toho");
+    const observed = new URL(observedHref);
+    if (observed.pathname !== expected.pathname) {
+      throw new BrowserRuntimeError(
+        "UI_STATE_CHANGED",
+        "TOHO schedule redirect changed the reviewed theater route.",
+        { expectedPath: expected.pathname, observedPath: observed.pathname }
+      );
+    }
+
+    return {
+      ...result,
+      theaters: [{ ...theater, url: observed.href }]
+    };
   }
 
   private async ensureTheaterRegionsExpanded(): Promise<void> {
