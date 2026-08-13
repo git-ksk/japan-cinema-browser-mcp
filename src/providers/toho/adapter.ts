@@ -3,6 +3,7 @@ import { assertOfficialUrl } from "../../providers.js";
 
 const TOHO_THEATER_LIST_URL = "https://www.tohotheater.jp/theater/find.html";
 const TOHO_SCHEDULE_PATH = /^\/net\/schedule\/(\d{3})\/TNPI2000J01\.do$/;
+const MIN_THEATER_SCHEDULE_LINKS = 20;
 
 export interface TohoTheater {
   provider: "toho";
@@ -36,6 +37,11 @@ interface TheaterSnapshotRow {
 
 interface TheaterSnapshot {
   rows?: unknown;
+}
+
+interface TheaterRegionExpansionState {
+  regionCount?: unknown;
+  visibleScheduleLinks?: unknown;
 }
 
 interface ScheduleDateCandidate {
@@ -78,6 +84,50 @@ const THEATER_LIST_EXPRESSION = `(() => {
     rows.push({ id: match[1], name, url: url.href });
   }
   return { rows: rows.slice(0, 160) };
+})()`;
+
+const EXPAND_THEATER_REGIONS_EXPRESSION = `(() => {
+  const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+  const rendered = (el) => {
+    const s = getComputedStyle(el);
+    return s.visibility !== 'hidden' && s.display !== 'none';
+  };
+  const schedulePath = /^\\/net\\/schedule\\/\\d{3}\\/TNPI2000J01\\.do$/;
+  const regionPrefixes = ['北海道地区', '東北地区', '関東地区', '中部地区', '関西地区', '中国地区', '四国地区', '九州地区'];
+  const headings = Array.from(document.querySelectorAll('h3.theater-list-title.js-toggle-button'))
+    .filter((el) => {
+      if (!rendered(el)) return false;
+      const label = normalize(el.textContent);
+      return regionPrefixes.some((prefix) => label.startsWith(prefix));
+    });
+  const regions = headings.map((heading) => {
+    const panel = heading.nextElementSibling;
+    const validPanel = panel && panel.matches('.theater-list-toggle-panel.js-toggle-panel') ? panel : null;
+    return { heading, panel: validPanel };
+  });
+  const scheduleLinksInOpenPanels = () => {
+    let count = 0;
+    for (const { panel } of regions) {
+      if (!panel || !rendered(panel)) continue;
+      for (const anchor of Array.from(panel.querySelectorAll('a[href]'))) {
+        try {
+          const url = new URL(anchor.href, location.href);
+          if (schedulePath.test(url.pathname)) count += 1;
+        } catch {}
+      }
+    }
+    return count;
+  };
+  if (scheduleLinksInOpenPanels() < ${MIN_THEATER_SCHEDULE_LINKS}) {
+    for (const { heading, panel } of regions) {
+      if (!panel || rendered(panel)) continue;
+      heading.click();
+    }
+  }
+  return {
+    regionCount: regions.filter(({ panel }) => Boolean(panel)).length,
+    visibleScheduleLinks: scheduleLinksInOpenPanels()
+  };
 })()`;
 
 const SCHEDULE_EXPRESSION = `(() => {
@@ -194,12 +244,16 @@ function normalizeTheaterQuery(value: string): string {
 }
 
 function routeKey(url: URL): string {
-  return `${url.origin}${url.pathname}`;
+  return url.pathname;
 }
 
 function stringArray(value: unknown, limit: number): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is string => typeof item === "string").map(normalizeText).filter(Boolean).slice(0, limit);
+}
+
+function countValue(value: unknown): number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : 0;
 }
 
 function tokyoTodayIso(now = new Date()): string {
@@ -283,7 +337,7 @@ export function normalizeTohoTheaterSnapshot(snapshot: TheaterSnapshot, sourceUr
       sourceUrl
     };
   }).sort((a, b) => a.name.localeCompare(b.name, "ja"));
-  if (theaters.length < 20) {
+  if (theaters.length < MIN_THEATER_SCHEDULE_LINKS) {
     throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO theater list extraction returned too few schedule groups; the public UI may have changed.", { count: theaters.length });
   }
   return theaters;
@@ -449,7 +503,31 @@ export class TohoReadAdapter {
     if (!currentUrl.startsWith(TOHO_THEATER_LIST_URL)) {
       await this.runtime.navigate(TOHO_THEATER_LIST_URL, "toho");
     }
-    const semantic = await this.runtime.evaluateSemanticState<TheaterSnapshot>("toho", THEATER_LIST_EXPRESSION);
+
+    let semantic = await this.runtime.evaluateSemanticState<TheaterSnapshot>("toho", THEATER_LIST_EXPRESSION);
+    if (!Array.isArray(semantic.value.rows) || semantic.value.rows.length < MIN_THEATER_SCHEDULE_LINKS) {
+      let regionCount = 0;
+      let visibleScheduleLinks = 0;
+      for (let attempt = 0; attempt < 16; attempt += 1) {
+        const expansion = await this.runtime.evaluateSemanticState<TheaterRegionExpansionState>(
+          "toho",
+          EXPAND_THEATER_REGIONS_EXPRESSION
+        );
+        regionCount = countValue(expansion.value.regionCount);
+        visibleScheduleLinks = countValue(expansion.value.visibleScheduleLinks);
+        if (visibleScheduleLinks >= MIN_THEATER_SCHEDULE_LINKS) break;
+        await sleep(180);
+      }
+      if (visibleScheduleLinks < MIN_THEATER_SCHEDULE_LINKS) {
+        throw new BrowserRuntimeError(
+          "UI_STATE_CHANGED",
+          "TOHO regional theater controls did not expose enough reviewed public schedule links within the bounded wait.",
+          { regionCount, visibleScheduleLinks }
+        );
+      }
+      semantic = await this.runtime.evaluateSemanticState<TheaterSnapshot>("toho", THEATER_LIST_EXPRESSION);
+    }
+
     let theaters = normalizeTohoTheaterSnapshot(semantic.value, semantic.url);
     if (query?.trim()) {
       const needle = normalizeTheaterQuery(query);
@@ -472,9 +550,17 @@ export class TohoReadAdapter {
   }> {
     const theater = await this.resolveTheater(input.theater);
     await this.runtime.navigate(theater.url, "toho");
+
     let semantic = await this.runtime.evaluateSemanticState<ScheduleSnapshot>("toho", SCHEDULE_EXPRESSION);
-    assertScheduleIdentity(semantic.value, theater, semantic.url);
     let dates = normalizeDateCandidates(semantic.value);
+    for (let attempt = 0; attempt < 16; attempt += 1) {
+      const theaterNames = stringArray(semantic.value.theaterNames, 4).filter((name) => /^TOHOシネマズ\s+/.test(name));
+      if (semantic.value.scheduleHeadingCount === 1 && dates.length > 0 && theaterNames.length > 0) break;
+      await sleep(180);
+      semantic = await this.runtime.evaluateSemanticState<ScheduleSnapshot>("toho", SCHEDULE_EXPRESSION);
+      dates = normalizeDateCandidates(semantic.value);
+    }
+    assertScheduleIdentity(semantic.value, theater, semantic.url);
     if (dates.length === 0) {
       throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO date controls could not be read from the rendered public schedule UI.");
     }
