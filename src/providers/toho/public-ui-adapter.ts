@@ -89,35 +89,22 @@ export class TohoPublicUiReadAdapter extends TohoReadAdapter {
       await this.uiRuntime.navigate(TOHO_THEATER_LIST_URL, "toho");
     }
 
-    let semantic = await this.uiRuntime.evaluateSemanticState<TheaterRegionExpansionState>(
-      "toho",
-      EXPAND_THEATER_REGIONS_EXPRESSION
-    );
-    let regionCount = expansionCount(semantic.value.regionCount);
-    let visibleScheduleLinks = expansionCount(semantic.value.visibleScheduleLinks);
-    if (visibleScheduleLinks >= MIN_THEATER_SCHEDULE_LINKS) return;
-    if (regionCount === 0) {
-      throw new BrowserRuntimeError(
-        "UI_STATE_CHANGED",
-        "TOHO theater list no longer exposes the reviewed visible regional headings."
-      );
-    }
-
-    for (let attempt = 0; attempt < 12; attempt += 1) {
-      await sleep(150);
-      semantic = await this.uiRuntime.evaluateSemanticState<TheaterRegionExpansionState>(
+    let regionCount = 0;
+    let visibleScheduleLinks = 0;
+    for (let attempt = 0; attempt < 16; attempt += 1) {
+      const semantic = await this.uiRuntime.evaluateSemanticState<TheaterRegionExpansionState>(
         "toho",
         EXPAND_THEATER_REGIONS_EXPRESSION
       );
       regionCount = expansionCount(semantic.value.regionCount);
       visibleScheduleLinks = expansionCount(semantic.value.visibleScheduleLinks);
       if (visibleScheduleLinks >= MIN_THEATER_SCHEDULE_LINKS) return;
-      if (regionCount === 0) break;
+      await sleep(180);
     }
 
     throw new BrowserRuntimeError(
       "UI_STATE_CHANGED",
-      "TOHO regional theater controls did not expose enough reviewed public schedule links after expansion.",
+      "TOHO regional theater controls did not expose enough reviewed public schedule links within the bounded wait.",
       { regionCount, visibleScheduleLinks }
     );
   }
