@@ -75,36 +75,17 @@ const THEATER_LIST_EXPRESSION = `(() => {
     const s = getComputedStyle(el);
     return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' && !el.disabled;
   };
-  const before = (a, b) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
-  const prefectures = new Set(${JSON.stringify(PREFECTURES)});
   const headings = Array.from(document.querySelectorAll('h1,h2,h3,h4,h5,h6')).filter(visible);
   const headingCount = headings.filter((el) => normalize(el.textContent) === '劇場を探す').length;
-  const boundary = Array.from(document.querySelectorAll('h1,h2,h3,h4,h5,h6,div,p,span'))
-    .filter(visible)
-    .find((el) => /^STEP2上映日を選択/.test(normalize(el.textContent))) || null;
-  const controls = Array.from(document.querySelectorAll('a,button,[role="button"],[role="link"]')).filter(visible);
-  const dataKeys = ['data-url','data-href','data-theater-url','data-cinema-url','data-link'];
   const rows = [];
-  for (const control of controls) {
-    if (boundary && !before(control, boundary)) continue;
-    const label = normalize(control.getAttribute('aria-label') || control.textContent);
+  for (const anchor of Array.from(document.querySelectorAll('a[href]'))) {
+    if (!visible(anchor)) continue;
+    let url;
+    try { url = new URL(anchor.href, location.href); } catch { continue; }
+    if (url.hostname !== 'www.aeoncinema.com' || !/^\\/cinema\\/[a-z0-9_-]+\\/?$/.test(url.pathname)) continue;
+    const label = normalize(anchor.getAttribute('aria-label') || anchor.textContent);
     if (!label || label.length > 140) continue;
-    let nearestHeading = null;
-    for (const heading of headings) {
-      if (before(heading, control)) nearestHeading = heading;
-    }
-    if (!nearestHeading || !prefectures.has(normalize(nearestHeading.textContent))) continue;
-    const href = control.matches('a[href]') ? control.href || '' : '';
-    let route = '';
-    let node = control;
-    for (let depth = 0; node && depth < 4; depth += 1, node = node.parentElement) {
-      if (route) break;
-      for (const key of dataKeys) {
-        const value = normalize(node.getAttribute?.(key));
-        if (value) { route = value; break; }
-      }
-    }
-    rows.push({ label, href, route });
+    rows.push({ label, href: url.href, route: '' });
     if (rows.length >= 160) break;
   }
   return { headingCount, rows };
