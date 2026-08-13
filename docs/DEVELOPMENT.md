@@ -360,4 +360,4 @@ runtime dependency追加時は次を説明できる状態にします。
 
 purchase submissionの場合は `PURCHASE_UNKNOWN` とduplicate submission防止テストも必須です。
 
-TOHO / AEON / 109 Phase 1は1〜5、7〜8を実装し、非購入live smoke scriptも追加済みです。実ブラウザでのlive smoke実行確認は通常CIから分離して管理します。
+TOHO / AEON / 109 Phase 1は1〜8を満たし、2026-08-13に3社の非購入live smoke greenを実ブラウザで確認済みです。live smokeは通常CIから分離して管理します。

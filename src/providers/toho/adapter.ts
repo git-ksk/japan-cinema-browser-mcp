@@ -3,6 +3,7 @@ import { assertOfficialUrl } from "../../providers.js";
 
 const TOHO_THEATER_LIST_URL = "https://www.tohotheater.jp/theater/find.html";
 const TOHO_SCHEDULE_PATH = /^\/net\/schedule\/(\d{3})\/TNPI2000J01\.do$/;
+const MIN_THEATER_SCHEDULE_LINKS = 20;
 
 export interface TohoTheater {
   provider: "toho";
@@ -36,6 +37,16 @@ interface TheaterSnapshotRow {
 
 interface TheaterSnapshot {
   rows?: unknown;
+}
+
+interface TheaterRegionExpansionState {
+  regionCount?: unknown;
+  visibleScheduleLinks?: unknown;
+}
+
+interface DateClickState {
+  matched?: unknown;
+  clicked?: unknown;
 }
 
 interface ScheduleDateCandidate {
@@ -80,6 +91,50 @@ const THEATER_LIST_EXPRESSION = `(() => {
   return { rows: rows.slice(0, 160) };
 })()`;
 
+const EXPAND_THEATER_REGIONS_EXPRESSION = `(() => {
+  const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+  const rendered = (el) => {
+    const s = getComputedStyle(el);
+    return s.visibility !== 'hidden' && s.display !== 'none';
+  };
+  const schedulePath = /^\\/net\\/schedule\\/\\d{3}\\/TNPI2000J01\\.do$/;
+  const regionPrefixes = ['北海道地区', '東北地区', '関東地区', '中部地区', '関西地区', '中国地区', '四国地区', '九州地区'];
+  const headings = Array.from(document.querySelectorAll('h3.theater-list-title.js-toggle-button'))
+    .filter((el) => {
+      if (!rendered(el)) return false;
+      const label = normalize(el.textContent);
+      return regionPrefixes.some((prefix) => label.startsWith(prefix));
+    });
+  const regions = headings.map((heading) => {
+    const panel = heading.nextElementSibling;
+    const validPanel = panel && panel.matches('.theater-list-toggle-panel.js-toggle-panel') ? panel : null;
+    return { heading, panel: validPanel };
+  });
+  const scheduleLinksInOpenPanels = () => {
+    let count = 0;
+    for (const { panel } of regions) {
+      if (!panel || !rendered(panel)) continue;
+      for (const anchor of Array.from(panel.querySelectorAll('a[href]'))) {
+        try {
+          const url = new URL(anchor.href, location.href);
+          if (schedulePath.test(url.pathname)) count += 1;
+        } catch {}
+      }
+    }
+    return count;
+  };
+  if (scheduleLinksInOpenPanels() < ${MIN_THEATER_SCHEDULE_LINKS}) {
+    for (const { heading, panel } of regions) {
+      if (!panel || rendered(panel)) continue;
+      heading.click();
+    }
+  }
+  return {
+    regionCount: regions.filter(({ panel }) => Boolean(panel)).length,
+    visibleScheduleLinks: scheduleLinksInOpenPanels()
+  };
+})()`;
+
 const SCHEDULE_EXPRESSION = `(() => {
   const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
   const visible = (el) => {
@@ -101,45 +156,43 @@ const SCHEDULE_EXPRESSION = `(() => {
     .filter((text) => /^TOHOシネマズ\\s+/.test(text))
     .slice(0, 4);
 
-  const datePattern = /(?:^|\\s)(?:20\\d{2}[.\\/年-])?(\\d{1,2})[.\\/月-](\\d{1,2})(?:日)?(?:\\s|\\(|（|$)/;
-  const selectedSignal = (el) => {
-    const own = [el.getAttribute('aria-current'), el.getAttribute('aria-selected'), el.className].map(normalize).join(' ');
-    const parent = el.parentElement
-      ? [el.parentElement.getAttribute('aria-current'), el.parentElement.getAttribute('aria-selected'), el.parentElement.className].map(normalize).join(' ')
-      : '';
-    return /(?:^|[\\s_-])(?:active|current|selected|on)(?:$|[\\s_-])/i.test(own + ' ' + parent) ||
-      /^(?:true|date|page)$/i.test(normalize(el.getAttribute('aria-current'))) ||
-      /^true$/i.test(normalize(el.getAttribute('aria-selected')));
-  };
-  const clickable = (el) => el.matches('a,button,[role="button"],[role="tab"],[role="link"]');
-  const dateNodes = Array.from(document.querySelectorAll('a,button,[role="button"],[role="tab"],[role="link"],li,span,time'))
-    .filter((el) => visible(el) && (clickable(el) || selectedSignal(el)))
-    .map((el) => ({ el, label: normalize(el.getAttribute('aria-label') || el.textContent) }))
-    .filter(({ label }) => label.length > 0 && label.length <= 48 && datePattern.test(label));
+  const dateItems = Array.from(document.querySelectorAll('.schedule-tab-wrapper .schedule-tab-item'))
+    .filter(visible)
+    .map((el) => {
+      const dateNode = el.querySelector('.schedule-tab-dates');
+      return {
+        label: normalize(dateNode?.textContent),
+        selected: el.classList.contains('is-selected'),
+        clickable: !el.classList.contains('is-selected')
+      };
+    })
+    .filter(({ label }) => label.length > 0 && label.length <= 48);
   const dates = [];
   const dateSeen = new Set();
-  for (const item of dateNodes) {
-    const key = item.label + '|' + selectedSignal(item.el) + '|' + clickable(item.el);
-    if (dateSeen.has(key)) continue;
-    dateSeen.add(key);
-    dates.push({ label: item.label, selected: selectedSignal(item.el), clickable: clickable(item.el) });
+  for (const item of dateItems) {
+    if (dateSeen.has(item.label)) continue;
+    dateSeen.add(item.label);
+    dates.push(item);
     if (dates.length >= 40) break;
   }
 
   const titleRejected = /^(?:上映スケジュール|この劇場の公開予定作品|販売期間外|購入|詳細|字幕|吹替|IMAX|MX4D|TCX|SCREEN\\s*X|Dolby|ATMOS|3D|2D|轟音|PREMIUM\\s+THEATER)$/i;
   const titleCandidate = (text) => text.length >= 2 && text.length <= 180 && !titleRejected.test(text) && !/^(?:\\d{1,2}[.:：]\\d{2})/.test(text);
-  const candidateSelectors = 'h3,h4,h5,h6,[class*="title" i],[class*="movie" i],[class*="film" i]';
-  const titleCandidatesFor = (control) => {
+  const titleCandidatesFor = (item) => {
+    const section = item.closest('.schedule-body-section-item');
+    if (!section || !visible(section) || !inScheduleRange(section)) return [];
     const result = [];
     const seen = new Set();
-    let parent = control.parentElement;
-    for (let depth = 0; parent && depth < 7; depth += 1, parent = parent.parentElement) {
-      const nodes = Array.from(parent.querySelectorAll(candidateSelectors))
-        .filter((el) => visible(el) && inScheduleRange(el) && before(el, control))
+    const selectorGroups = [
+      'h3,h4,h5,h6,[role="heading"]',
+      '[class*="title" i],[class*="movie" i],[class*="film" i]'
+    ];
+    for (const selectors of selectorGroups) {
+      const nodes = Array.from(section.querySelectorAll(selectors))
+        .filter((el) => visible(el) && inScheduleRange(el) && before(el, item))
         .map((el) => normalize(el.textContent))
         .filter(titleCandidate);
-      for (let i = nodes.length - 1; i >= 0; i -= 1) {
-        const text = nodes[i];
+      for (const text of nodes) {
         if (seen.has(text)) continue;
         seen.add(text);
         result.push(text);
@@ -148,23 +201,33 @@ const SCHEDULE_EXPRESSION = `(() => {
     }
     return result;
   };
-  const contextFor = (control) => {
-    let parent = control.parentElement;
-    for (let depth = 0; parent && depth < 6; depth += 1, parent = parent.parentElement) {
+  const contextFor = (item) => {
+    const ownText = normalize(item.innerText || item.textContent);
+    if (ownText.length >= 8 && ownText.length <= 650) return ownText;
+    let parent = item.parentElement;
+    for (let depth = 0; parent && depth < 4; depth += 1, parent = parent.parentElement) {
       const text = normalize(parent.innerText || parent.textContent);
       if (text.length >= 8 && text.length <= 650) return text;
     }
-    return normalize(control.textContent).slice(0, 240);
+    return ownText.slice(0, 240);
   };
 
   const timePattern = /(?:^|\\D)((?:[01]?\\d|2[0-3])[:：][0-5]\\d)(?!\\d)/;
-  const controls = Array.from(document.querySelectorAll('a,button,[role="button"],[role="link"]'))
+  const rows = Array.from(document.querySelectorAll('.schedule-body-section-item .schedule-item'))
     .filter((el) => visible(el) && inScheduleRange(el))
-    .map((el) => ({ el, label: normalize(el.getAttribute('aria-label') || el.textContent) }))
+    .map((el) => {
+      const start = normalize(el.querySelector('.time .start')?.textContent);
+      const end = normalize(el.querySelector('.time .end')?.textContent);
+      const timeNode = el.querySelector('.time');
+      const label = start && end
+        ? start + ' ～ ' + end
+        : normalize(timeNode?.textContent || el.getAttribute('aria-label') || el.textContent);
+      return { el, label };
+    })
     .filter(({ label }) => label.length > 0 && label.length <= 160 && timePattern.test(label));
   const showtimes = [];
   const showtimeSeen = new Set();
-  for (const item of controls) {
+  for (const item of rows) {
     const titles = titleCandidatesFor(item.el);
     const key = item.label + '|' + titles.join('|');
     if (showtimeSeen.has(key)) continue;
@@ -194,12 +257,16 @@ function normalizeTheaterQuery(value: string): string {
 }
 
 function routeKey(url: URL): string {
-  return `${url.origin}${url.pathname}`;
+  return url.pathname;
 }
 
 function stringArray(value: unknown, limit: number): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is string => typeof item === "string").map(normalizeText).filter(Boolean).slice(0, limit);
+}
+
+function countValue(value: unknown): number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : 0;
 }
 
 function tokyoTodayIso(now = new Date()): string {
@@ -283,7 +350,7 @@ export function normalizeTohoTheaterSnapshot(snapshot: TheaterSnapshot, sourceUr
       sourceUrl
     };
   }).sort((a, b) => a.name.localeCompare(b.name, "ja"));
-  if (theaters.length < 20) {
+  if (theaters.length < MIN_THEATER_SCHEDULE_LINKS) {
     throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO theater list extraction returned too few schedule groups; the public UI may have changed.", { count: theaters.length });
   }
   return theaters;
@@ -363,7 +430,7 @@ function normalizeScheduleRows(snapshot: ScheduleSnapshot, theater: TohoTheater,
     throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO schedule rows are unavailable from the rendered public UI.");
   }
   if (snapshot.showtimes.length === 0 && snapshot.emptySchedule !== true) {
-    throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO schedule page contains no recognizable showtime controls and no explicit empty-schedule state.");
+    throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO schedule page contains no recognizable rendered showtime rows and no explicit empty-schedule state.");
   }
   const result: TohoShowtime[] = [];
   const unresolved: string[] = [];
@@ -408,7 +475,7 @@ function normalizeScheduleRows(snapshot: ScheduleSnapshot, theater: TohoTheater,
     });
   }
   if (unresolved.length > 0) {
-    throw new BrowserRuntimeError("UI_STATE_CHANGED", "Some TOHO showtime controls could not be associated with one movie title; refusing a partial ambiguous result.", { unresolved: unresolved.slice(0, 8) });
+    throw new BrowserRuntimeError("UI_STATE_CHANGED", "Some TOHO rendered showtime rows could not be associated with one movie title; refusing a partial ambiguous result.", { unresolved: unresolved.slice(0, 8) });
   }
   const seen = new Set<string>();
   return result.filter((item) => {
@@ -449,7 +516,31 @@ export class TohoReadAdapter {
     if (!currentUrl.startsWith(TOHO_THEATER_LIST_URL)) {
       await this.runtime.navigate(TOHO_THEATER_LIST_URL, "toho");
     }
-    const semantic = await this.runtime.evaluateSemanticState<TheaterSnapshot>("toho", THEATER_LIST_EXPRESSION);
+
+    let semantic = await this.runtime.evaluateSemanticState<TheaterSnapshot>("toho", THEATER_LIST_EXPRESSION);
+    if (!Array.isArray(semantic.value.rows) || semantic.value.rows.length < MIN_THEATER_SCHEDULE_LINKS) {
+      let regionCount = 0;
+      let visibleScheduleLinks = 0;
+      for (let attempt = 0; attempt < 16; attempt += 1) {
+        const expansion = await this.runtime.evaluateSemanticState<TheaterRegionExpansionState>(
+          "toho",
+          EXPAND_THEATER_REGIONS_EXPRESSION
+        );
+        regionCount = countValue(expansion.value.regionCount);
+        visibleScheduleLinks = countValue(expansion.value.visibleScheduleLinks);
+        if (visibleScheduleLinks >= MIN_THEATER_SCHEDULE_LINKS) break;
+        await sleep(180);
+      }
+      if (visibleScheduleLinks < MIN_THEATER_SCHEDULE_LINKS) {
+        throw new BrowserRuntimeError(
+          "UI_STATE_CHANGED",
+          "TOHO regional theater controls did not expose enough reviewed public schedule links within the bounded wait.",
+          { regionCount, visibleScheduleLinks }
+        );
+      }
+      semantic = await this.runtime.evaluateSemanticState<TheaterSnapshot>("toho", THEATER_LIST_EXPRESSION);
+    }
+
     let theaters = normalizeTohoTheaterSnapshot(semantic.value, semantic.url);
     if (query?.trim()) {
       const needle = normalizeTheaterQuery(query);
@@ -472,9 +563,17 @@ export class TohoReadAdapter {
   }> {
     const theater = await this.resolveTheater(input.theater);
     await this.runtime.navigate(theater.url, "toho");
+
     let semantic = await this.runtime.evaluateSemanticState<ScheduleSnapshot>("toho", SCHEDULE_EXPRESSION);
-    assertScheduleIdentity(semantic.value, theater, semantic.url);
     let dates = normalizeDateCandidates(semantic.value);
+    for (let attempt = 0; attempt < 16; attempt += 1) {
+      const theaterNames = stringArray(semantic.value.theaterNames, 4).filter((name) => /^TOHOシネマズ\s+/.test(name));
+      if (semantic.value.scheduleHeadingCount === 1 && dates.length > 0 && theaterNames.length > 0) break;
+      await sleep(180);
+      semantic = await this.runtime.evaluateSemanticState<ScheduleSnapshot>("toho", SCHEDULE_EXPRESSION);
+      dates = normalizeDateCandidates(semantic.value);
+    }
+    assertScheduleIdentity(semantic.value, theater, semantic.url);
     if (dates.length === 0) {
       throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO date controls could not be read from the rendered public schedule UI.");
     }
@@ -502,7 +601,7 @@ export class TohoReadAdapter {
         if (clickableLabels.length !== 1) {
           throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO requested date is not represented by one unique visible date control.", { date: requestedDate, candidates: clickableLabels });
         }
-        await this.runtime.clickControl(clickableLabels[0]!);
+        await this.clickDateControl(clickableLabels[0]!);
         let selected = false;
         for (let attempt = 0; attempt < 16; attempt += 1) {
           semantic = await this.runtime.evaluateSemanticState<ScheduleSnapshot>("toho", SCHEDULE_EXPRESSION);
@@ -542,6 +641,33 @@ export class TohoReadAdapter {
       sourceUrl: semantic.url,
       showtimes
     };
+  }
+
+  private async clickDateControl(label: string): Promise<void> {
+    const targetLabel = JSON.stringify(label);
+    const semantic = await this.runtime.evaluateSemanticState<DateClickState>("toho", `(() => {
+      const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+      const rendered = (el) => {
+        const r = el.getBoundingClientRect();
+        const s = getComputedStyle(el);
+        return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
+      };
+      const target = ${targetLabel};
+      const matches = Array.from(document.querySelectorAll('.schedule-tab-wrapper .schedule-tab-item'))
+        .filter(rendered)
+        .filter((el) => normalize(el.querySelector('.schedule-tab-dates')?.textContent) === target);
+      if (matches.length !== 1) return { matched: matches.length, clicked: false };
+      const item = matches[0];
+      if (!item.classList.contains('is-selected')) item.click();
+      return { matched: 1, clicked: true };
+    })()`);
+    if (semantic.value.matched !== 1 || semantic.value.clicked !== true) {
+      throw new BrowserRuntimeError(
+        "UI_STATE_CHANGED",
+        "TOHO requested date is not represented by one unique reviewed public schedule tab.",
+        { label, matched: semantic.value.matched }
+      );
+    }
   }
 
   private async resolveTheater(query: string): Promise<TohoTheater> {

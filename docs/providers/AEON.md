@@ -119,7 +119,7 @@ Manual non-purchase smoke:
 npm run smoke:aeon
 ```
 
-smokeは公式劇場一覧と上映ページを読むだけです。seat selection / checkout / purchaseは行いません。通常CIには含めません。
+smokeは公式劇場一覧と上映ページを読むだけです。seat selection / checkout / purchaseは行いません。通常CIには含めません。2026-08-13の実ブラウザlive smokeはgreenを確認済みです。
 
 ## Seat Map確認項目
 

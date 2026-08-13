@@ -20,7 +20,16 @@ try {
   assert.equal(schedule.dateAvailable, true);
   assert.ok(schedule.availableDates.includes(schedule.date));
   assert.ok(schedule.sourceUrl.startsWith("https://"));
-  assert.ok(new URL(schedule.sourceUrl).hostname.endsWith("tohotheater.jp"));
+  const sourceUrl = new URL(schedule.sourceUrl);
+  assert.equal(sourceUrl.hostname, "hlo.tohotheater.jp");
+  assert.equal(sourceUrl.pathname, "/net/schedule/036/TNPI2000J01.do");
+  assert.ok(schedule.showtimes.length > 0, "expected at least one reviewed rendered public showtime row");
+  assert.ok(
+    schedule.showtimes.every((showtime) =>
+      showtime.sourceUrl === schedule.sourceUrl && showtime.movie.length > 0 && /^\d{2}:\d{2}$/.test(showtime.startTime)
+    ),
+    "expected every TOHO showtime to preserve movie/time/source identity"
+  );
 
   console.error(`[toho-live-smoke] ${schedule.theater.name} ${schedule.date}: ${schedule.showtimes.length} showtimes`);
 } finally {

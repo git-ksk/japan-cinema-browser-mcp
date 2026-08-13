@@ -57,7 +57,7 @@ AEON Phase 1 read adapterレビュー日: 2026-08-13
 
 TOHOの公開UIには、複数の劇場名が1つのschedule routeを共有するケースがあります。Phase 1 adapterはこれをaliasを持つschedule groupとして扱い、単純な「schedule ID = 1劇場名」前提には依存しません。
 
-非購入live smokeは `npm run smoke:toho` として低頻度・明示実行用に分離し、通常CIには含めません。
+非購入live smokeは `npm run smoke:toho` として低頻度・明示実行用に分離し、通常CIには含めません。2026-08-13の実ブラウザ確認では、TOHOシネマズ ららぽーと横浜（id `036`）でofficial redirect後もreviewed schedule pathnameとdate identityを維持し、showtimes > 0を確認しました。staticな「販売期間外」rowもrendered public UIから取得し、`unavailable` へ正規化しています。
 
 ## AEON Phase 1 Read Adapter
 
@@ -77,7 +77,7 @@ TOHOの公開UIには、複数の劇場名が1つのschedule routeを共有す�
 - movie/time groupingが曖昧なら部分結果を返さずfail closed
 - `予約購入` はread contextに含まれてもadapterからclickしない
 
-非購入live smokeは `npm run smoke:aeon` として通常CIから分離します。
+非購入live smokeは `npm run smoke:aeon` として通常CIから分離します。2026-08-13の実ブラウザ確認はgreenで、rendered public UIだけを使うread-only境界を維持しました。
 
 ## 109 Phase 1 Read Adapter
 
@@ -114,7 +114,7 @@ TOHOの公開UIには、複数の劇場名が1つのschedule routeを共有す�
 - movie/screenを一意にbindingできない
 - rowsなし + explicit empty stateなし
 
-非購入live smokeは `npm run smoke:109` として通常CIから分離します。
+非購入live smokeは `npm run smoke:109` として通常CIから分離します。2026-08-13の初回実行は `unresolvedGroupCount=44` でfail closedし、現行公開UIの `article → header h2 → ul.timetable → li.theatre → time.start/time.end` 構造をreviewed provider-specific shapeとして反映後、再実行で44 showtimesを取得してgreenを確認しました。
 
 詳細は [`providers/109.md`](./providers/109.md) を参照してください。
 

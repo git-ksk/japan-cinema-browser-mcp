@@ -126,7 +126,7 @@ Unit test:
 npm run smoke:toho
 ```
 
-smokeは低頻度・明示実行とし、CIの通常testには含めません。
+smokeは低頻度・明示実行とし、CIの通常testには含めません。2026-08-13の実ブラウザ確認ではTOHOシネマズ ららぽーと横浜（id `036`）を使用し、official redirect後もreviewed schedule pathnameを維持、date identity一致、showtimes > 0を確認しました。staticな「販売期間外」rowもrendered public UIから取得し、availabilityを`unavailable`へ正規化できています。
 
 確認対象:
 

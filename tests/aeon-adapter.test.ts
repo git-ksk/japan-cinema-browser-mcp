@@ -56,6 +56,24 @@ test("AEON theater snapshot normalizes visible labels and adopts only explicit r
   assert.equal(result.find((theater) => theater.name.includes("URL未確定劇場"))?.scheduleUrl, undefined);
 });
 
+test("AEON current public /cinema links remain navigation-only and never become guessed schedule routes", () => {
+  const rows = theaterRows(54);
+  rows.push({
+    label: "みなとみらい 4DX",
+    href: "https://www.aeoncinema.com/cinema/minatomirai/"
+  });
+  const result = normalizeAeonTheaterSnapshot(
+    { headingCount: 1, rows },
+    "https://www.aeoncinema.com/theater/"
+  );
+  const theater = result.find((candidate) => candidate.name === "イオンシネマ みなとみらい");
+
+  assert.ok(theater);
+  assert.equal(theater?.selectionLabel, "みなとみらい 4DX");
+  assert.equal(theater?.scheduleUrl, undefined);
+  assert.equal(theater?.id, "みなとみらい");
+});
+
 test("AEON theater snapshot fails closed when the public theater list shape collapses", () => {
   assert.throws(
     () => normalizeAeonTheaterSnapshot(

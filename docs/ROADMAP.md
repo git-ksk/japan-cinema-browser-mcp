@@ -31,7 +31,7 @@
 - ✅ baseline compliance policy
 - ✅ unit test / CI定義
 - ✅ ドキュメント整備
-- 🟡 ローカルlive smoke確認
+- ✅ ローカルlive smoke確認
 
 Exit criteria:
 
@@ -44,7 +44,7 @@ Exit criteria:
 
 目的: generic page readから、映画館ドメインを理解するread-only adapterへ移行する。
 
-状態: ✅ TOHO / AEON / 109実装済み。live smoke実行確認は低頻度の別タスク
+状態: ✅ complete — TOHO / AEON / 109実装済み。2026-08-13に3社の非購入live smoke greenを確認
 
 ### TOHOシネマズ
 
@@ -58,7 +58,7 @@ Exit criteria:
 - ✅ stale/ambiguous stateでfail closed
 - ✅ unit test
 - ✅ 非購入live smoke script追加
-- 🟡 実ブラウザでのlive smoke実行確認
+- ✅ 実ブラウザでのlive smoke実行確認
 
 TOHOでは `list_theaters` / `get_showtimes` を有効化します。1つのschedule routeを複数劇場名が共有する公開UIもalias groupとして扱い、単純な「ID = 1劇場名」前提には依存しません。
 
@@ -75,7 +75,7 @@ TOHOでは `list_theaters` / `get_showtimes` を有効化します。1つのsche
 - ✅ redirect / theater identity / ambiguous time groupでfail closed
 - ✅ unit test
 - ✅ 非購入live smoke script追加
-- 🟡 実ブラウザでのlive smoke実行確認
+- ✅ 実ブラウザでのlive smoke実行確認
 
 AEONではrendered public UIだけを読みます。`schedule.json` 等のprivate/internal endpointを直接利用せず、network interceptionもしません。`予約購入` controlはcontextとして読めてもread adapterからclickしません。
 
@@ -93,7 +93,7 @@ AEONではrendered public UIだけを読みます。`schedule.json` 等のprivat
 - ✅ wrong route / ambiguous grouping / unresolved movie-screenでfail closed
 - ✅ unit test
 - ✅ 非購入live smoke script追加
-- 🟡 実ブラウザでのlive smoke実行確認
+- ✅ 実ブラウザでのlive smoke実行確認
 
 109ではrootや劇場名からschedule URLを合成せず、rendered public UIに明示された劇場link・日付linkだけを利用します。`オンラインチケット購入` 等の購入導線はread adapterからclickしません。
 

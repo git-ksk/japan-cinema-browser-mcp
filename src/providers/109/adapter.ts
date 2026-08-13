@@ -163,127 +163,73 @@ const SCHEDULE_EXPRESSION = `(() => {
     const s = getComputedStyle(el);
     return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
   };
-  const before = (a, b) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
   const headings = Array.from(document.querySelectorAll('h1,h2,h3,h4,h5,h6')).filter(visible);
   const dateHeadings = headings
     .map((el) => normalize(el.textContent))
     .filter((text) => /^20\\d{2}\\/\\d{1,2}\\/\\d{1,2}(?:\\s|（|\\(|$)/.test(text))
     .slice(0, 4);
 
-  const movieLinks = Array.from(document.querySelectorAll('a[href*="/movies/"]'))
+  const timeValuePattern = /^(?:[01]?\\d|2[0-3])[:：][0-5]\\d$/;
+  const timeRangePattern = /(?:[01]?\\d|2[0-3])[:：][0-5]\\d\\s*[~〜～ー–—-]\\s*(?:[01]?\\d|2[0-3])[:：][0-5]\\d/;
+  const articles = Array.from(document.querySelectorAll('article'))
     .filter(visible)
-    .map((el) => ({
-      el,
-      text: normalize(el.getAttribute('aria-label') || el.textContent).replace(/作品詳細へ/g, '').trim()
-    }))
-    .filter((item) => item.text.length >= 2 && item.text.length <= 260);
-
-  const screenNodes = Array.from(document.querySelectorAll('a,button,div,li,p,span'))
-    .filter(visible)
-    .map((el) => ({ el, text: normalize(el.getAttribute('aria-label') || el.textContent) }))
-    .filter((item) => /^(?:シアター|THEATER)\\s*[A-Z0-9-]+(?:\\s|$)/i.test(item.text) && item.text.length <= 80)
-    .filter((item) => !Array.from(item.el.children).some((child) =>
-      visible(child) && /^(?:シアター|THEATER)\\s*[A-Z0-9-]+(?:\\s|$)/i.test(normalize(child.textContent))
-    ));
-
-  const availabilityNodes = Array.from(document.querySelectorAll('a,button,div,li,p,span'))
-    .filter(visible)
-    .map((el) => ({ el, text: normalize(el.getAttribute('aria-label') || el.textContent) }))
-    .filter((item) =>
-      item.text.length > 0 &&
-      item.text.length <= 80 &&
-      /^(?:空席あり|残席わずか|残りわずか|満席|完売|売り切れ|販売終了(?:または販売開始前)?|販売開始前)$/.test(item.text)
-    )
-    .filter((item) => !Array.from(item.el.children).some((child) =>
-      visible(child) && /(?:空席あり|残席わずか|残りわずか|満席|完売|売り切れ|販売終了|販売開始前)/.test(normalize(child.textContent))
-    ));
-
-  const timeRangePattern = /((?:[01]?\\d|2[0-3])[:：][0-5]\\d)\\s*[~〜～ー–—-]\\s*((?:[01]?\\d|2[0-3])[:：][0-5]\\d)/g;
-  const candidates = Array.from(document.querySelectorAll('a,button,div,li,p,span')).filter(visible);
-  const timeItems = candidates
-    .map((el) => {
-      const text = normalize(el.getAttribute('aria-label') || el.textContent);
-      return { el, text, ranges: Array.from(text.matchAll(timeRangePattern)) };
-    })
-    .filter((item) => item.text.length > 0 && item.text.length <= 180 && item.ranges.length > 0)
-    .filter((item) => !Array.from(item.el.children).some((child) => {
-      const childText = normalize(child.getAttribute?.('aria-label') || child.textContent);
-      return visible(child) && /(?:[01]?\\d|2[0-3])[:：][0-5]\\d\\s*[~〜～ー–—-]\\s*(?:[01]?\\d|2[0-3])[:：][0-5]\\d/.test(childText);
-    }));
-
-  const ambiguousTimeGroups = timeItems.filter((item) => item.ranges.length !== 1).length;
-  const singleTimes = timeItems.filter((item) => item.ranges.length === 1);
-
-  const movieFor = (control) => {
-    let parent = control.parentElement;
-    for (let depth = 0; parent && depth < 12; depth += 1, parent = parent.parentElement) {
-      const candidates = movieLinks.filter((item) => parent.contains(item.el) && before(item.el, control));
-      if (candidates.length > 0) return candidates[candidates.length - 1].text;
-    }
-    return '';
-  };
-
-  const screenFor = (control) => {
-    let parent = control.parentElement;
-    for (let depth = 0; parent && depth < 10; depth += 1, parent = parent.parentElement) {
-      const candidates = screenNodes.filter((item) => parent.contains(item.el) && before(item.el, control));
-      if (candidates.length > 0) {
-        const screen = candidates[candidates.length - 1];
-        let contextNode = screen.el.parentElement;
-        let fallback = screen.text;
-        for (let contextDepth = 0; contextNode && contextDepth < 6; contextDepth += 1, contextNode = contextNode.parentElement) {
-          const text = normalize(contextNode.innerText || contextNode.textContent);
-          if (text.length > 0 && text.length <= 240) fallback = text;
-          if (
-            text.length > 0 &&
-            text.length <= 520 &&
-            /(?:ULTRA\\s*4DX|IMAX|4DX|SCREENX|Dolby\\s*Atmos|ドルビーアトモス|SAION|(?:^|\\s)[23]D(?:\\s|$))/i.test(text)
-          ) return { screen: screen.text, context: text };
-        }
-        return { screen: screen.text, context: fallback };
-      }
-    }
-    return { screen: '', context: '' };
-  };
-
-  const availabilityFor = (control) => {
-    let parent = control.parentElement;
-    for (let depth = 0; parent && depth < 8; depth += 1, parent = parent.parentElement) {
-      const candidates = availabilityNodes.filter((item) => parent.contains(item.el) && before(control, item.el));
-      if (candidates.length > 0) return candidates[0].text;
-    }
-    return '';
-  };
-
-  const contextFor = (control) => {
-    let parent = control.parentElement;
-    for (let depth = 0; parent && depth < 5; depth += 1, parent = parent.parentElement) {
-      const text = normalize(parent.innerText || parent.textContent);
-      if (text.length >= 8 && text.length <= 420) return text;
-    }
-    return normalize(control.textContent).slice(0, 180);
-  };
+    .filter((article) => Array.from(article.children).some((child) => child.matches?.('ul.timetable')));
 
   const showtimes = [];
   const seen = new Set();
+  let ambiguousTimeGroups = 0;
   let unresolvedGroupCount = 0;
-  for (const item of singleTimes) {
-    const match = item.ranges[0];
-    if (!match?.[1] || !match[2]) continue;
-    const movie = movieFor(item.el);
-    const screenInfo = screenFor(item.el);
-    if (!movie || !screenInfo.screen) unresolvedGroupCount += 1;
-    const key = [movie, screenInfo.screen, match[1], match[2]].join('|');
-    if (seen.has(key)) continue;
-    seen.add(key);
-    showtimes.push({
-      movie,
-      label: match[1] + '~' + match[2],
-      screen: screenInfo.screen,
-      screenContext: screenInfo.context,
-      availability: availabilityFor(item.el),
-      context: contextFor(item.el)
-    });
+  for (const article of articles) {
+    const movieNodes = Array.from(article.querySelectorAll('header h2'))
+      .filter(visible)
+      .map((el) => normalize(el.textContent))
+      .filter((text) => text.length >= 2 && text.length <= 260);
+    const movie = movieNodes.length === 1 ? movieNodes[0] : '';
+    const timetables = Array.from(article.children)
+      .filter((child) => child.matches?.('ul.timetable') && visible(child));
+
+    for (const timetable of timetables) {
+      const screenRows = Array.from(timetable.children)
+        .filter((child) => child.matches?.('li.theatre') && visible(child));
+      const screenRow = screenRows.length === 1 ? screenRows[0] : null;
+      const screen = screenRow
+        ? normalize(screenRow.querySelector('a')?.textContent || screenRow.textContent).slice(0, 80)
+        : '';
+      const screenContext = screenRow ? normalize(screenRow.textContent).slice(0, 240) : '';
+      const rows = Array.from(timetable.children)
+        .filter((child) => child.matches?.('li:not(.theatre)') && visible(child));
+
+      for (const row of rows) {
+        const rowText = normalize(row.textContent);
+        const startNodes = Array.from(row.querySelectorAll('time.start')).filter(visible);
+        const endNodes = Array.from(row.querySelectorAll('time.end')).filter(visible);
+        if (startNodes.length === 0 && endNodes.length === 0 && !timeRangePattern.test(rowText)) continue;
+        if (startNodes.length !== 1 || endNodes.length !== 1) {
+          ambiguousTimeGroups += 1;
+          continue;
+        }
+        const start = normalize(startNodes[0]?.textContent);
+        const end = normalize(endNodes[0]?.textContent);
+        if (!timeValuePattern.test(start) || !timeValuePattern.test(end)) {
+          ambiguousTimeGroups += 1;
+          continue;
+        }
+        if (!movie || !screen) unresolvedGroupCount += 1;
+        const key = [movie, screen, start, end].join('|');
+        if (seen.has(key)) continue;
+        seen.add(key);
+        showtimes.push({
+          movie,
+          label: start + '~' + end,
+          screen,
+          screenContext,
+          availability: rowText.slice(0, 80),
+          context: rowText.slice(0, 180)
+        });
+        if (showtimes.length >= 220) break;
+      }
+      if (showtimes.length >= 220) break;
+    }
     if (showtimes.length >= 220) break;
   }
 
