@@ -17,9 +17,13 @@ const EXPAND_THEATER_REGIONS_EXPRESSION = `(() => {
     return s.visibility !== 'hidden' && s.display !== 'none';
   };
   const schedulePath = /^\\/net\\/schedule\\/\\d{3}\\/TNPI2000J01\\.do$/;
-  const regionHeading = /^(?:北海道|東北|関東|中部|関西|中国|四国|九州)地区(?:\\s|$)/;
+  const regionPrefixes = ['北海道地区', '東北地区', '関東地区', '中部地区', '関西地区', '中国地区', '四国地区', '九州地区'];
   const headings = Array.from(document.querySelectorAll('h3.theater-list-title.js-toggle-button'))
-    .filter((el) => rendered(el) && regionHeading.test(normalize(el.textContent)));
+    .filter((el) => {
+      if (!rendered(el)) return false;
+      const label = normalize(el.textContent);
+      return regionPrefixes.some((prefix) => label.startsWith(prefix));
+    });
   const regions = headings.map((heading) => {
     const panel = heading.nextElementSibling;
     const validPanel = panel && panel.matches('.theater-list-toggle-panel.js-toggle-panel') ? panel : null;
