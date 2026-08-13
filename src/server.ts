@@ -69,7 +69,7 @@ function requireReadAdapter(provider: CinemaProviderId, capability: "theaters" |
   if (provider === "109") return cinemas109ReadAdapter;
   throw new ProviderPolicyError(
     "UNSUPPORTED_CAPABILITY",
-    `${CINEMA_PROVIDERS[provider].name} ${capability} adapter is not available.`
+    `Read adapter for '${capability}' is not available.`
   );
 }
 
