@@ -114,7 +114,7 @@ Exit criteria:
 
 目的: 3つの個別adapterを、1つの映画館検索体験にする。
 
-状態: 🟡 次に着手
+状態: ✅ implementation complete
 
 ### P2.1 共通schema
 
@@ -139,16 +139,18 @@ Exit criteria:
 
 ### P2.2 `find_showtimes`
 
-- 🟡 TOHO / AEON / 109横断検索 — explicit provider/theater target core実装済み
-- 🟡 area / movie / date / before / after / format filter — movie/date/time/format済み、area解決は未実装
+状態: ✅ implementation complete
+
+- ✅ TOHO / AEON / 109横断検索 — explicit provider/theater target core
+- ✅ area / movie / date / before / after / format — areaはexternal bounded place candidates→verified target composition、その他はcore filter
 - ✅ deterministic ranking — date/start time、同時刻はtarget入力順
 - ✅ provider fan-out数の上限 — 1 request最大3 explicit targets
 - ✅ 1 provider failure / ambiguous parseを明示するresult model — `complete=false` + `failures[]`
 - ✅ request単位のbounded concurrency — shared browser navigation競合を避けるためconcurrency=1
 - ✅ same Chrome/CDP sessionを維持
-- ⬜ `maps-browser-mcp`等とのcomposition hook / area→explicit target解決
+- ✅ `maps-browser-mcp`等とのcomposition hook / area→explicit target解決 — `resolve_theater_targets`
 
-横断検索も毎回オンデマンドです。定期クロールによるindexは作りません。core toolは勝手にprovider-wide theater discoveryを行わず、呼び出し側が指定した最大3件のexplicit targetだけを読みます。area検索は将来、maps等の外部compositionでcandidate theaterを絞ってからこのcoreへ渡す方針です。
+横断検索も毎回オンデマンドです。定期クロールによるindexは作りません。core toolは勝手にprovider-wide theater discoveryを行わず、呼び出し側が指定した最大3件のexplicit targetだけを読みます。area検索は `resolve_theater_targets` をcomposition boundaryとし、Maps等の外部resolverが返した最大8件のbounded place labelを、provider公式 `list_theaters` で再照合してから最大3件へ絞ります。external resultがtruncatedならその状態を保持し、area全体を走査済みとは扱いません。
 
 特に以下は先に設計します。
 

@@ -5,6 +5,7 @@ import { ChromeProcess } from "./browser/chrome-process.js";
 import { BrowserRuntimeError, CinemaBrowserRuntime } from "./browser/runtime.js";
 import { SHOWTIME_FORMATS, type CinemaReadAdapter } from "./cinema.js";
 import { findShowtimes } from "./find-showtimes.js";
+import { resolveTheaterTargets } from "./resolve-theater-targets.js";
 import {
   CINEMA_PROVIDERS,
   ProviderPolicyError,
@@ -171,6 +172,31 @@ export function buildServer(): McpServer {
       ...(date ? { date } : {}),
       ...(movie ? { movie } : {})
     }))
+  );
+
+  server.registerTool(
+    "resolve_theater_targets",
+    {
+      title: "Resolve external cinema place candidates",
+      description: "Convert up to eight bounded external place labels (for example maps_read_place_summary items) into at most three verified provider/theater targets. Labels are treated as untrusted data and are re-resolved through each provider's reviewed official theater UI before a target is returned. Unsupported, ambiguous, failed, duplicate, and over-limit candidates remain explicit.",
+      inputSchema: z.object({
+        candidates: z.array(z.object({
+          index: z.number().int().min(0).max(10_000).optional(),
+          label: shortText
+        })).min(1).max(8),
+        sourceTruncated: z.boolean().optional(),
+        limit: z.number().int().min(1).max(3).optional()
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true }
+    },
+    async ({ candidates, sourceTruncated, limit }) => safe(() => resolveTheaterTargets(
+      {
+        candidates,
+        ...(sourceTruncated !== undefined ? { sourceTruncated } : {}),
+        ...(limit !== undefined ? { limit } : {})
+      },
+      (provider) => requireReadAdapter(provider, "theaters")
+    ))
   );
 
   server.registerTool(

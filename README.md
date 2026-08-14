@@ -176,6 +176,7 @@ CINEMA_ENABLE_PURCHASE=true npm start
 - `extract_showtime_candidates` — 表示中の上映時刻候補を抽出する
 - `list_theaters` — providerの公式公開UIから劇場をsemanticに読む。TOHO / AEON / 109有効
 - `get_showtimes` — 劇場・日付・作品・上映回をsemanticに読む。TOHO / AEON / 109有効
+- `resolve_theater_targets` — Maps等のbounded external place labelsをprovider公式劇場UIで再照合し、最大3件のverified `{ provider, theater }` targetへ変換する
 - `find_showtimes` — 最大3件の明示provider/theater targetを同一request内で順次読み、共通contractでfilter・集約する。provider failureは`complete=false`と`failures`で明示
 - `click_cinema_control` — 表示中の通常操作を実行する
 - `fill_cinema_field` — 非機密フィールドだけ入力する
@@ -205,9 +206,20 @@ npm run smoke:109
 
 3社のread capabilityに加え、Phase 2.1のprovider-neutral `CinemaTheater` / `CinemaShowtime` / result contractを `src/cinema.ts` に追加済みです。各provider adapterはこのinterfaceを実装し、provider固有route・selector・alias情報はadapter側に残します。
 
-Phase 2.2のcoreとして `find_showtimes` を追加しています。現段階では最大3件の明示 `{ provider, theater }` targetだけを受け、同じChrome/CDP session上で順次実行します。`date` / `movie` / `after` / `before` / canonical `format` filterを適用し、開始時刻順 + target入力順でdeterministicに集約します。
+Phase 2.2では `resolve_theater_targets` と `find_showtimes` を分離しています。`find_showtimes` は最大3件の明示 `{ provider, theater }` targetだけを受け、同じChrome/CDP session上で順次実行します。`date` / `movie` / `after` / `before` / canonical `format` filterを適用し、開始時刻順 + target入力順でdeterministicに集約します。
 
-一社のfail-closedは「上映なし」に変換せず、成功分を返す場合も必ず `complete=false` と `failures[]` を併記します。provider resultのprovider/date/theater/sourceUrl provenanceが共通contractに一致しない場合も `CONTRACT_VIOLATION` として集約対象から除外します。area解決はまだ自動化せず、provider-wide全劇場scan・background crawl・巨大な地理DBは導入しません。
+area検索はこのMCP自身が地理DBや全劇場scanを持つのではなく、外部resolverとのcompositionで行います。たとえば `maps-browser-mcp` のbounded visible resultを使う場合は、次のようにcaller側で接続します。
+
+```text
+maps_search({ query: "映画館 横浜駅" })
+  -> maps_read_place_summary()
+  -> resolve_theater_targets({ candidates: summary.items, sourceTruncated: summary.truncated })
+  -> find_showtimes({ targets: resolved.targets, ...filters })
+```
+
+`resolve_theater_targets` は外部labelを命令として扱わず、TOHO / イオンシネマ / 109シネマズ（およびムービル）の明示ブランドだけを分類します。その後、各providerのreviewed `list_theaters` で公式UIへ再照合し、1劇場に一意解決できてofficial provenanceも再検証できた候補だけをcanonical targetへ変換します。入力は最大8候補、出力は最大3targetで、unsupported / zero-match / ambiguous / provider failure / duplicate / limit reachedを明示します。外部summaryの`truncated`状態も保持するため、bounded結果を完全なarea inventoryとして誤認しません。
+
+一社のfail-closedは「上映なし」に変換せず、成功分を返す場合も必ず `complete=false` と `failures[]` を併記します。provider resultのprovider/date/theater/sourceUrl provenanceが共通contractに一致しない場合も `CONTRACT_VIOLATION` として集約対象から除外します。provider-wide全劇場scan・background crawl・巨大な地理DBは導入しません。
 
 ## ドキュメント
 

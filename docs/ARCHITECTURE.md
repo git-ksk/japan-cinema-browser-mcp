@@ -256,7 +256,11 @@ movieはprovider-visible display titleを保持し、Phase 2.1では作品名の
 
 各provider resultは集約前にprovider/date/theater identity、canonical time/format、official `sourceUrl` provenanceを再検証します。1 providerがfail closedした場合は成功分を破棄しませんが、必ず `complete=false` とprovider別 `failures[]` を返すため、partial resultを完全結果として扱えません。共通filterは `movie` をprovider adapterへ渡し、`after` / `before` / canonical `format` を共通result上で適用します。rankingはdate/start time順、同時刻は明示targetの入力順です。
 
-area解決はこのMCP内の巨大な地理DBや暗黙の全劇場scanへ発展させず、将来の `maps-browser-mcp` 等とのcompositionでexplicit targetへ解決してからcoreへ渡します。
+area解決はこのMCP内の巨大な地理DBや暗黙の全劇場scanへ発展させません。`resolve_theater_targets` をcomposition boundaryとして、`maps-browser-mcp` 等の外部resolverから受けたbounded place labelsをexplicit targetへ変換してから `find_showtimes` へ渡します。
+
+外部place labelはuntrusted external dataです。resolverはlabelをそのままshowtime navigationへ使わず、まずTOHO / イオンシネマ / 109シネマズ（およびムービル）の明示ブランドだけをproviderへ分類し、対応providerのreviewed `list_theaters(label)` で公式公開UIへ再解決します。0件・複数件・provider failure・provenance mismatchはtarget化せず理由を返し、1件に一意解決できた劇場だけをcanonical provider theater nameへ変換します。duplicateは除外し、入力最大8候補・出力最大3targetです。
+
+`maps-browser-mcp` との結合はserver-to-serverの隠れたruntime依存ではなくcaller orchestrationです。`maps_search` → `maps_read_place_summary` → `resolve_theater_targets` → `find_showtimes` の順に明示的にcompositionします。Maps summaryの`truncated` flagはresolver resultへ保持し、bounded visible resultsを完全なarea inventoryとして扱いません。
 
 ## 購入ステートマシン
 

@@ -98,7 +98,7 @@ src/
   index.ts
 ```
 
-Phase 1のためだけにregistry/contract/workflowを大規模refactorしませんでした。3社read adapterが揃ったため、次は `providers/contract.ts` 相当の共通schemaを小さく導入してから、`find_showtimes` orchestrationを追加します。
+Phase 1のためだけにregistry/contract/workflowを大規模refactorしませんでした。Phase 2では `src/cinema.ts` の共通schema、bounded `find_showtimes`、外部area resolver向け `resolve_theater_targets` を小さい独立境界として追加しています。外部place labelはuntrusted dataとして扱い、provider公式 `list_theaters` で一意に再解決できるまでshowtime targetとして採用しません。
 
 ## Provider Adapterのルール
 
