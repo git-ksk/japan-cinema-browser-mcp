@@ -139,16 +139,16 @@ Exit criteria:
 
 ### P2.2 `find_showtimes`
 
-- ⬜ TOHO / AEON / 109横断検索
-- ⬜ area / movie / date / before / after / format filter
-- ⬜ deterministic ranking
-- ⬜ provider fan-out数の上限
-- ⬜ 1 provider failure / ambiguous parseを明示するresult model
-- ⬜ request単位のbounded concurrency
-- ⬜ same Chrome/CDP sessionを維持
-- ⬜ `maps-browser-mcp`等とのcomposition hook
+- 🟡 TOHO / AEON / 109横断検索 — explicit provider/theater target core実装済み
+- 🟡 area / movie / date / before / after / format filter — movie/date/time/format済み、area解決は未実装
+- ✅ deterministic ranking — date/start time、同時刻はtarget入力順
+- ✅ provider fan-out数の上限 — 1 request最大3 explicit targets
+- ✅ 1 provider failure / ambiguous parseを明示するresult model — `complete=false` + `failures[]`
+- ✅ request単位のbounded concurrency — shared browser navigation競合を避けるためconcurrency=1
+- ✅ same Chrome/CDP sessionを維持
+- ⬜ `maps-browser-mcp`等とのcomposition hook / area→explicit target解決
 
-横断検索も毎回オンデマンドです。定期クロールによるindexは作りません。
+横断検索も毎回オンデマンドです。定期クロールによるindexは作りません。core toolは勝手にprovider-wide theater discoveryを行わず、呼び出し側が指定した最大3件のexplicit targetだけを読みます。area検索は将来、maps等の外部compositionでcandidate theaterを絞ってからこのcoreへ渡す方針です。
 
 特に以下は先に設計します。
 

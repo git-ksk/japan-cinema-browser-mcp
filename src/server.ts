@@ -3,7 +3,8 @@ import * as z from "zod/v4";
 import { loadConfig } from "./config.js";
 import { ChromeProcess } from "./browser/chrome-process.js";
 import { BrowserRuntimeError, CinemaBrowserRuntime } from "./browser/runtime.js";
-import type { CinemaReadAdapter } from "./cinema.js";
+import { SHOWTIME_FORMATS, type CinemaReadAdapter } from "./cinema.js";
+import { findShowtimes } from "./find-showtimes.js";
 import {
   CINEMA_PROVIDERS,
   ProviderPolicyError,
@@ -28,6 +29,7 @@ const purchaseGate = new PurchaseGate(config.policy.confirmationTtlMs);
 const providerSchema = z.enum(["toho", "aeon", "109"]);
 const shortText = z.string().trim().min(1).max(240);
 const isoDate = z.string().regex(/^20\d{2}-\d{2}-\d{2}$/, "date must be YYYY-MM-DD");
+const clockTime = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/, "time must be HH:MM");
 
 function jsonResult(value: unknown): CallToolResult {
   return { content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }] };
@@ -169,6 +171,40 @@ export function buildServer(): McpServer {
       ...(date ? { date } : {}),
       ...(movie ? { movie } : {})
     }))
+  );
+
+  server.registerTool(
+    "find_showtimes",
+    {
+      title: "Find showtimes across cinema providers",
+      description: "Read and combine showtimes for up to three explicit provider/theater targets using the shared cinema contract. Provider failures remain explicit; successful partial results are never presented as complete. Area-wide crawling is not performed.",
+      inputSchema: z.object({
+        targets: z.array(z.object({
+          provider: providerSchema,
+          theater: shortText
+        })).min(1).max(3),
+        date: isoDate.optional(),
+        movie: shortText.optional(),
+        after: clockTime.optional(),
+        before: clockTime.optional(),
+        format: z.enum(SHOWTIME_FORMATS).optional()
+      }).refine(
+        (value) => !value.after || !value.before || value.after <= value.before,
+        { message: "after must not be later than before", path: ["after"] }
+      ),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true }
+    },
+    async ({ targets, date, movie, after, before, format }) => safe(() => findShowtimes(
+      {
+        targets,
+        ...(date ? { date } : {}),
+        ...(movie ? { movie } : {}),
+        ...(after ? { after } : {}),
+        ...(before ? { before } : {}),
+        ...(format ? { format } : {})
+      },
+      (provider) => requireReadAdapter(provider, "showtimes")
+    ))
   );
 
   server.registerTool(

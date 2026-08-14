@@ -252,7 +252,11 @@ availabilityの意味は次で固定します。
 
 movieはprovider-visible display titleを保持し、Phase 2.1では作品名のcross-provider同一作品判定やタイトル書き換えを行いません。TOHOのaliases、AEONのschedule route、109のexplicit route/queryなどはprovider extensionのままです。
 
-`find_showtimes` はこのcontractを通した結果だけを比較し、provider fan-out数をboundedにします。一社のambiguous parseを他社結果で隠さず、provider failureを明示的に扱います。
+`find_showtimes` はこのcontractを通した結果だけを比較します。core inputは最大3件のexplicit `{ provider, theater }` targetで、provider-wide theater discoveryは行いません。同じChrome/CDP sessionを共有するためprovider navigationは意図的にconcurrency=1で順次実行し、複数navigationのraceを作りません。
+
+各provider resultは集約前にprovider/date/theater identity、canonical time/format、official `sourceUrl` provenanceを再検証します。1 providerがfail closedした場合は成功分を破棄しませんが、必ず `complete=false` とprovider別 `failures[]` を返すため、partial resultを完全結果として扱えません。共通filterは `movie` をprovider adapterへ渡し、`after` / `before` / canonical `format` を共通result上で適用します。rankingはdate/start time順、同時刻は明示targetの入力順です。
+
+area解決はこのMCP内の巨大な地理DBや暗黙の全劇場scanへ発展させず、将来の `maps-browser-mcp` 等とのcompositionでexplicit targetへ解決してからcoreへ渡します。
 
 ## 購入ステートマシン
 

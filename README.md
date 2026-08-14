@@ -176,6 +176,7 @@ CINEMA_ENABLE_PURCHASE=true npm start
 - `extract_showtime_candidates` — 表示中の上映時刻候補を抽出する
 - `list_theaters` — providerの公式公開UIから劇場をsemanticに読む。TOHO / AEON / 109有効
 - `get_showtimes` — 劇場・日付・作品・上映回をsemanticに読む。TOHO / AEON / 109有効
+- `find_showtimes` — 最大3件の明示provider/theater targetを同一request内で順次読み、共通contractでfilter・集約する。provider failureは`complete=false`と`failures`で明示
 - `click_cinema_control` — 表示中の通常操作を実行する
 - `fill_cinema_field` — 非機密フィールドだけ入力する
 - `prepare_purchase_confirmation` — 現在の購入内容を確認用に固定する
@@ -204,7 +205,9 @@ npm run smoke:109
 
 3社のread capabilityに加え、Phase 2.1のprovider-neutral `CinemaTheater` / `CinemaShowtime` / result contractを `src/cinema.ts` に追加済みです。各provider adapterはこのinterfaceを実装し、provider固有route・selector・alias情報はadapter側に残します。
 
-次はこの共通contractだけを入力にした `find_showtimes` を設計します。横断検索はオンデマンドのbounded fan-outに限定し、provider-wide indexやbackground crawlは導入しません。一社のfail-closedを「上映なし」に変換したり、他社のpartial resultで隠したりしません。
+Phase 2.2のcoreとして `find_showtimes` を追加しています。現段階では最大3件の明示 `{ provider, theater }` targetだけを受け、同じChrome/CDP session上で順次実行します。`date` / `movie` / `after` / `before` / canonical `format` filterを適用し、開始時刻順 + target入力順でdeterministicに集約します。
+
+一社のfail-closedは「上映なし」に変換せず、成功分を返す場合も必ず `complete=false` と `failures[]` を併記します。provider resultのprovider/date/theater/sourceUrl provenanceが共通contractに一致しない場合も `CONTRACT_VIOLATION` として集約対象から除外します。area解決はまだ自動化せず、provider-wide全劇場scan・background crawl・巨大な地理DBは導入しません。
 
 ## ドキュメント
 
