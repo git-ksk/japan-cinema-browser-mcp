@@ -136,7 +136,7 @@ test("TOHO showtime normalization returns compact semantic facts and does not mi
   });
   assert.equal(result.showtimes[1]?.startTime, "13:00");
   assert.equal(result.showtimes[1]?.endTime, undefined);
-  assert.deepEqual(result.showtimes[1]?.formats, ["SCREEN X"]);
+  assert.deepEqual(result.showtimes[1]?.formats, ["SCREENX"]);
   assert.equal(result.showtimes[1]?.screen, undefined);
   assert.equal(result.showtimes[1]?.availability, "unavailable");
 });

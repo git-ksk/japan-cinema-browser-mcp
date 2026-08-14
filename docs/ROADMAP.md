@@ -118,19 +118,24 @@ Exit criteria:
 
 ### P2.1 共通schema
 
-- 🟡 共通 `Theater` schema
-- 🟡 共通 `Showtime` schema
-- 🟡 provider-specific ID / aliases / display nameの整理
-- 🟡 `dateAvailable` / `availableDates` contract
-- 🟡 start/end timeのoptional/required整理
-- 🟡 format vocabulary統一
-- 🟡 language統一
-- 🟡 screen表現統一
-- 🟡 availability `unknown / limited / sold_out / unavailable` の意味固定
-- 🟡 source URL / provenance固定
-- 🟡 movie display titleのprovider差を壊さない方針
+状態: ✅ complete
 
-schemaは「各providerの最小公倍数を雑に文字列化する」のではなく、現在すでに返しているsemantic factsを明示contractへ移す。provider固有route/selectorは共通schemaへ漏らさない。
+- ✅ 共通 `CinemaTheater` schema
+- ✅ 共通 `CinemaShowtime` schema
+- ✅ provider-specific ID / aliases / display nameの整理
+- ✅ `dateAvailable` / `availableDates` contract
+- ✅ start/end timeのoptional/required整理
+- ✅ canonical format vocabulary
+- ✅ language `subtitled / dubbed` 統一
+- ✅ screen表現をoptional stringへ統一
+- ✅ availability `unknown / limited / sold_out / unavailable` の意味固定
+- ✅ source URL / provenance固定
+- ✅ movie display titleのprovider差を壊さない方針
+- ✅ 3 provider adapterを共通 `CinemaReadAdapter` interfaceでtypecheck
+
+`src/cinema.ts` をprovider-neutral contractとし、schemaは「各providerの最小公倍数を雑に文字列化する」のではなく、現在すでに返しているsemantic factsを明示contractへ移す。provider固有route/selector/alias fieldはadapter内のextensionとして残し、共通schemaへ漏らさない。
+
+`dateAvailable` はmovie filter適用前に決定するdate-level factで、`showtimes=[]` と独立する。`availableDates` は現在のreviewed public schedule surfaceから観測した日付だけを返し、未観測routeを生成しない。`unknown` availabilityは「空席あり」を意味せず、明示的な残席signalを観測できなかった状態として扱う。
 
 ### P2.2 `find_showtimes`
 

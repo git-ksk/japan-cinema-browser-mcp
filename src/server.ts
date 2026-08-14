@@ -3,6 +3,7 @@ import * as z from "zod/v4";
 import { loadConfig } from "./config.js";
 import { ChromeProcess } from "./browser/chrome-process.js";
 import { BrowserRuntimeError, CinemaBrowserRuntime } from "./browser/runtime.js";
+import type { CinemaReadAdapter } from "./cinema.js";
 import {
   CINEMA_PROVIDERS,
   ProviderPolicyError,
@@ -27,11 +28,6 @@ const purchaseGate = new PurchaseGate(config.policy.confirmationTtlMs);
 const providerSchema = z.enum(["toho", "aeon", "109"]);
 const shortText = z.string().trim().min(1).max(240);
 const isoDate = z.string().regex(/^20\d{2}-\d{2}-\d{2}$/, "date must be YYYY-MM-DD");
-
-interface CinemaReadAdapter {
-  listTheaters(query?: string): Promise<unknown>;
-  getShowtimes(input: { theater: string; date?: string; movie?: string }): Promise<unknown>;
-}
 
 function jsonResult(value: unknown): CallToolResult {
   return { content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }] };

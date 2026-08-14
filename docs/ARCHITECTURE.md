@@ -230,18 +230,27 @@ TOHOは日付click後にselected stateを再確認します。AEONは明示route
 - end time / format / language / screen / availabilityの観測可能性に差がある
 - movie titleのvisible label表現に差がある
 
-共通schemaではprovider固有routeやDOM selectorを漏らさず、少なくとも以下を明示します。
+共通contractは `src/cinema.ts` に置き、provider固有routeやDOM selectorを漏らしません。3社adapterは共通 `CinemaReadAdapter` を実装し、少なくとも以下を同じ型で公開します。
 
-- provider
-- theater stable identity + display name
-- date
-- movie display title
-- start/end time
-- formats
-- language
-- screen
-- availability
-- source URL / provenance
+- `CinemaTheater`: provider / stable id / display name / provenance `sourceUrl`
+- `CinemaShowtime`: provider / theater identity / date / provider-visible movie title / required start time / optional end time
+- canonical `formats` vocabulary（同一方式の表記をprovider横断で同じ値へ正規化）
+- optional `language: subtitled | dubbed`
+- optional `screen`
+- `availability: unknown | limited | sold_out | unavailable`
+- reviewed public schedule `sourceUrl`
+- result-level `dateAvailable` / `availableDates`
+
+`dateAvailable` はmovie filter適用前のdate-level factです。そのため、指定作品が0件でも日付自体がproviderのschedule surfaceで有効なら `true` のままです。`availableDates` はreviewed public UI/routeで観測した日付だけを扱い、未観測の日付routeを推測しません。
+
+availabilityの意味は次で固定します。
+
+- `unknown`: reviewed UIで明示的な残席状態を観測できない。空席ありとはみなさない
+- `limited`: 残席わずか等の明示signal
+- `sold_out`: 満席・完売・売り切れ等の明示signal
+- `unavailable`: 上映回は存在するが、販売期間外・販売開始前・販売終了等の明示signal
+
+movieはprovider-visible display titleを保持し、Phase 2.1では作品名のcross-provider同一作品判定やタイトル書き換えを行いません。TOHOのaliases、AEONのschedule route、109のexplicit route/queryなどはprovider extensionのままです。
 
 `find_showtimes` はこのcontractを通した結果だけを比較し、provider fan-out数をboundedにします。一社のambiguous parseを他社結果で隠さず、provider failureを明示的に扱います。
 

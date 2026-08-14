@@ -202,9 +202,9 @@ npm run smoke:109
 
 ## 次の段階
 
-3社のread capabilityが揃ったため、次はprovider固有resultを直接結合せず、共通 `Theater` / `Showtime` schemaを先に定義してから `find_showtimes` を追加します。
+3社のread capabilityに加え、Phase 2.1のprovider-neutral `CinemaTheater` / `CinemaShowtime` / result contractを `src/cinema.ts` に追加済みです。各provider adapterはこのinterfaceを実装し、provider固有route・selector・alias情報はadapter側に残します。
 
-残る主な差分は、劇場ID/alias表現、`dateAvailable`、format語彙、availabilityの解釈、作品名表示の差です。横断検索はオンデマンドのbounded fan-outに限定し、provider-wide indexやbackground crawlは導入しません。
+次はこの共通contractだけを入力にした `find_showtimes` を設計します。横断検索はオンデマンドのbounded fan-outに限定し、provider-wide indexやbackground crawlは導入しません。一社のfail-closedを「上映なし」に変換したり、他社のpartial resultで隠したりしません。
 
 ## ドキュメント
 

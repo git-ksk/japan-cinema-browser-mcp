@@ -1,4 +1,5 @@
 import { BrowserRuntimeError, CinemaBrowserRuntime } from "../../browser/runtime.js";
+import type { CinemaReadAdapter, CinemaShowtime, CinemaTheater, ShowtimeFormat, ShowtimeQuery, ShowtimeResult, TheaterListResult } from "../../cinema.js";
 import { assertOfficialUrl } from "../../providers.js";
 
 const AEON_THEATER_LIST_URL = "https://www.aeoncinema.com/theater/";
@@ -14,11 +15,7 @@ const PREFECTURES = [
   "岡山", "広島", "島根", "山口", "香川", "徳島", "愛媛", "福岡", "佐賀", "熊本"
 ] as const;
 
-export interface AeonTheater {
-  provider: "aeon";
-  id: string;
-  name: string;
-  sourceUrl: string;
+export interface AeonTheater extends CinemaTheater<"aeon"> {
   scheduleUrl?: string;
 }
 
@@ -26,20 +23,7 @@ export interface AeonTheaterCandidate extends AeonTheater {
   selectionLabel: string;
 }
 
-export interface AeonShowtime {
-  provider: "aeon";
-  theaterId: string;
-  theater: string;
-  date: string;
-  movie: string;
-  startTime: string;
-  endTime?: string;
-  formats: string[];
-  language?: "subtitled" | "dubbed";
-  screen?: string;
-  availability: "unknown" | "limited" | "sold_out" | "unavailable";
-  sourceUrl: string;
-}
+export interface AeonShowtime extends CinemaShowtime<"aeon"> {}
 
 interface TheaterSnapshotRow {
   label?: unknown;
@@ -302,23 +286,22 @@ export function buildAeonScheduleUrl(scheduleUrl: string, date: string): string 
   return url.href;
 }
 
-function normalizeFormats(text: string): string[] {
-  const checks: Array<[RegExp, string]> = [
+function normalizeFormats(text: string): ShowtimeFormat[] {
+  const checks: Array<[RegExp, ShowtimeFormat]> = [
     [/IMAX\s*(?:レーザー|LASER)/i, "IMAX LASER"],
     [/\bIMAX\b/i, "IMAX"],
     [/\b4DX\b/i, "4DX"],
     [/\bMX4D\b/i, "MX4D"],
     [/Dolby\s*Atmos|ドルビーアトモス/i, "DOLBY ATMOS"],
     [/\bTHX\b/i, "THX"],
-    [/ULTIRA/i, "ULTIRA"],
-    [/ULTILA/i, "ULTILA"],
+    [/ULTIRA|ULTILA/i, "ULTIRA"],
     [/D-BOX/i, "D-BOX"],
     [/VSound/i, "VSOUND"],
     [/VIVE\s*AUDIO/i, "VIVE AUDIO"],
     [/dts\s*X/i, "DTS:X"],
     [/(?:^|[\s【\[(])3D(?:[\s】\])]|$)/i, "3D"]
   ];
-  const values: string[] = [];
+  const values: ShowtimeFormat[] = [];
   for (const [pattern, label] of checks) {
     if (pattern.test(text) && !values.includes(label)) values.push(label);
   }
@@ -460,10 +443,10 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export class AeonReadAdapter {
+export class AeonReadAdapter implements CinemaReadAdapter<"aeon", AeonTheater, AeonShowtime> {
   constructor(private readonly runtime: CinemaBrowserRuntime) {}
 
-  async listTheaters(query?: string): Promise<{ provider: "aeon"; sourceUrl: string; theaters: AeonTheater[] }> {
+  async listTheaters(query?: string): Promise<TheaterListResult<"aeon", AeonTheater>> {
     const candidates = await this.readTheaterCandidates(query);
     return {
       provider: "aeon",
@@ -472,15 +455,7 @@ export class AeonReadAdapter {
     };
   }
 
-  async getShowtimes(input: { theater: string; date?: string; movie?: string }): Promise<{
-    provider: "aeon";
-    theater: AeonTheater;
-    date: string;
-    dateAvailable: boolean;
-    availableDates: string[];
-    sourceUrl: string;
-    showtimes: AeonShowtime[];
-  }> {
+  async getShowtimes(input: ShowtimeQuery): Promise<ShowtimeResult<"aeon", AeonTheater, AeonShowtime>> {
     const candidate = await this.resolveTheater(input.theater);
     const baseScheduleUrl = candidate.scheduleUrl ?? await this.openScheduleThroughPublicUi(candidate);
     const theater = resolvedTheater(candidate, baseScheduleUrl);
@@ -501,6 +476,7 @@ export class AeonReadAdapter {
     }
     const semantic = await this.readScheduleSemantic();
     let showtimes = normalizeAeonScheduleSnapshot(semantic.value, theater, date, semantic.url);
+    const dateAvailable = showtimes.length > 0 || semantic.value.emptySchedule === true;
     if (input.movie?.trim()) {
       const needle = normalizeText(input.movie).toLocaleLowerCase("ja-JP");
       showtimes = showtimes.filter((showtime) => showtime.movie.toLocaleLowerCase("ja-JP").includes(needle));
@@ -509,7 +485,7 @@ export class AeonReadAdapter {
       provider: "aeon",
       theater: publicTheater(theater),
       date,
-      dateAvailable: showtimes.length > 0 || semantic.value.emptySchedule === true,
+      dateAvailable,
       availableDates: this.normalizeAvailableDates(semantic.value.dateLabels, date),
       sourceUrl: semantic.url,
       showtimes

@@ -84,7 +84,7 @@ adapterはこの公開Web UIのrendered DOMだけを読みます。network inter
 - date
 - movie
 - startTime / endTime（visible control上で確認できる場合）
-- format（IMAX / IMAX LASER / MX4D / DOLBY CINEMA / SCREEN X / TCX等）
+- format（IMAX / IMAX LASER / MX4D / DOLBY CINEMA / SCREENX / TCX等。visible `SCREEN X` 表記もcanonical `SCREENX` へ正規化）
 - subtitle / dub表示
 - screen表示（明示されている場合）
 - availability表示（明示されている場合のみ）

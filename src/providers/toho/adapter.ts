@@ -1,33 +1,17 @@
 import { BrowserRuntimeError, CinemaBrowserRuntime } from "../../browser/runtime.js";
+import type { CinemaReadAdapter, CinemaShowtime, CinemaTheater, ShowtimeFormat, ShowtimeQuery, ShowtimeResult, TheaterListResult } from "../../cinema.js";
 import { assertOfficialUrl } from "../../providers.js";
 
 const TOHO_THEATER_LIST_URL = "https://www.tohotheater.jp/theater/find.html";
 const TOHO_SCHEDULE_PATH = /^\/net\/schedule\/(\d{3})\/TNPI2000J01\.do$/;
 const MIN_THEATER_SCHEDULE_LINKS = 20;
 
-export interface TohoTheater {
-  provider: "toho";
-  id: string;
-  name: string;
+export interface TohoTheater extends CinemaTheater<"toho"> {
   aliases: string[];
   url: string;
-  sourceUrl: string;
 }
 
-export interface TohoShowtime {
-  provider: "toho";
-  theaterId: string;
-  theater: string;
-  date: string;
-  movie: string;
-  startTime: string;
-  endTime?: string;
-  formats: string[];
-  language?: "subtitled" | "dubbed";
-  screen?: string;
-  availability: "unknown" | "limited" | "sold_out" | "unavailable";
-  sourceUrl: string;
-}
+export interface TohoShowtime extends CinemaShowtime<"toho"> {}
 
 interface TheaterSnapshotRow {
   id?: unknown;
@@ -356,13 +340,13 @@ export function normalizeTohoTheaterSnapshot(snapshot: TheaterSnapshot, sourceUr
   return theaters;
 }
 
-function normalizedFormats(text: string): string[] {
-  const checks: Array<[RegExp, string]> = [
+function normalizedFormats(text: string): ShowtimeFormat[] {
+  const checks: Array<[RegExp, ShowtimeFormat]> = [
     [/IMAX\s*(?:レーザー|LASER)/i, "IMAX LASER"],
     [/\bIMAX\b/i, "IMAX"],
     [/Dolby\s*Cinema|ドルビーシネマ/i, "DOLBY CINEMA"],
     [/MX4D/i, "MX4D"],
-    [/SCREEN\s*X/i, "SCREEN X"],
+    [/SCREEN\s*X/i, "SCREENX"],
     [/DTS\s*:?\s*X/i, "DTS:X"],
     [/ATMOS|アトモス/i, "DOLBY ATMOS"],
     [/\bTCX\b/i, "TCX"],
@@ -370,7 +354,7 @@ function normalizedFormats(text: string): string[] {
     [/轟音/, "GO-ON"],
     [/(?:^|[\s【\[(])3D(?:[\s】\])]|$)/i, "3D"]
   ];
-  const values: string[] = [];
+  const values: ShowtimeFormat[] = [];
   for (const [pattern, label] of checks) {
     if (pattern.test(text) && !values.includes(label)) values.push(label);
   }
@@ -507,10 +491,10 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export class TohoReadAdapter {
+export class TohoReadAdapter implements CinemaReadAdapter<"toho", TohoTheater, TohoShowtime> {
   constructor(private readonly runtime: CinemaBrowserRuntime) {}
 
-  async listTheaters(query?: string): Promise<{ provider: "toho"; sourceUrl: string; theaters: TohoTheater[] }> {
+  async listTheaters(query?: string): Promise<TheaterListResult<"toho", TohoTheater>> {
     const status = await this.runtime.status();
     const currentUrl = typeof status.url === "string" ? status.url : "";
     if (!currentUrl.startsWith(TOHO_THEATER_LIST_URL)) {
@@ -552,15 +536,7 @@ export class TohoReadAdapter {
     return { provider: "toho", sourceUrl: semantic.url, theaters };
   }
 
-  async getShowtimes(input: { theater: string; date?: string; movie?: string }): Promise<{
-    provider: "toho";
-    theater: TohoTheater;
-    date: string;
-    dateAvailable: boolean;
-    availableDates: string[];
-    sourceUrl: string;
-    showtimes: TohoShowtime[];
-  }> {
+  async getShowtimes(input: ShowtimeQuery): Promise<ShowtimeResult<"toho", TohoTheater, TohoShowtime>> {
     const theater = await this.resolveTheater(input.theater);
     await this.runtime.navigate(theater.url, "toho");
 

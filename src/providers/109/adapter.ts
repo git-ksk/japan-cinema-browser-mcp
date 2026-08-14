@@ -1,4 +1,5 @@
 import { BrowserRuntimeError, CinemaBrowserRuntime } from "../../browser/runtime.js";
+import type { CinemaReadAdapter, CinemaShowtime, CinemaTheater, ShowtimeFormat, ShowtimeQuery, ShowtimeResult, TheaterListResult } from "../../cinema.js";
 import { assertOfficialUrl } from "../../providers.js";
 
 const CINEMAS_109_HOME_URL = "https://109cinemas.net/";
@@ -11,28 +12,11 @@ const THEATER_READY_ATTEMPTS = 20;
 const SCHEDULE_READY_ATTEMPTS = 30;
 const READY_POLL_MS = 180;
 
-export interface Cinemas109Theater {
-  provider: "109";
-  id: string;
-  name: string;
+export interface Cinemas109Theater extends CinemaTheater<"109"> {
   url: string;
-  sourceUrl: string;
 }
 
-export interface Cinemas109Showtime {
-  provider: "109";
-  theaterId: string;
-  theater: string;
-  date: string;
-  movie: string;
-  startTime: string;
-  endTime?: string;
-  formats: string[];
-  language?: "subtitled" | "dubbed";
-  screen?: string;
-  availability: "unknown" | "limited" | "sold_out" | "unavailable";
-  sourceUrl: string;
-}
+export interface Cinemas109Showtime extends CinemaShowtime<"109"> {}
 
 interface TheaterSnapshotRow {
   label?: unknown;
@@ -468,8 +452,8 @@ export function normalize109TheaterPageSnapshot(
   return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
 }
 
-function normalizeFormats(text: string): string[] {
-  const checks: Array<[RegExp, string]> = [
+function normalizeFormats(text: string): ShowtimeFormat[] {
+  const checks: Array<[RegExp, ShowtimeFormat]> = [
     [/ULTRA\s*4DX/i, "ULTRA 4DX"],
     [/IMAX\s*(?:レーザー|LASER)/i, "IMAX LASER"],
     [/\bIMAX\b/i, "IMAX"],
@@ -481,7 +465,7 @@ function normalizeFormats(text: string): string[] {
     [/(?:^|[\s【[(])3D(?:[\s】\])]|$)/i, "3D"],
     [/(?:^|[\s【[(])2D(?:[\s】\])]|$)/i, "2D"]
   ];
-  const values: string[] = [];
+  const values: ShowtimeFormat[] = [];
   for (const [pattern, label] of checks) {
     if (pattern.test(text) && !values.includes(label)) values.push(label);
   }
@@ -658,10 +642,10 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export class Cinemas109ReadAdapter {
+export class Cinemas109ReadAdapter implements CinemaReadAdapter<"109", Cinemas109Theater, Cinemas109Showtime> {
   constructor(private readonly runtime: CinemaBrowserRuntime) {}
 
-  async listTheaters(query?: string): Promise<{ provider: "109"; sourceUrl: string; theaters: Cinemas109Theater[] }> {
+  async listTheaters(query?: string): Promise<TheaterListResult<"109", Cinemas109Theater>> {
     const result = await this.readTheaters();
     let theaters = result.theaters;
     if (query?.trim()) {
@@ -671,15 +655,7 @@ export class Cinemas109ReadAdapter {
     return { provider: "109", sourceUrl: result.sourceUrl, theaters };
   }
 
-  async getShowtimes(input: { theater: string; date?: string; movie?: string }): Promise<{
-    provider: "109";
-    theater: Cinemas109Theater;
-    date: string;
-    dateAvailable: boolean;
-    availableDates: string[];
-    sourceUrl: string;
-    showtimes: Cinemas109Showtime[];
-  }> {
+  async getShowtimes(input: ShowtimeQuery): Promise<ShowtimeResult<"109", Cinemas109Theater, Cinemas109Showtime>> {
     const theater = await this.resolveTheater(input.theater);
     const date = input.date ?? tokyoTodayIso();
     if (!validIsoDate(date)) {

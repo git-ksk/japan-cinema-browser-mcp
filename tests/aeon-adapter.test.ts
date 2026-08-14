@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { BrowserRuntimeError } from "../src/browser/runtime.js";
+import { BrowserRuntimeError, CinemaBrowserRuntime } from "../src/browser/runtime.js";
 import {
+  AeonReadAdapter,
   buildAeonScheduleUrl,
   normalizeAeonScheduleSnapshot,
   normalizeAeonTheaterSnapshot
@@ -110,7 +111,7 @@ test("AEON schedule snapshot returns compact movie/showtime facts without treati
         {
           movie: "FouRTe Project 1st LIVE ALL IN",
           label: "18:30~21:00",
-          context: "FouRTe Project 1st LIVE ALL IN 4DX 字幕 18:30~21:00 スクリーン9 予約購入"
+          context: "FouRTe Project 1st LIVE ALL IN 4DX ULTILA 字幕 18:30~21:00 スクリーン9 予約購入"
         }
       ],
       emptySchedule: false
@@ -125,7 +126,7 @@ test("AEON schedule snapshot returns compact movie/showtime facts without treati
   assert.equal(showtimes[0]?.endTime, "21:00");
   assert.equal(showtimes[0]?.screen, "9");
   assert.equal(showtimes[0]?.language, "subtitled");
-  assert.deepEqual(showtimes[0]?.formats, ["4DX"]);
+  assert.deepEqual(showtimes[0]?.formats, ["4DX", "ULTIRA"]);
   assert.equal(showtimes[0]?.availability, "unknown");
 });
 
@@ -165,4 +166,62 @@ test("AEON schedule snapshot fails closed when one rendered group contains multi
     ),
     (error) => error instanceof BrowserRuntimeError && error.code === "UI_STATE_CHANGED"
   );
+});
+
+test("AEON dateAvailable remains a date-level fact when a movie filter matches no showtimes", async () => {
+  const rows = theaterRows();
+  rows[0] = {
+    label: "白山 GRAN THEATER ULTILA Dolby Atmos",
+    href: "https://theater.aeoncinema.com/theaters/hakusan/"
+  };
+  const states = [
+    {
+      url: "https://www.aeoncinema.com/theater/",
+      value: { headingCount: 1, rows }
+    },
+    {
+      url: "https://theater.aeoncinema.com/theaters/hakusan/?date=20260815",
+      value: {
+        title: "上映スケジュール｜白山｜イオンシネマ",
+        scheduleHeadingCount: 1,
+        theaterNames: ["イオンシネマ 白山"],
+        dateLabels: ["8/15（土）", "8/16（日）"],
+        ambiguousTimeGroups: 0,
+        showtimes: [
+          {
+            movie: "実在する作品",
+            label: "10:00~12:00",
+            context: "実在する作品 10:00~12:00 スクリーン1"
+          }
+        ],
+        emptySchedule: false
+      }
+    }
+  ];
+  let index = 0;
+  const runtime = {
+    status: async () => ({
+      connected: true,
+      url: "https://www.aeoncinema.com/theater/",
+      provider: "aeon",
+      officialSurface: true
+    }),
+    navigate: async (url: string) => url,
+    evaluateSemanticState: async () => {
+      const state = states[index++];
+      if (!state) throw new Error("fake semantic state exhausted");
+      return state;
+    },
+    clickControl: async () => ({ clicked: true })
+  } as unknown as CinemaBrowserRuntime;
+
+  const result = await new AeonReadAdapter(runtime).getShowtimes({
+    theater: "白山",
+    date: "2026-08-15",
+    movie: "存在しない作品"
+  });
+
+  assert.equal(result.dateAvailable, true);
+  assert.deepEqual(result.showtimes, []);
+  assert.ok(result.availableDates.includes("2026-08-15"));
 });
