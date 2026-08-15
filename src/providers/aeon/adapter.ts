@@ -9,12 +9,6 @@ const THEATER_READY_ATTEMPTS = 20;
 const SCHEDULE_READY_ATTEMPTS = 30;
 const READY_POLL_MS = 180;
 
-const PREFECTURES = [
-  "北海道", "青森", "秋田", "岩手", "宮城", "山形", "福島", "群馬", "茨城", "埼玉", "東京", "千葉", "神奈川",
-  "新潟", "富山", "石川", "長野", "岐阜", "静岡", "愛知", "三重", "滋賀", "京都", "大阪", "兵庫", "和歌山",
-  "岡山", "広島", "島根", "山口", "香川", "徳島", "愛媛", "福岡", "佐賀", "熊本"
-] as const;
-
 export interface AeonTheater extends CinemaTheater<"aeon"> {
   scheduleUrl?: string;
 }
