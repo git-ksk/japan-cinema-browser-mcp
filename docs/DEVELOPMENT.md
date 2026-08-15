@@ -298,6 +298,7 @@ Actions workflowでは:
 - actionはfull commit SHAへpin
 - Dependabotでnpm dependencyとGitHub Actionsを週次更新
 - PRのdependency変更はDependency Reviewでmoderate以上の既知脆弱性を拒否
+- CodeQL advanced setupは`security-and-quality` suiteでJS/TSとGitHub Actionsを解析
 - duplicate PR runはconcurrencyでcancel
 
 とします。
