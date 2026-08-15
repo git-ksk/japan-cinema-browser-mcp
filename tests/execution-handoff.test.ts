@@ -122,11 +122,11 @@ test("Human handoff invalidation remains separate from purchase confirmation", (
   assert.throws(() => gate.consume(prepared.confirmationId));
 });
 
-test("pre-release handoff dependency is immutable and transaction replay remains statically fenced", () => {
+test("v0.1.0 handoff dependency is immutable and transaction replay remains statically fenced", () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")) as { dependencies?: Record<string, string> };
   assert.equal(
     pkg.dependencies?.["mcp-execution-handoff"],
-    "https://github.com/git-ksk/mcp-execution-handoff/archive/31c78eb430481b00f08f7dbd5987fa5b2f194128.tar.gz"
+    "https://github.com/git-ksk/mcp-execution-handoff/archive/c87fe17b4a9a24bda7aa42e1f40e75a491e72698.tar.gz"
   );
   const server = fs.readFileSync(path.join(root, "src/server.ts"), "utf8");
   assert.match(server, /Human browser activity invalidates every prepared transaction confirmation/);

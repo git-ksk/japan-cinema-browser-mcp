@@ -330,7 +330,7 @@ export class CinemaBrowserRuntime {
   }
 
   async clickReviewedControl(query: string, expectedProvider: CinemaProviderId): Promise<Record<string, unknown>> {
-    const before = await this.assertOfficialCurrentUrl(expectedProvider);
+    await this.assertOfficialCurrentUrl(expectedProvider);
     await this.assertNoIntervention(CINEMA_HANDOFF_POLICY.semantic_mutation.resumePolicy);
     const resolved = await this.resolveControl(query);
     if (isFinalPurchaseLabel(resolved.label)) {

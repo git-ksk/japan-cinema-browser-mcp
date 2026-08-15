@@ -139,7 +139,7 @@ Northbound generic toolとadapter内部primitiveはpolicyを分離します。`n
 
 ### Execution Handoff
 
-Generic control planeはpre-release upstream `git-ksk/mcp-execution-handoff` をimmutable commitでconsumeします。upstreamはAgent/Human authority、resource epoch、resume policy、adapter contract、MRTR requestState/owner bindingを担当し、Cinema固有のprovider URL/capability policy、Human surface classification、verification、replay policyはこのrepositoryへ残します。
+Generic control planeはupstream `git-ksk/mcp-execution-handoff` v0.1.0のsource release commitをimmutable pinしてconsumeします。upstreamはAgent/Human authority、resource epoch、resume policy、adapter contract、MRTR requestState/owner bindingを担当し、Cinema固有のprovider URL/capability policy、Human surface classification、verification、replay policyはこのrepositoryへ残します。
 
 Cinema policyはpure readのみ `replay_safe` とし、navigationは `revalidate`、semantic mutationとtransaction/payment actionは `never_replay` です。navigation/mutation/transactionはMCP側でも `require_fresh_semantic_action` を要求するため、Human完了後にautomatic replayしません。Human intervention開始時にはprepared purchase confirmationも破棄します。
 
