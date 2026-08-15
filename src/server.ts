@@ -1,8 +1,37 @@
-import { McpServer, type CallToolResult } from "@modelcontextprotocol/server";
+import { randomBytes } from "node:crypto";
+import {
+  acceptedContent,
+  createRequestStateCodec,
+  inputRequired,
+  inputResponse,
+  McpServer,
+  type CallToolResult,
+  type InputRequiredResult,
+  type ServerContext
+} from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 import { loadConfig } from "./config.js";
 import { ChromeProcess } from "./browser/chrome-process.js";
-import { BrowserRuntimeError, CinemaBrowserRuntime } from "./browser/runtime.js";
+import { BrowserRuntimeError, CinemaBrowserRuntime, type CinemaIntervention } from "./browser/runtime.js";
+import {
+  ExecutionHandoffError,
+  claimHandoffOwner,
+  createHandoffOwner,
+  handoffOwnerMatches,
+  type HandoffOwner,
+  type HandoffResumeStrategy
+} from "mcp-execution-handoff/core";
+import {
+  HANDOFF_INPUT_KEY,
+  HANDOFF_STATE_TTL_SECONDS,
+  HUMAN_INTERVENTION_SCHEMA,
+  createHandoffRequestState,
+  handoffStateMatchesInvocation,
+  type HandoffRequestState
+} from "mcp-execution-handoff/mcp";
+import { createCinemaExecutionAdapter } from "./cinema-execution-adapter.js";
+import { OperationQueue } from "./operation-queue.js";
+import { CINEMA_HANDOFF_POLICY } from "./handoff-policy.js";
 import { SHOWTIME_FORMATS, type CinemaReadAdapter } from "./cinema.js";
 import { findShowtimes } from "./find-showtimes.js";
 import { resolveTheaterTargets } from "./resolve-theater-targets.js";
@@ -22,15 +51,24 @@ const SERVER_VERSION = "0.1.0";
 export const config = loadConfig();
 const chrome = new ChromeProcess(config.browser);
 const runtime = new CinemaBrowserRuntime(chrome, config.policy.maxReadChars);
+const executionAdapter = createCinemaExecutionAdapter(runtime);
+const operationQueue = new OperationQueue();
 const tohoReadAdapter = new TohoReadAdapter(runtime);
 const aeonReadAdapter = new AeonReadAdapter(runtime);
 const cinemas109ReadAdapter = new Cinemas109ReadAdapter(runtime);
 const purchaseGate = new PurchaseGate(config.policy.confirmationTtlMs);
+const handoffStateCodec = createRequestStateCodec<HandoffRequestState>({
+  key: randomBytes(32).toString("base64url"),
+  ttlSeconds: HANDOFF_STATE_TTL_SECONDS
+});
+const handoffOwners = new Map<string, HandoffOwner>();
+const LOCAL_PRINCIPAL_BINDING = "local-stdio";
 
 const providerSchema = z.enum(["toho", "aeon", "109"]);
 const shortText = z.string().trim().min(1).max(240);
 const isoDate = z.string().regex(/^20\d{2}-\d{2}-\d{2}$/, "date must be YYYY-MM-DD");
 const clockTime = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/, "time must be HH:MM");
+const handoffDecisionSchema = z.object({ decision: z.enum(["continue", "cancel"]) });
 
 function jsonResult(value: unknown): CallToolResult {
   return { content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }] };
@@ -40,7 +78,8 @@ function errorResult(error: unknown): CallToolResult {
   const known =
     error instanceof BrowserRuntimeError ||
     error instanceof ProviderPolicyError ||
-    error instanceof PurchaseGateError;
+    error instanceof PurchaseGateError ||
+    error instanceof ExecutionHandoffError;
   if (!known) console.error("[japan-cinema-browser-mcp] unexpected tool error", error);
   const code = known ? error.code : "INTERNAL_ERROR";
   const message = known
@@ -61,6 +100,214 @@ async function safe<T>(task: () => Promise<T> | T): Promise<CallToolResult> {
   }
 }
 
+function ownerFor(toolName: string, args: unknown, resumeStrategy: HandoffResumeStrategy): HandoffOwner {
+  return createHandoffOwner(LOCAL_PRINCIPAL_BINDING, toolName, args, resumeStrategy);
+}
+
+function cinemaInterventionPrompt(intervention: CinemaIntervention): string {
+  const label = intervention.reason === "access_challenge"
+    ? "an access challenge or CAPTCHA"
+    : intervention.reason === "sign_in"
+      ? "a sign-in or authentication step"
+      : intervention.reason === "consent"
+        ? "a consent step"
+        : "a manual identity, consent, or transaction step outside the reviewed automation surface";
+  return [
+    `The cinema browser requires ${label}.`,
+    "Complete the manual step directly in the dedicated Chrome window.",
+    "Do not paste passwords, OTP/MFA codes, CAPTCHA answers, cookies, payment-card data, bank data, or other credentials into this MCP prompt.",
+    "Choose Continue only after the manual browser step is complete, or Cancel to stop the operation."
+  ].join(" ");
+}
+
+async function humanInputRequired(
+  intervention: CinemaIntervention,
+  candidateOwner: HandoffOwner,
+  args: unknown
+): Promise<InputRequiredResult | CallToolResult> {
+  const owner = handoffOwners.get(intervention.id);
+  if (!owner || !handoffOwnerMatches(owner, candidateOwner)) {
+    return errorResult(new BrowserRuntimeError(
+      "UI_STATE_CHANGED",
+      "The active Human intervention belongs to another invocation or no longer has a valid owner. Complete or cancel the original cinema flow first."
+    ));
+  }
+
+  let active = executionAdapter.control.getActiveIntervention();
+  if (!active || active.id !== intervention.id) {
+    handoffOwners.delete(intervention.id);
+    return errorResult(new BrowserRuntimeError(
+      "UI_STATE_CHANGED",
+      "The Human intervention is no longer active. Re-read the current cinema page before continuing."
+    ));
+  }
+  if (active.status === "awaiting_human") {
+    active = executionAdapter.control.claimHumanControl(active.id);
+  }
+  if (active.status !== "human_active") {
+    return errorResult(new BrowserRuntimeError(
+      "HUMAN_ACTION_REQUIRED",
+      `The active Human intervention is ${active.status}; finish the original handoff flow first.`
+    ));
+  }
+
+  const requestState = await handoffStateCodec.mint(createHandoffRequestState({
+    toolName: owner.toolName,
+    args,
+    interventionId: active.id,
+    epoch: active.epoch,
+    resumeStrategy: owner.resumeStrategy,
+    principalBinding: owner.principalBinding
+  }));
+
+  return inputRequired({
+    requestState,
+    inputRequests: {
+      [HANDOFF_INPUT_KEY]: inputRequired.elicit({
+        message: cinemaInterventionPrompt(active),
+        requestedSchema: HUMAN_INTERVENTION_SCHEMA
+      })
+    }
+  });
+}
+
+function cancelIntervention(interventionId: string): CallToolResult {
+  const active = executionAdapter.control.getActiveIntervention();
+  if (active?.id === interventionId) executionAdapter.control.cancelHumanIntervention(interventionId);
+  handoffOwners.delete(interventionId);
+  purchaseGate.clear();
+  return jsonResult({ cancelled: true, reason: "human_intervention_cancelled" });
+}
+
+function staleAfterInterventionResult(): CallToolResult {
+  purchaseGate.clear();
+  return errorResult(new BrowserRuntimeError(
+    "UI_STATE_CHANGED",
+    "Human intervention completed, but the interrupted cinema operation was not replayed. Re-read the current provider state and issue a fresh semantic action. Seat, checkout, purchase, and payment actions always require fresh intent and a new explicit confirmation where applicable."
+  ));
+}
+
+async function executeToolTask<T>(
+  toolName: string,
+  args: unknown,
+  resumeStrategy: HandoffResumeStrategy,
+  task: () => Promise<T>
+): Promise<CallToolResult | InputRequiredResult> {
+  const owner = ownerFor(toolName, args, resumeStrategy);
+  try {
+    const result = await operationQueue.run(async () => {
+      const interventionBefore = executionAdapter.control.getActiveIntervention()?.id;
+      try {
+        return await task();
+      } finally {
+        const interventionAfter = executionAdapter.control.getActiveIntervention();
+        if (interventionAfter && interventionAfter.id !== interventionBefore) {
+          const boundOwner = claimHandoffOwner(
+            handoffOwners,
+            interventionAfter.id,
+            interventionAfter.status,
+            owner
+          );
+          if (!boundOwner) {
+            executionAdapter.control.cancelHumanIntervention(interventionAfter.id);
+            throw new BrowserRuntimeError(
+              "UI_STATE_CHANGED",
+              "A newly-created Human intervention could not be bound to its originating invocation and was cancelled."
+            );
+          }
+          // Human browser activity invalidates every prepared transaction confirmation.
+          purchaseGate.clear();
+        }
+      }
+    });
+    return jsonResult(result);
+  } catch (error) {
+    if (
+      error instanceof BrowserRuntimeError &&
+      error.code === "HUMAN_ACTION_REQUIRED" &&
+      error.intervention
+    ) {
+      return humanInputRequired(error.intervention, owner, args);
+    }
+    return errorResult(error);
+  }
+}
+
+async function runToolWithHandoff<T>(input: {
+  toolName: string;
+  args: unknown;
+  resumeStrategy: HandoffResumeStrategy;
+  ctx: ServerContext;
+  task: () => Promise<T>;
+}): Promise<CallToolResult | InputRequiredResult> {
+  const state = input.ctx.mcpReq.requestState<HandoffRequestState>();
+  if (!state) {
+    return executeToolTask(input.toolName, input.args, input.resumeStrategy, input.task);
+  }
+
+  if (!handoffStateMatchesInvocation(state, input.toolName, input.args, LOCAL_PRINCIPAL_BINDING)) {
+    return errorResult(new BrowserRuntimeError(
+      "UI_STATE_CHANGED",
+      "The returned MCP requestState does not match this cinema tool invocation. Re-read the current cinema state instead of reusing stale handoff state."
+    ));
+  }
+
+  const expectedOwner = ownerFor(input.toolName, input.args, input.resumeStrategy);
+  const owner = handoffOwners.get(state.interventionId);
+  if (!owner || !handoffOwnerMatches(owner, expectedOwner)) {
+    return errorResult(new BrowserRuntimeError(
+      "UI_STATE_CHANGED",
+      "The Human intervention owner does not match this invocation. Restart from the current reviewed cinema state."
+    ));
+  }
+
+  const active = executionAdapter.control.getActiveIntervention();
+  if (!active || active.id !== state.interventionId || active.epoch !== state.epoch) {
+    handoffOwners.delete(state.interventionId);
+    purchaseGate.clear();
+    return errorResult(new BrowserRuntimeError(
+      "UI_STATE_CHANGED",
+      "The browser changed while waiting for Human intervention. Re-read the current cinema state before continuing."
+    ));
+  }
+
+  const response = inputResponse(input.ctx.mcpReq.inputResponses, HANDOFF_INPUT_KEY);
+  if (response.kind === "missing") return humanInputRequired(active, owner, input.args);
+  if (response.kind !== "elicit" || response.action !== "accept") return cancelIntervention(state.interventionId);
+
+  const content = acceptedContent(input.ctx.mcpReq.inputResponses, HANDOFF_INPUT_KEY, handoffDecisionSchema);
+  if (!content) return humanInputRequired(active, owner, input.args);
+  if (content.decision === "cancel") return cancelIntervention(state.interventionId);
+
+  try {
+    executionAdapter.control.markHumanControlComplete(state.interventionId);
+    await operationQueue.run(() => executionAdapter.control.verifyHumanIntervention(state.interventionId));
+  } catch (error) {
+    const stillActive = executionAdapter.control.getActiveIntervention();
+    if (
+      error instanceof BrowserRuntimeError &&
+      error.code === "HUMAN_ACTION_REQUIRED" &&
+      stillActive?.id === state.interventionId &&
+      stillActive.status === "verifying"
+    ) {
+      const returned = executionAdapter.control.claimHumanControl(state.interventionId);
+      return humanInputRequired(returned, owner, input.args);
+    }
+    if (stillActive?.id === state.interventionId) executionAdapter.control.cancelHumanIntervention(state.interventionId);
+    handoffOwners.delete(state.interventionId);
+    purchaseGate.clear();
+    return errorResult(error);
+  }
+
+  const decision = executionAdapter.control.resumeAfterHumanIntervention(state.interventionId);
+  handoffOwners.delete(state.interventionId);
+  if (decision.resumePolicy !== "replay_safe" || input.resumeStrategy === "require_fresh_semantic_action") {
+    return staleAfterInterventionResult();
+  }
+
+  return executeToolTask(input.toolName, input.args, input.resumeStrategy, input.task);
+}
+
 function requireReadAdapter(provider: CinemaProviderId, capability: "theaters" | "showtimes"): CinemaReadAdapter {
   assertProviderCapability(provider, capability);
   if (provider === "toho") return tohoReadAdapter;
@@ -73,7 +320,13 @@ function requireReadAdapter(provider: CinemaProviderId, capability: "theaters" |
 }
 
 export function buildServer(): McpServer {
-  const server = new McpServer({ name: "japan-cinema-browser-mcp", version: SERVER_VERSION });
+  const server = new McpServer(
+    { name: "japan-cinema-browser-mcp", version: SERVER_VERSION },
+    {
+      requestState: { verify: handoffStateCodec.verify },
+      inputRequired: { maxRounds: 4, roundTimeoutMs: HANDOFF_STATE_TTL_SECONDS * 1_000 }
+    }
+  );
 
   server.registerTool(
     "list_cinema_providers",
@@ -103,7 +356,13 @@ export function buildServer(): McpServer {
       inputSchema: z.object({ provider: providerSchema }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true }
     },
-    async ({ provider }) => safe(() => runtime.openProvider(provider))
+    async ({ provider }, ctx) => runToolWithHandoff({
+      toolName: "open_cinema_provider",
+      args: { provider },
+      resumeStrategy: CINEMA_HANDOFF_POLICY.navigation.resumeStrategy,
+      ctx,
+      task: () => runtime.openProvider(provider)
+    })
   );
 
   server.registerTool(
@@ -117,7 +376,13 @@ export function buildServer(): McpServer {
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true }
     },
-    async ({ url, provider }) => safe(async () => ({ url: await runtime.navigate(url, provider) }))
+    async ({ url, provider }, ctx) => runToolWithHandoff({
+      toolName: "navigate_cinema_official",
+      args: { url, ...(provider ? { provider } : {}) },
+      resumeStrategy: CINEMA_HANDOFF_POLICY.navigation.resumeStrategy,
+      ctx,
+      task: async () => ({ url: await runtime.navigate(url, provider) })
+    })
   );
 
   server.registerTool(
@@ -125,9 +390,16 @@ export function buildServer(): McpServer {
     {
       title: "Read visible cinema page",
       description: "Read a bounded visible-text snapshot of the current official cinema page. Raw HTML is never returned or persisted.",
+      inputSchema: z.object({}),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true }
     },
-    async () => safe(() => runtime.readVisibleText())
+    async (_args, ctx) => runToolWithHandoff({
+      toolName: "read_cinema_page",
+      args: {},
+      resumeStrategy: CINEMA_HANDOFF_POLICY.read.resumeStrategy,
+      ctx,
+      task: () => runtime.readVisibleText()
+    })
   );
 
   server.registerTool(
@@ -135,9 +407,16 @@ export function buildServer(): McpServer {
     {
       title: "Extract visible showtimes",
       description: "Extract likely HH:MM showtime candidates and short surrounding text from the currently visible official cinema page.",
+      inputSchema: z.object({}),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true }
     },
-    async () => safe(() => runtime.extractShowtimeCandidates())
+    async (_args, ctx) => runToolWithHandoff({
+      toolName: "extract_showtime_candidates",
+      args: {},
+      resumeStrategy: CINEMA_HANDOFF_POLICY.read.resumeStrategy,
+      ctx,
+      task: () => runtime.extractShowtimeCandidates()
+    })
   );
 
   server.registerTool(
@@ -151,7 +430,13 @@ export function buildServer(): McpServer {
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true }
     },
-    async ({ provider, query }) => safe(() => requireReadAdapter(provider, "theaters").listTheaters(query))
+    async ({ provider, query }, ctx) => runToolWithHandoff({
+      toolName: "list_theaters",
+      args: { provider, ...(query ? { query } : {}) },
+      resumeStrategy: CINEMA_HANDOFF_POLICY.navigation.resumeStrategy,
+      ctx,
+      task: () => requireReadAdapter(provider, "theaters").listTheaters(query)
+    })
   );
 
   server.registerTool(
@@ -167,11 +452,17 @@ export function buildServer(): McpServer {
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true }
     },
-    async ({ provider, theater, date, movie }) => safe(() => requireReadAdapter(provider, "showtimes").getShowtimes({
-      theater,
-      ...(date ? { date } : {}),
-      ...(movie ? { movie } : {})
-    }))
+    async ({ provider, theater, date, movie }, ctx) => runToolWithHandoff({
+      toolName: "get_showtimes",
+      args: { provider, theater, ...(date ? { date } : {}), ...(movie ? { movie } : {}) },
+      resumeStrategy: CINEMA_HANDOFF_POLICY.navigation.resumeStrategy,
+      ctx,
+      task: () => requireReadAdapter(provider, "showtimes").getShowtimes({
+        theater,
+        ...(date ? { date } : {}),
+        ...(movie ? { movie } : {})
+      })
+    })
   );
 
   server.registerTool(
@@ -189,14 +480,24 @@ export function buildServer(): McpServer {
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true }
     },
-    async ({ candidates, sourceTruncated, limit }) => safe(() => resolveTheaterTargets(
-      {
+    async ({ candidates, sourceTruncated, limit }, ctx) => runToolWithHandoff({
+      toolName: "resolve_theater_targets",
+      args: {
         candidates,
         ...(sourceTruncated !== undefined ? { sourceTruncated } : {}),
         ...(limit !== undefined ? { limit } : {})
       },
-      (provider) => requireReadAdapter(provider, "theaters")
-    ))
+      resumeStrategy: CINEMA_HANDOFF_POLICY.navigation.resumeStrategy,
+      ctx,
+      task: () => resolveTheaterTargets(
+        {
+          candidates,
+          ...(sourceTruncated !== undefined ? { sourceTruncated } : {}),
+          ...(limit !== undefined ? { limit } : {})
+        },
+        (provider) => requireReadAdapter(provider, "theaters")
+      )
+    })
   );
 
   server.registerTool(
@@ -220,8 +521,9 @@ export function buildServer(): McpServer {
       ),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true }
     },
-    async ({ targets, date, movie, after, before, format }) => safe(() => findShowtimes(
-      {
+    async ({ targets, date, movie, after, before, format }, ctx) => runToolWithHandoff({
+      toolName: "find_showtimes",
+      args: {
         targets,
         ...(date ? { date } : {}),
         ...(movie ? { movie } : {}),
@@ -229,8 +531,20 @@ export function buildServer(): McpServer {
         ...(before ? { before } : {}),
         ...(format ? { format } : {})
       },
-      (provider) => requireReadAdapter(provider, "showtimes")
-    ))
+      resumeStrategy: CINEMA_HANDOFF_POLICY.navigation.resumeStrategy,
+      ctx,
+      task: () => findShowtimes(
+        {
+          targets,
+          ...(date ? { date } : {}),
+          ...(movie ? { movie } : {}),
+          ...(after ? { after } : {}),
+          ...(before ? { before } : {}),
+          ...(format ? { format } : {})
+        },
+        (provider) => requireReadAdapter(provider, "showtimes")
+      )
+    })
   );
 
   server.registerTool(
@@ -241,7 +555,13 @@ export function buildServer(): McpServer {
       inputSchema: z.object({ label: shortText }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false }
     },
-    async ({ label }) => safe(() => runtime.clickControl(label))
+    async ({ label }, ctx) => runToolWithHandoff({
+      toolName: "click_cinema_control",
+      args: { label },
+      resumeStrategy: CINEMA_HANDOFF_POLICY.semantic_mutation.resumeStrategy,
+      ctx,
+      task: () => runtime.clickControl(label)
+    })
   );
 
   server.registerTool(
@@ -255,7 +575,13 @@ export function buildServer(): McpServer {
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true }
     },
-    async ({ label, value }) => safe(() => runtime.fillField(label, value))
+    async ({ label, value }, ctx) => runToolWithHandoff({
+      toolName: "fill_cinema_field",
+      args: { label, value },
+      resumeStrategy: CINEMA_HANDOFF_POLICY.semantic_mutation.resumeStrategy,
+      ctx,
+      task: () => runtime.fillField(label, value)
+    })
   );
 
   server.registerTool(
@@ -312,26 +638,32 @@ export function buildServer(): McpServer {
       inputSchema: z.object({ confirmationId: z.string().trim().min(1).max(200) }),
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false }
     },
-    async ({ confirmationId }) => safe(async () => {
-      if (!config.policy.enablePurchase) {
-        throw new BrowserRuntimeError(
-          "FINAL_ACTION_REQUIRES_CONFIRMATION",
-          "Final purchase execution is disabled. Set CINEMA_ENABLE_PURCHASE=true only after reviewing the provider flow."
+    async ({ confirmationId }, ctx) => runToolWithHandoff({
+      toolName: "confirm_purchase_action",
+      args: { confirmationId },
+      resumeStrategy: CINEMA_HANDOFF_POLICY.transaction.resumeStrategy,
+      ctx,
+      task: async () => {
+        if (!config.policy.enablePurchase) {
+          throw new BrowserRuntimeError(
+            "FINAL_ACTION_REQUIRES_CONFIRMATION",
+            "Final purchase execution is disabled. Set CINEMA_ENABLE_PURCHASE=true only after reviewing the provider flow."
+          );
+        }
+        const confirmation = purchaseGate.consume(confirmationId);
+        assertProviderCapability(confirmation.summary.provider, "purchaseSubmission");
+        const status = await runtime.status();
+        if (status.url !== confirmation.expectedUrl || status.provider !== confirmation.summary.provider) {
+          throw new BrowserRuntimeError(
+            "UI_STATE_CHANGED",
+            "The browser page changed after confirmation was prepared. Re-read the page and prepare a new confirmation."
+          );
+        }
+        return runtime.finalPurchaseClick(
+          confirmation.summary.finalControlLabel,
+          confirmation.summary.provider
         );
       }
-      const confirmation = purchaseGate.consume(confirmationId);
-      assertProviderCapability(confirmation.summary.provider, "purchaseSubmission");
-      const status = await runtime.status();
-      if (status.url !== confirmation.expectedUrl || status.provider !== confirmation.summary.provider) {
-        throw new BrowserRuntimeError(
-          "UI_STATE_CHANGED",
-          "The browser page changed after confirmation was prepared. Re-read the page and prepare a new confirmation."
-        );
-      }
-      return runtime.finalPurchaseClick(
-        confirmation.summary.finalControlLabel,
-        confirmation.summary.provider
-      );
     })
   );
 

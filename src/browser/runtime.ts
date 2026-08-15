@@ -1,5 +1,13 @@
 import CDP from "chrome-remote-interface";
+import {
+  ExecutionHandoffError,
+  ExecutionHandoffState,
+  type ExecutionIntervention,
+  type ResumeDecision,
+  type ResumePolicy
+} from "mcp-execution-handoff/core";
 import { ChromeProcess } from "./chrome-process.js";
+import { CINEMA_HANDOFF_POLICY } from "../handoff-policy.js";
 import {
   CINEMA_PROVIDERS,
   ProviderPolicyError,
@@ -18,6 +26,12 @@ function sleep(ms: number): Promise<void> {
 
 type CdpClient = Awaited<ReturnType<typeof CDP>>;
 
+export type CinemaInterventionReason =
+  | "access_challenge"
+  | "sign_in"
+  | "consent";
+export type CinemaIntervention = ExecutionIntervention<never, CinemaInterventionReason>;
+
 export class BrowserRuntimeError extends Error {
   constructor(
     public readonly code:
@@ -32,28 +46,45 @@ export class BrowserRuntimeError extends Error {
       | "SENSITIVE_FIELD"
       | "FINAL_ACTION_REQUIRES_CONFIRMATION",
     message: string,
-    public readonly details?: Record<string, unknown>
+    public readonly details?: Record<string, unknown>,
+    public readonly intervention?: CinemaIntervention
   ) {
     super(message);
     this.name = "BrowserRuntimeError";
   }
 }
 
-const CHALLENGE_EXPRESSION = `(() => {
+const INTERVENTION_EXPRESSION = `(() => {
   const visible = (el) => {
     const r = el.getBoundingClientRect();
     const s = getComputedStyle(el);
     return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
   };
-  const selectors = [
+  const anyVisible = (selectors) => selectors.some((selector) => Array.from(document.querySelectorAll(selector)).some(visible));
+  if (anyVisible([
     'iframe[src*="recaptcha"]',
     'iframe[src*="hcaptcha"]',
     'iframe[src*="challenge"]',
     'form[action*="captcha"]',
     '#captcha',
     'input[name*="captcha" i]'
-  ];
-  return selectors.some((selector) => Array.from(document.querySelectorAll(selector)).some(visible));
+  ])) return 'access_challenge';
+  if (anyVisible([
+    'input[type="password"]',
+    'input[autocomplete="current-password"]',
+    'input[autocomplete="new-password"]',
+    'input[autocomplete="one-time-code"]'
+  ])) return 'sign_in';
+  const dialogs = Array.from(document.querySelectorAll('[role="dialog"],dialog,[aria-modal="true"]')).filter(visible);
+  for (const dialog of dialogs) {
+    const text = String(dialog.textContent || '').replace(/\s+/g, ' ').toLocaleLowerCase();
+    const hasConsentTopic = /cookie|privacy|terms|同意|プライバシー|利用規約/.test(text);
+    const hasConsentControl = Array.from(dialog.querySelectorAll('button,[role="button"],input[type="submit"]'))
+      .filter(visible)
+      .some((el) => /accept|agree|consent|同意|許可/.test(String(el.getAttribute('aria-label') || el.textContent || el.value || '').toLocaleLowerCase()));
+    if (hasConsentTopic && hasConsentControl) return 'consent';
+  }
+  return null;
 })()`;
 
 function visibleTextExpression(maxChars: number): string {
@@ -177,6 +208,7 @@ export class CinemaBrowserRuntime {
   private client?: CdpClient;
   private port?: number;
   private targetId?: string;
+  private readonly handoff = new ExecutionHandoffState<never, CinemaInterventionReason>();
 
   constructor(
     private readonly chrome: ChromeProcess,
@@ -184,6 +216,7 @@ export class CinemaBrowserRuntime {
   ) {}
 
   async status(): Promise<Record<string, unknown>> {
+    this.handoff.assertAgentAuthority();
     try {
       const client = await this.getClient();
       const url = await this.currentUrlUnchecked(client);
@@ -211,7 +244,10 @@ export class CinemaBrowserRuntime {
     const loaded = client.Page.loadEventFired();
     await client.Page.navigate({ url: url.href });
     await Promise.race([loaded, sleep(8_000)]);
-    return this.assertGenericCurrentUrl(expectedProvider);
+    await this.assertNoIntervention(CINEMA_HANDOFF_POLICY.navigation.resumePolicy);
+    const current = await this.assertGenericCurrentUrl(expectedProvider);
+    this.handoff.advanceResourceEpoch();
+    return current;
   }
 
   async navigateReviewed(value: string, expectedProvider: CinemaProviderId): Promise<string> {
@@ -220,12 +256,15 @@ export class CinemaBrowserRuntime {
     const loaded = client.Page.loadEventFired();
     await client.Page.navigate({ url: url.href });
     await Promise.race([loaded, sleep(8_000)]);
-    return this.assertOfficialCurrentUrl(expectedProvider);
+    await this.assertNoIntervention(CINEMA_HANDOFF_POLICY.navigation.resumePolicy);
+    const current = await this.assertOfficialCurrentUrl(expectedProvider);
+    this.handoff.advanceResourceEpoch();
+    return current;
   }
 
   async readVisibleText(): Promise<Record<string, unknown>> {
     const url = await this.assertGenericCurrentUrl();
-    await this.assertNoChallenge();
+    await this.assertNoIntervention(CINEMA_HANDOFF_POLICY.read.resumePolicy);
     const client = await this.getClient();
     const result = await client.Runtime.evaluate({
       expression: visibleTextExpression(this.maxReadChars),
@@ -245,7 +284,7 @@ export class CinemaBrowserRuntime {
 
   async extractShowtimeCandidates(): Promise<Record<string, unknown>> {
     const url = await this.assertGenericCurrentUrl();
-    await this.assertNoChallenge();
+    await this.assertNoIntervention(CINEMA_HANDOFF_POLICY.read.resumePolicy);
     const client = await this.getClient();
     const result = await client.Runtime.evaluate({
       expression: SHOWTIME_EXPRESSION,
@@ -262,7 +301,7 @@ export class CinemaBrowserRuntime {
 
   async evaluateSemanticState<T>(expectedProvider: CinemaProviderId, expression: string): Promise<{ url: string; value: T }> {
     const url = await this.assertOfficialCurrentUrl(expectedProvider);
-    await this.assertNoChallenge();
+    await this.assertNoIntervention(CINEMA_HANDOFF_POLICY.read.resumePolicy);
     const client = await this.getClient();
     const result = await client.Runtime.evaluate({
       expression,
@@ -277,27 +316,22 @@ export class CinemaBrowserRuntime {
 
   async clickControl(query: string): Promise<Record<string, unknown>> {
     const before = await this.assertGenericCurrentUrl();
-    await this.assertNoChallenge();
+    await this.assertNoIntervention(CINEMA_HANDOFF_POLICY.semantic_mutation.resumePolicy);
     const provider = providerForUrl(before);
     if (!provider) throw new BrowserRuntimeError("URL_NOT_ALLOWED", "Current page is outside the reviewed cinema boundary.");
     const resolved = await this.resolveControl(query);
     this.wrapProviderPolicy(() => assertGenericControlAllowed(provider.id, resolved.label, resolved.targetUrl));
     await this.clickExact(resolved.label);
     await sleep(350);
-    const after = await this.assertGenericCurrentUrl(provider.id).catch((error) => {
-      throw new BrowserRuntimeError(
-        "HUMAN_ACTION_REQUIRED",
-        "The browser left the reviewed public read surfaces. Continue manually if this is an expected transactional, payment, or identity surface.",
-        { previousUrl: before, cause: error instanceof Error ? error.message : String(error) }
-      );
-    });
-    await this.assertNoChallenge();
+    await this.assertNoIntervention(CINEMA_HANDOFF_POLICY.semantic_mutation.resumePolicy);
+    const after = await this.assertGenericCurrentUrl(provider.id);
+    this.handoff.advanceResourceEpoch();
     return { clicked: resolved.label, url: after };
   }
 
   async clickReviewedControl(query: string, expectedProvider: CinemaProviderId): Promise<Record<string, unknown>> {
     const before = await this.assertOfficialCurrentUrl(expectedProvider);
-    await this.assertNoChallenge();
+    await this.assertNoIntervention(CINEMA_HANDOFF_POLICY.semantic_mutation.resumePolicy);
     const resolved = await this.resolveControl(query);
     if (isFinalPurchaseLabel(resolved.label)) {
       throw new BrowserRuntimeError(
@@ -307,14 +341,9 @@ export class CinemaBrowserRuntime {
     }
     await this.clickExact(resolved.label);
     await sleep(350);
-    const after = await this.assertOfficialCurrentUrl(expectedProvider).catch((error) => {
-      throw new BrowserRuntimeError(
-        "HUMAN_ACTION_REQUIRED",
-        "The reviewed provider flow left its official cinema domain. Continue manually if this is an expected payment or identity surface.",
-        { previousUrl: before, cause: error instanceof Error ? error.message : String(error) }
-      );
-    });
-    await this.assertNoChallenge();
+    await this.assertNoIntervention(CINEMA_HANDOFF_POLICY.semantic_mutation.resumePolicy);
+    const after = await this.assertOfficialCurrentUrl(expectedProvider);
+    this.handoff.advanceResourceEpoch();
     return { clicked: resolved.label, url: after };
   }
 
@@ -323,7 +352,7 @@ export class CinemaBrowserRuntime {
     const provider = providerForUrl(current);
     if (!provider) throw new BrowserRuntimeError("URL_NOT_ALLOWED", "Current page is outside the reviewed cinema boundary.");
     this.wrapProviderPolicy(() => assertGenericFieldAllowed(provider.id, query));
-    await this.assertNoChallenge();
+    await this.assertNoIntervention(CINEMA_HANDOFF_POLICY.semantic_mutation.resumePolicy);
     const client = await this.getClient();
     const inspect = await client.Runtime.evaluate({ expression: fieldExpression(query), returnByValue: true });
     const observed = inspect.result.value as { ok?: boolean; label?: string; candidates?: string[] } | undefined;
@@ -337,12 +366,13 @@ export class CinemaBrowserRuntime {
     const filled = await client.Runtime.evaluate({ expression: fieldExpression(observedLabel, value), returnByValue: true });
     const result = filled.result.value as { ok?: boolean; label?: string; type?: string } | undefined;
     if (!result?.ok) throw new BrowserRuntimeError("UI_STATE_CHANGED", "The field changed before it could be filled");
+    this.handoff.advanceResourceEpoch();
     return { filled: result.label, type: result.type };
   }
 
   async finalPurchaseClick(label: string, expectedProvider: CinemaProviderId): Promise<Record<string, unknown>> {
     await this.assertOfficialCurrentUrl(expectedProvider);
-    await this.assertNoChallenge();
+    await this.assertNoIntervention(CINEMA_HANDOFF_POLICY.transaction.resumePolicy);
     const resolved = await this.resolveControl(label);
     if (!isFinalPurchaseLabel(resolved.label)) {
       throw new BrowserRuntimeError("UI_STATE_CHANGED", "The confirmed target no longer looks like a final purchase/payment control");
@@ -351,10 +381,66 @@ export class CinemaBrowserRuntime {
     await sleep(350);
     const client = await this.getClient();
     const url = await this.currentUrlUnchecked(client);
+    this.handoff.advanceResourceEpoch();
     return { submitted: true, clicked: resolved.label, url };
   }
 
+  getResourceEpoch(): number {
+    return this.handoff.getResourceEpoch();
+  }
+
+  getActiveIntervention(): CinemaIntervention | undefined {
+    return this.handoff.getActive();
+  }
+
+  claimHumanControl(interventionId: string): CinemaIntervention {
+    return this.handoff.claimHuman(interventionId);
+  }
+
+  markHumanControlComplete(interventionId: string): CinemaIntervention {
+    return this.handoff.markHumanComplete(interventionId);
+  }
+
+  async verifyHumanIntervention(interventionId: string): Promise<CinemaIntervention> {
+    const active = this.handoff.getActive();
+    if (!active || active.id !== interventionId) {
+      throw new ExecutionHandoffError("INTERVENTION_NOT_FOUND", "The cinema intervention is no longer active");
+    }
+    const client = await this.getVerificationClient();
+    const url = await this.currentUrlUnchecked(client);
+    try {
+      assertOfficialUrl(url);
+    } catch {
+      throw new BrowserRuntimeError(
+        "HUMAN_ACTION_REQUIRED",
+        "Return to the reviewed official cinema site before completing the Human handoff.",
+        undefined,
+        active
+      );
+    }
+    const surface = await this.detectInterventionSurface(client);
+    if (surface) {
+      throw new BrowserRuntimeError(
+        "HUMAN_ACTION_REQUIRED",
+        "The manual sign-in, consent, or challenge surface is still active.",
+        undefined,
+        active
+      );
+    }
+    return this.handoff.markVerified(interventionId);
+  }
+
+  resumeAfterHumanIntervention(interventionId: string): ResumeDecision<never> {
+    return this.handoff.resumeAgent(interventionId);
+  }
+
+  cancelHumanIntervention(interventionId: string): void {
+    this.handoff.cancel(interventionId);
+  }
+
   async close(): Promise<void> {
+    const active = this.handoff.getActive();
+    if (active) this.handoff.cancel(active.id);
     const client = this.client;
     this.client = undefined;
     this.targetId = undefined;
@@ -389,15 +475,31 @@ export class CinemaBrowserRuntime {
     }
   }
 
-  private async assertNoChallenge(): Promise<void> {
+  private async assertNoIntervention(resumePolicy: ResumePolicy): Promise<void> {
     const client = await this.getClient();
-    const result = await client.Runtime.evaluate({ expression: CHALLENGE_EXPRESSION, returnByValue: true });
-    if (result.result.value === true) {
-      throw new BrowserRuntimeError(
-        "HUMAN_ACTION_REQUIRED",
-        "An access challenge is visible. Automatic bypass is intentionally unsupported; complete it directly in Chrome."
-      );
-    }
+    const surface = await this.detectInterventionSurface(client);
+    if (!surface) return;
+    const message = surface === "access_challenge"
+      ? "An access challenge is visible. Automatic bypass is intentionally unsupported; complete it directly in Chrome."
+      : surface === "sign_in"
+        ? "A sign-in or authentication surface is visible. Enter credentials, OTP, or MFA only directly in Chrome, never through MCP."
+        : "A consent surface requires direct Human review in Chrome.";
+    this.requireHumanIntervention(surface, resumePolicy, message);
+  }
+
+  private async detectInterventionSurface(client: CdpClient): Promise<CinemaInterventionReason | undefined> {
+    const result = await client.Runtime.evaluate({ expression: INTERVENTION_EXPRESSION, returnByValue: true });
+    const value = result.result.value;
+    return value === "access_challenge" || value === "sign_in" || value === "consent" ? value : undefined;
+  }
+
+  private requireHumanIntervention(
+    reason: CinemaInterventionReason,
+    resumePolicy: ResumePolicy,
+    message: string
+  ): never {
+    const intervention = this.handoff.begin({ reason, resumePolicy });
+    throw new BrowserRuntimeError("HUMAN_ACTION_REQUIRED", message, undefined, intervention);
   }
 
   private async assertOfficialCurrentUrl(expectedProvider?: CinemaProviderId): Promise<string> {
@@ -439,6 +541,13 @@ export class CinemaBrowserRuntime {
   }
 
   private async getClient(): Promise<CdpClient> {
+    this.handoff.assertAgentAuthority();
+    await this.ensureConnected();
+    if (!this.client) throw new BrowserRuntimeError("BROWSER_UNAVAILABLE", "Chrome DevTools client is unavailable");
+    return this.client;
+  }
+
+  private async getVerificationClient(): Promise<CdpClient> {
     await this.ensureConnected();
     if (!this.client) throw new BrowserRuntimeError("BROWSER_UNAVAILABLE", "Chrome DevTools client is unavailable");
     return this.client;
