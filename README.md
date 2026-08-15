@@ -171,15 +171,15 @@ CINEMA_ENABLE_PURCHASE=true npm start
 - `list_cinema_providers` — 対応provider一覧とcapability
 - `browser_status` — Chrome/CDP状態
 - `open_cinema_provider` — 公式サイトを開く
-- `navigate_cinema_official` — 許可済み公式ドメイン内だけ移動する
+- `navigate_cinema_official` — 明示レビュー済みのpublic read surfaceだけへ移動する。同一公式domain内でも任意path/subdomainは許可しない
 - `read_cinema_page` — 表示中情報を上限付きで読む
 - `extract_showtime_candidates` — 表示中の上映時刻候補を抽出する
 - `list_theaters` — providerの公式公開UIから劇場をsemanticに読む。TOHO / AEON / 109有効
 - `get_showtimes` — 劇場・日付・作品・上映回をsemanticに読む。TOHO / AEON / 109有効
 - `resolve_theater_targets` — Maps等のbounded external place labelsをprovider公式劇場UIで再照合し、最大3件のverified `{ provider, theater }` targetへ変換する
 - `find_showtimes` — 最大3件の明示provider/theater targetを同一request内で順次読み、共通contractでfilter・集約する。provider failureは`complete=false`と`failures`で明示
-- `click_cinema_control` — 表示中の通常操作を実行する
-- `fill_cinema_field` — 非機密フィールドだけ入力する
+- `click_cinema_control` — reviewed read surface内の明示的read操作だけを実行する。seat/checkout/purchase系はprovider capabilityで拒否
+- `fill_cinema_field` — reviewed read-only search/filter fieldだけ入力する。seat/checkout fieldと機密fieldは拒否
 - `prepare_purchase_confirmation` — 現在の購入内容を確認用に固定する
 - `confirm_purchase_action` — 最終購入操作。provider capabilityが必要で、現在全provider無効
 - `close_browser_session` — MCP所有Chromeを閉じる
@@ -193,6 +193,8 @@ npm run build
 ```
 
 providerの非購入live smokeは通常CIには含めず、低頻度で明示実行します。
+
+Generic navigation/click/fill と provider adapter内部のreviewed flowは別policyです。Generic toolはpositive allow-listのpublic read surfaceだけを扱い、adapterはrendered public UIから採用・検証したexplicit route/controlだけを内部primitiveで操作します。
 
 ```bash
 npm run smoke:toho

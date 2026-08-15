@@ -662,7 +662,7 @@ export class Cinemas109ReadAdapter implements CinemaReadAdapter<"109", Cinemas10
       throw new BrowserRuntimeError("UI_STATE_CHANGED", "109 Cinemas requested date is not a valid calendar date.", { date });
     }
 
-    const opened = await this.runtime.navigate(theater.url, "109");
+    const opened = await this.runtime.navigateReviewed(theater.url, "109");
     if (opened !== theater.url) {
       throw new BrowserRuntimeError("UI_STATE_CHANGED", "109 Cinemas redirected away from the explicitly resolved theater page.", {
         expected: theater.url,
@@ -686,7 +686,7 @@ export class Cinemas109ReadAdapter implements CinemaReadAdapter<"109", Cinemas10
     }
 
     const expectedRoute = review109ScheduleUrl(requested.url, theater.id);
-    const sourceUrl = await this.runtime.navigate(expectedRoute.url, "109");
+    const sourceUrl = await this.runtime.navigateReviewed(expectedRoute.url, "109");
     const actualRoute = review109ScheduleUrl(sourceUrl, theater.id);
     if (
       actualRoute.date !== expectedRoute.date ||
@@ -720,7 +720,7 @@ export class Cinemas109ReadAdapter implements CinemaReadAdapter<"109", Cinemas10
     const status = await this.runtime.status();
     const currentUrl = typeof status.url === "string" ? status.url : "";
     if (!isTheaterListUrl(currentUrl)) {
-      await this.runtime.navigate(CINEMAS_109_HOME_URL, "109");
+      await this.runtime.navigateReviewed(CINEMAS_109_HOME_URL, "109");
     }
     let semantic: { url: string; value: TheaterSnapshot } | undefined;
     for (let attempt = 0; attempt < THEATER_READY_ATTEMPTS; attempt += 1) {

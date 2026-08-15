@@ -3,6 +3,9 @@ import assert from "node:assert/strict";
 import {
   CINEMA_PROVIDERS,
   ProviderPolicyError,
+  assertGenericControlAllowed,
+  assertGenericFieldAllowed,
+  assertGenericNavigationUrl,
   assertOfficialUrl,
   assertProviderCapability,
   isFinalPurchaseLabel,
@@ -91,4 +94,111 @@ test("final purchase labels are detected", () => {
   }
   assert.equal(isFinalPurchaseLabel("座席を選ぶ"), false);
   assert.equal(isFinalPurchaseLabel("次へ"), false);
+});
+
+test("generic navigation is limited to reviewed public read surfaces", () => {
+  for (const [url, provider] of [
+    ["https://www.tohotheater.jp/", "toho"],
+    ["https://www.tohotheater.jp/theater/find.html", "toho"],
+    ["https://hlo.tohotheater.jp/net/schedule/036/TNPI2000J01.do", "toho"],
+    ["https://www.aeoncinema.com/theater/", "aeon"],
+    ["https://theater.aeoncinema.com/theaters/hakusan/?date=20260815", "aeon"],
+    ["https://109cinemas.net/", "109"],
+    ["https://109cinemas.net/kohoku/", "109"],
+    ["https://109cinemas.net/kohoku/schedules/20260815.html", "109"]
+  ] as const) {
+    assert.doesNotThrow(() => assertGenericNavigationUrl(url, provider), `${provider}: ${url}`);
+  }
+
+  for (const url of [
+    "https://api.tohotheater.jp/internal/schedule",
+    "https://www.tohotheater.jp/api/private",
+    "https://foo.aeoncinema.com/path",
+    "https://theater.aeoncinema.com/api/showtimes",
+    "https://cinema.109cinemas.net/path",
+    "https://109cinemas.net/api/internal",
+    "https://109cinemas.net/kohoku/schedules/20260815.html?theater_code=13"
+  ]) {
+    assert.throws(
+      () => assertGenericNavigationUrl(url),
+      (error) => error instanceof ProviderPolicyError && error.code === "URL_NOT_ALLOWED",
+      url
+    );
+  }
+});
+
+test("generic navigation preserves wrong-domain, credential and port rejection", () => {
+  for (const url of [
+    "https://tohotheater.jp.evil.example/",
+    "https://user:pass@www.aeoncinema.com/theater/",
+    "https://109cinemas.net:8443/kohoku/"
+  ]) {
+    assert.throws(
+      () => assertGenericNavigationUrl(url),
+      (error) => error instanceof ProviderPolicyError && error.code === "URL_NOT_ALLOWED",
+      url
+    );
+  }
+});
+
+test("generic controls enforce disabled transaction capabilities before fuzzy automation", () => {
+  for (const provider of ["toho", "aeon", "109"] as const) {
+    for (const label of ["座席を選ぶ", "座席選択", "Select seats"]) {
+      assert.throws(
+        () => assertGenericControlAllowed(provider, label),
+        (error) => error instanceof ProviderPolicyError && error.code === "UNSUPPORTED_CAPABILITY",
+        `${provider}: ${label}`
+      );
+    }
+    for (const label of ["券種を選択", "チケット枚数", "Checkout", "お客様情報へ進む", "次へ"]) {
+      assert.throws(
+        () => assertGenericControlAllowed(provider, label),
+        (error) => error instanceof ProviderPolicyError && error.code === "UNSUPPORTED_CAPABILITY",
+        `${provider}: ${label}`
+      );
+    }
+    assert.throws(
+      () => assertGenericControlAllowed(provider, "購入する"),
+      (error) => error instanceof ProviderPolicyError && error.code === "UNSUPPORTED_CAPABILITY",
+      provider
+    );
+  }
+});
+
+test("generic controls allow reviewed read navigation but reject unknown script-driven controls", () => {
+  assert.doesNotThrow(() => assertGenericControlAllowed(
+    "109",
+    "港北",
+    "https://109cinemas.net/kohoku/"
+  ));
+  assert.doesNotThrow(() => assertGenericControlAllowed("toho", "8/15（土）"));
+  assert.throws(
+    () => assertGenericControlAllowed("toho", "続行"),
+    (error) => error instanceof ProviderPolicyError && error.code === "UNREVIEWED_INTERACTION"
+  );
+  assert.throws(
+    () => assertGenericControlAllowed("109", "詳細", "https://109cinemas.net/api/internal"),
+    (error) => error instanceof ProviderPolicyError && error.code === "URL_NOT_ALLOWED"
+  );
+});
+
+test("generic fields allow read filters but block seat, checkout and unreviewed fields", () => {
+  assert.doesNotThrow(() => assertGenericFieldAllowed("aeon", "劇場を検索"));
+  assert.doesNotThrow(() => assertGenericFieldAllowed("109", "作品名"));
+  assert.throws(
+    () => assertGenericFieldAllowed("toho", "カード番号"),
+    (error) => error instanceof ProviderPolicyError && error.code === "SENSITIVE_FIELD"
+  );
+  for (const [label, code] of [
+    ["座席番号", "UNSUPPORTED_CAPABILITY"],
+    ["チケット枚数", "UNSUPPORTED_CAPABILITY"],
+    ["メールアドレス", "UNSUPPORTED_CAPABILITY"],
+    ["備考", "UNREVIEWED_INTERACTION"]
+  ] as const) {
+    assert.throws(
+      () => assertGenericFieldAllowed("toho", label),
+      (error) => error instanceof ProviderPolicyError && error.code === code,
+      label
+    );
+  }
 });

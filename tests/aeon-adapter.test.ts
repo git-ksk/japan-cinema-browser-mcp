@@ -206,13 +206,13 @@ test("AEON dateAvailable remains a date-level fact when a movie filter matches n
       provider: "aeon",
       officialSurface: true
     }),
-    navigate: async (url: string) => url,
+    navigateReviewed: async (url: string) => url,
     evaluateSemanticState: async () => {
       const state = states[index++];
       if (!state) throw new Error("fake semantic state exhausted");
       return state;
     },
-    clickControl: async () => ({ clicked: true })
+    clickReviewedControl: async () => ({ clicked: true })
   } as unknown as CinemaBrowserRuntime;
 
   const result = await new AeonReadAdapter(runtime).getShowtimes({

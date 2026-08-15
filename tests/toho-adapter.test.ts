@@ -24,13 +24,13 @@ function fakeRuntime(states: Array<{ url: string; value: unknown }>): CinemaBrow
   let index = 0;
   const runtime = {
     status: async () => ({ connected: true, url: THEATER_LIST_URL, provider: "toho", officialSurface: true }),
-    navigate: async (url: string) => url,
+    navigateReviewed: async (url: string) => url,
     evaluateSemanticState: async () => {
       const state = states[index++];
       if (!state) throw new Error("fake semantic state exhausted");
       return state;
     },
-    clickControl: async () => ({ clicked: true })
+    clickReviewedControl: async () => ({ clicked: true })
   };
   return runtime as unknown as CinemaBrowserRuntime;
 }

@@ -88,14 +88,18 @@ password/card number/CVV/OTP/MFA/session tokenをMCPに読ませたり入力さ�
 - localStorage/sessionStorage dumpを作らない
 - logへfield valueを出さない
 
-### Accidental Purchase
+### Transactional Workflow Bypass / Accidental Purchase
 
-generic clickで決済確定ボタンを押すリスクがあります。
+generic navigation/click/fillからseat selectionやcheckoutへ進み、provider capabilityを迂回するリスクがあります。
 
 対策:
 
-- final-action label分類
-- generic clickから拒否
+- generic navigationはreview済みpublic read surfaceのpositive allow-list
+- same-domainの任意path/subdomainを許可しない
+- generic click/fillでseat map / seat selection / checkout preparation / purchase submissionをcapability gateへ接続
+- 未レビューのscript-driven control / fieldはfail closed
+- provider adapter内部のreviewed read-only primitiveをnorthbound generic toolから分離
+- final-action label分類とgeneric clickからの拒否
 - final submitは別tool
 - runtime flagでデフォルト無効
 - transaction summaryを確認してからconfirmation発行

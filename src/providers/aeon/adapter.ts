@@ -461,7 +461,7 @@ export class AeonReadAdapter implements CinemaReadAdapter<"aeon", AeonTheater, A
     const theater = resolvedTheater(candidate, baseScheduleUrl);
     const date = input.date ?? tokyoTodayIso();
     const targetUrl = buildAeonScheduleUrl(baseScheduleUrl, date);
-    const sourceUrl = await this.runtime.navigate(targetUrl, "aeon");
+    const sourceUrl = await this.runtime.navigateReviewed(targetUrl, "aeon");
     const current = new URL(sourceUrl);
     const expectedPath = new URL(baseScheduleUrl).pathname;
     if (
@@ -496,7 +496,7 @@ export class AeonReadAdapter implements CinemaReadAdapter<"aeon", AeonTheater, A
     const status = await this.runtime.status();
     const currentUrl = typeof status.url === "string" ? status.url : "";
     if (!isTheaterListUrl(currentUrl)) {
-      await this.runtime.navigate(AEON_THEATER_LIST_URL, "aeon");
+      await this.runtime.navigateReviewed(AEON_THEATER_LIST_URL, "aeon");
     }
     let semantic: { url: string; value: TheaterSnapshot } | undefined;
     for (let attempt = 0; attempt < THEATER_READY_ATTEMPTS; attempt += 1) {
@@ -543,7 +543,7 @@ export class AeonReadAdapter implements CinemaReadAdapter<"aeon", AeonTheater, A
   }
 
   private async openScheduleThroughPublicUi(theater: AeonTheaterCandidate): Promise<string> {
-    await this.runtime.clickControl(theater.selectionLabel);
+    await this.runtime.clickReviewedControl(theater.selectionLabel, "aeon");
     const direct = await this.waitForScheduleUrl(6, READY_POLL_MS);
     if (direct) return direct;
 
@@ -561,7 +561,7 @@ export class AeonReadAdapter implements CinemaReadAdapter<"aeon", AeonTheater, A
     let lastError: unknown;
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       try {
-        await this.runtime.clickControl(label);
+        await this.runtime.clickReviewedControl(label, "aeon");
         return;
       } catch (error) {
         lastError = error;

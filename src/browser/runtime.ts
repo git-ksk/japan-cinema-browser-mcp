@@ -2,9 +2,12 @@ import CDP from "chrome-remote-interface";
 import { ChromeProcess } from "./chrome-process.js";
 import {
   CINEMA_PROVIDERS,
+  ProviderPolicyError,
+  assertGenericControlAllowed,
+  assertGenericFieldAllowed,
+  assertGenericNavigationUrl,
   assertOfficialUrl,
   isFinalPurchaseLabel,
-  isSensitiveFieldLabel,
   providerForUrl,
   type CinemaProviderId
 } from "../providers.js";
@@ -20,6 +23,9 @@ export class BrowserRuntimeError extends Error {
     public readonly code:
       | "BROWSER_UNAVAILABLE"
       | "URL_NOT_ALLOWED"
+      | "UNSUPPORTED_PROVIDER"
+      | "UNSUPPORTED_CAPABILITY"
+      | "UNREVIEWED_INTERACTION"
       | "UI_ELEMENT_NOT_FOUND"
       | "UI_STATE_CHANGED"
       | "HUMAN_ACTION_REQUIRED"
@@ -105,7 +111,10 @@ function controlsExpression(query: string): string {
     const exact = matches.filter((x) => x.label.toLocaleLowerCase() === q.toLocaleLowerCase());
     const chosen = exact.length === 1 ? exact[0] : (exact.length === 0 && matches.length === 1 ? matches[0] : null);
     return {
-      chosen: chosen ? chosen.label : null,
+      chosen: chosen ? {
+        label: chosen.label,
+        targetUrl: chosen.el instanceof HTMLAnchorElement ? chosen.el.href : null
+      } : null,
       candidates: matches.slice(0, 12).map((x) => x.label)
     };
   })()`;
@@ -197,12 +206,16 @@ export class CinemaBrowserRuntime {
   }
 
   async navigate(value: string, expectedProvider?: CinemaProviderId): Promise<string> {
-    let url: URL;
-    try {
-      url = assertOfficialUrl(value, expectedProvider);
-    } catch (error) {
-      throw new BrowserRuntimeError("URL_NOT_ALLOWED", error instanceof Error ? error.message : "URL is not allowed");
-    }
+    const url = this.wrapProviderPolicy(() => assertGenericNavigationUrl(value, expectedProvider));
+    const client = await this.getClient();
+    const loaded = client.Page.loadEventFired();
+    await client.Page.navigate({ url: url.href });
+    await Promise.race([loaded, sleep(8_000)]);
+    return this.assertGenericCurrentUrl(expectedProvider);
+  }
+
+  async navigateReviewed(value: string, expectedProvider: CinemaProviderId): Promise<string> {
+    const url = this.wrapProviderPolicy(() => assertOfficialUrl(value, expectedProvider));
     const client = await this.getClient();
     const loaded = client.Page.loadEventFired();
     await client.Page.navigate({ url: url.href });
@@ -211,7 +224,7 @@ export class CinemaBrowserRuntime {
   }
 
   async readVisibleText(): Promise<Record<string, unknown>> {
-    const url = await this.assertOfficialCurrentUrl();
+    const url = await this.assertGenericCurrentUrl();
     await this.assertNoChallenge();
     const client = await this.getClient();
     const result = await client.Runtime.evaluate({
@@ -231,7 +244,7 @@ export class CinemaBrowserRuntime {
   }
 
   async extractShowtimeCandidates(): Promise<Record<string, unknown>> {
-    const url = await this.assertOfficialCurrentUrl();
+    const url = await this.assertGenericCurrentUrl();
     await this.assertNoChallenge();
     const client = await this.getClient();
     const result = await client.Runtime.evaluate({
@@ -263,33 +276,53 @@ export class CinemaBrowserRuntime {
   }
 
   async clickControl(query: string): Promise<Record<string, unknown>> {
-    const before = await this.assertOfficialCurrentUrl();
+    const before = await this.assertGenericCurrentUrl();
+    await this.assertNoChallenge();
+    const provider = providerForUrl(before);
+    if (!provider) throw new BrowserRuntimeError("URL_NOT_ALLOWED", "Current page is outside the reviewed cinema boundary.");
+    const resolved = await this.resolveControl(query);
+    this.wrapProviderPolicy(() => assertGenericControlAllowed(provider.id, resolved.label, resolved.targetUrl));
+    await this.clickExact(resolved.label);
+    await sleep(350);
+    const after = await this.assertGenericCurrentUrl(provider.id).catch((error) => {
+      throw new BrowserRuntimeError(
+        "HUMAN_ACTION_REQUIRED",
+        "The browser left the reviewed public read surfaces. Continue manually if this is an expected transactional, payment, or identity surface.",
+        { previousUrl: before, cause: error instanceof Error ? error.message : String(error) }
+      );
+    });
+    await this.assertNoChallenge();
+    return { clicked: resolved.label, url: after };
+  }
+
+  async clickReviewedControl(query: string, expectedProvider: CinemaProviderId): Promise<Record<string, unknown>> {
+    const before = await this.assertOfficialCurrentUrl(expectedProvider);
     await this.assertNoChallenge();
     const resolved = await this.resolveControl(query);
-    if (isFinalPurchaseLabel(resolved)) {
+    if (isFinalPurchaseLabel(resolved.label)) {
       throw new BrowserRuntimeError(
         "FINAL_ACTION_REQUIRES_CONFIRMATION",
         "This control appears to finalize a purchase/payment/booking. Use the separate purchase confirmation flow."
       );
     }
-    await this.clickExact(resolved);
+    await this.clickExact(resolved.label);
     await sleep(350);
-    const after = await this.assertOfficialCurrentUrl().catch((error) => {
+    const after = await this.assertOfficialCurrentUrl(expectedProvider).catch((error) => {
       throw new BrowserRuntimeError(
         "HUMAN_ACTION_REQUIRED",
-        "The browser left an allow-listed cinema domain. Continue manually if this is an expected payment or identity surface.",
+        "The reviewed provider flow left its official cinema domain. Continue manually if this is an expected payment or identity surface.",
         { previousUrl: before, cause: error instanceof Error ? error.message : String(error) }
       );
     });
     await this.assertNoChallenge();
-    return { clicked: resolved, url: after };
+    return { clicked: resolved.label, url: after };
   }
 
   async fillField(query: string, value: string): Promise<Record<string, unknown>> {
-    if (isSensitiveFieldLabel(query)) {
-      throw new BrowserRuntimeError("SENSITIVE_FIELD", "Sensitive authentication or payment fields must be entered by the user directly in Chrome.");
-    }
-    await this.assertOfficialCurrentUrl();
+    const current = await this.assertGenericCurrentUrl();
+    const provider = providerForUrl(current);
+    if (!provider) throw new BrowserRuntimeError("URL_NOT_ALLOWED", "Current page is outside the reviewed cinema boundary.");
+    this.wrapProviderPolicy(() => assertGenericFieldAllowed(provider.id, query));
     await this.assertNoChallenge();
     const client = await this.getClient();
     const inspect = await client.Runtime.evaluate({ expression: fieldExpression(query), returnByValue: true });
@@ -299,10 +332,9 @@ export class CinemaBrowserRuntime {
         candidates: observed?.candidates ?? []
       });
     }
-    if (isSensitiveFieldLabel(observed.label)) {
-      throw new BrowserRuntimeError("SENSITIVE_FIELD", "The resolved field is sensitive and must be entered by the user directly in Chrome.");
-    }
-    const filled = await client.Runtime.evaluate({ expression: fieldExpression(observed.label, value), returnByValue: true });
+    const observedLabel = observed.label;
+    this.wrapProviderPolicy(() => assertGenericFieldAllowed(provider.id, observedLabel));
+    const filled = await client.Runtime.evaluate({ expression: fieldExpression(observedLabel, value), returnByValue: true });
     const result = filled.result.value as { ok?: boolean; label?: string; type?: string } | undefined;
     if (!result?.ok) throw new BrowserRuntimeError("UI_STATE_CHANGED", "The field changed before it could be filled");
     return { filled: result.label, type: result.type };
@@ -312,14 +344,14 @@ export class CinemaBrowserRuntime {
     await this.assertOfficialCurrentUrl(expectedProvider);
     await this.assertNoChallenge();
     const resolved = await this.resolveControl(label);
-    if (!isFinalPurchaseLabel(resolved)) {
+    if (!isFinalPurchaseLabel(resolved.label)) {
       throw new BrowserRuntimeError("UI_STATE_CHANGED", "The confirmed target no longer looks like a final purchase/payment control");
     }
-    await this.clickExact(resolved);
+    await this.clickExact(resolved.label);
     await sleep(350);
     const client = await this.getClient();
     const url = await this.currentUrlUnchecked(client);
-    return { submitted: true, clicked: resolved, url };
+    return { submitted: true, clicked: resolved.label, url };
   }
 
   async close(): Promise<void> {
@@ -331,16 +363,19 @@ export class CinemaBrowserRuntime {
     await this.chrome.close();
   }
 
-  private async resolveControl(query: string): Promise<string> {
+  private async resolveControl(query: string): Promise<{ label: string; targetUrl?: string }> {
     const client = await this.getClient();
     const result = await client.Runtime.evaluate({ expression: controlsExpression(query), returnByValue: true });
-    const value = result.result.value as { chosen?: string | null; candidates?: string[] } | undefined;
-    if (!value?.chosen) {
+    const value = result.result.value as { chosen?: { label?: unknown; targetUrl?: unknown } | null; candidates?: string[] } | undefined;
+    if (!value?.chosen || typeof value.chosen.label !== "string") {
       throw new BrowserRuntimeError("UI_ELEMENT_NOT_FOUND", "A unique visible control could not be identified", {
         candidates: value?.candidates ?? []
       });
     }
-    return value.chosen;
+    return {
+      label: value.chosen.label,
+      ...(typeof value.chosen.targetUrl === "string" && value.chosen.targetUrl ? { targetUrl: value.chosen.targetUrl } : {})
+    };
   }
 
   private async clickExact(label: string): Promise<void> {
@@ -373,6 +408,28 @@ export class CinemaBrowserRuntime {
       return url;
     } catch (error) {
       throw new BrowserRuntimeError("URL_NOT_ALLOWED", error instanceof Error ? error.message : "Current URL is not allowed", { url });
+    }
+  }
+
+  private async assertGenericCurrentUrl(expectedProvider?: CinemaProviderId): Promise<string> {
+    const client = await this.getClient();
+    const url = await this.currentUrlUnchecked(client);
+    try {
+      assertGenericNavigationUrl(url, expectedProvider);
+      return url;
+    } catch (error) {
+      throw new BrowserRuntimeError("URL_NOT_ALLOWED", error instanceof Error ? error.message : "Current URL is not an allowed public read surface", { url });
+    }
+  }
+
+  private wrapProviderPolicy<T>(fn: () => T): T {
+    try {
+      return fn();
+    } catch (error) {
+      if (error instanceof ProviderPolicyError) {
+        throw new BrowserRuntimeError(error.code, error.message);
+      }
+      throw error;
     }
   }
 

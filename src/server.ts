@@ -110,7 +110,7 @@ export function buildServer(): McpServer {
     "navigate_cinema_official",
     {
       title: "Navigate official cinema page",
-      description: "Navigate to an HTTPS page under a reviewed official cinema domain. Private/internal APIs and third-party surfaces are not allowed.",
+      description: "Navigate only to explicitly reviewed public read surfaces for TOHO Cinemas, AEON Cinema, or 109 Cinemas. Arbitrary same-domain paths, private/internal-like routes, credentials, and non-default ports are refused.",
       inputSchema: z.object({
         url: z.string().url().max(2_048),
         provider: providerSchema.optional()
@@ -237,7 +237,7 @@ export function buildServer(): McpServer {
     "click_cinema_control",
     {
       title: "Click cinema control",
-      description: "Click one uniquely matching visible link or button on the current official cinema page. Final purchase/payment/booking controls are refused and require the separate confirmation flow.",
+      description: "Click one uniquely matching visible control only when it stays within reviewed public read surfaces or is an explicitly reviewed read-only interaction. Seat, checkout, and purchase workflow controls are gated by provider capabilities and are currently disabled.",
       inputSchema: z.object({ label: shortText }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false }
     },
@@ -248,7 +248,7 @@ export function buildServer(): McpServer {
     "fill_cinema_field",
     {
       title: "Fill cinema field",
-      description: "Fill one uniquely matching non-sensitive visible form field. Passwords, card details, CVV/CVC, OTP/MFA and verification codes are always refused.",
+      description: "Fill one uniquely matching reviewed read-only search/filter field. Seat/checkout fields require enabled provider capabilities; passwords, card details, CVV/CVC, OTP/MFA and verification codes are always refused.",
       inputSchema: z.object({
         label: shortText,
         value: z.string().max(1_000)

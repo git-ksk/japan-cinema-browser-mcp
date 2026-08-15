@@ -74,6 +74,7 @@ export class ProviderPolicyError extends Error {
       | "UNSUPPORTED_PROVIDER"
       | "UNSUPPORTED_CAPABILITY"
       | "URL_NOT_ALLOWED"
+      | "UNREVIEWED_INTERACTION"
       | "SENSITIVE_FIELD"
       | "FINAL_ACTION_REQUIRES_CONFIRMATION",
     message: string
@@ -116,6 +117,142 @@ export function assertOfficialUrl(value: string, expectedProvider?: CinemaProvid
     );
   }
   return new URL(value);
+}
+
+function validCompactDate(value: string): boolean {
+  if (!/^20\d{6}$/.test(value)) return false;
+  const year = Number(value.slice(0, 4));
+  const month = Number(value.slice(4, 6));
+  const day = Number(value.slice(6, 8));
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
+
+function noSearchOrHash(url: URL): boolean {
+  return !url.search && !url.hash;
+}
+
+function isReviewedGenericReadSurface(url: URL, providerId: CinemaProviderId): boolean {
+  if (providerId === "toho") {
+    if (url.hostname === "www.tohotheater.jp" && ["/", "/theater/find.html"].includes(url.pathname)) {
+      return noSearchOrHash(url);
+    }
+    return (
+      ["www.tohotheater.jp", "hlo.tohotheater.jp"].includes(url.hostname) &&
+      /^\/net\/schedule\/\d{3}\/TNPI2000J01\.do$/.test(url.pathname) &&
+      noSearchOrHash(url)
+    );
+  }
+
+  if (providerId === "aeon") {
+    if (
+      url.hostname === "www.aeoncinema.com" &&
+      ["/", "/theater", "/theater/", "/theater/index.html"].includes(url.pathname)
+    ) {
+      return noSearchOrHash(url);
+    }
+    if (url.hostname !== "theater.aeoncinema.com" || !/^\/theaters\/[a-z0-9_-]+\/?$/.test(url.pathname) || url.hash) {
+      return false;
+    }
+    if (!url.search) return true;
+    const entries = [...url.searchParams.entries()];
+    return entries.length === 1 && entries[0]?.[0] === "date" && validCompactDate(entries[0]?.[1] ?? "");
+  }
+
+  if (url.hostname !== "109cinemas.net" || url.hash) return false;
+  if (url.pathname === "/") return !url.search;
+  if (/^\/[a-z0-9-]+\/$/.test(url.pathname)) return !url.search;
+  if (/^\/[a-z0-9-]+\/schedules\/20\d{6}\.html$/.test(url.pathname)) {
+    const date = url.pathname.match(/\/(20\d{6})\.html$/)?.[1];
+    return Boolean(date && validCompactDate(date) && !url.search);
+  }
+  return false;
+}
+
+export function assertGenericNavigationUrl(value: string, expectedProvider?: CinemaProviderId): URL {
+  const url = assertOfficialUrl(value, expectedProvider);
+  const provider = providerForUrl(url.href);
+  if (!provider || !isReviewedGenericReadSurface(url, provider.id)) {
+    throw new ProviderPolicyError(
+      "URL_NOT_ALLOWED",
+      "Generic navigation is limited to explicitly reviewed public cinema read surfaces. Provider adapters may use separately reviewed explicit routes discovered from rendered public UI."
+    );
+  }
+  return url;
+}
+
+function transactionCapabilityForLabel(value: string): ProviderCapability | undefined {
+  const label = value.trim();
+  if (isFinalPurchaseLabel(label)) return "purchaseSubmission";
+  if (/(座席表|座席図|seat\s*map|seat\s*availability)/i.test(label)) return "seatMap";
+  if (/(座席(?:番号|選択|指定|を選|を指定)|(?:選択|指定).*座席|seat.*(?:select|choose|pick)|(?:select|choose|pick).*seat)/i.test(label)) {
+    return "seatSelection";
+  }
+  if (/(券種|チケット(?:種類|種別|枚数)|枚数|checkout|お客様情報|購入情報|予約情報|氏名|メールアドレス|e-?mail|電話番号|phone|次へ|確認画面|支払方法|payment\s*method)/i.test(label)) {
+    return "checkoutPreparation";
+  }
+  return undefined;
+}
+
+function isReviewedReadControlLabel(value: string): boolean {
+  const label = value.trim();
+  return (
+    /^(?:20\d{2}[年\/.\-])?\d{1,2}[月\/.\-]\d{1,2}(?:日)?(?:\s*[（(][^）)]{1,4}[）)])?$/.test(label) ||
+    /上映スケジュール|スケジュールを確認|schedule/i.test(label)
+  );
+}
+
+function isReviewedReadFieldLabel(value: string): boolean {
+  return /(劇場|映画|作品|上映|検索|search|filter|日付|date)/i.test(value.trim());
+}
+
+export function assertGenericControlAllowed(
+  providerId: CinemaProviderId,
+  label: string,
+  targetUrl?: string
+): void {
+  const capability = transactionCapabilityForLabel(label);
+  if (capability) {
+    assertProviderCapability(providerId, capability);
+    if (capability === "purchaseSubmission") {
+      throw new ProviderPolicyError(
+        "FINAL_ACTION_REQUIRES_CONFIRMATION",
+        "Final purchase/payment/booking controls require the separate confirmation flow."
+      );
+    }
+    throw new ProviderPolicyError(
+      "UNREVIEWED_INTERACTION",
+      `Generic automation does not implement reviewed transactional capability '${capability}'. Use a dedicated provider workflow after separate review.`
+    );
+  }
+  if (targetUrl) {
+    assertGenericNavigationUrl(targetUrl, providerId);
+    return;
+  }
+  if (isReviewedReadControlLabel(label)) return;
+  throw new ProviderPolicyError(
+    "UNREVIEWED_INTERACTION",
+    "Generic script-driven controls are limited to explicitly reviewed read-only interactions. Use a provider adapter for provider-specific reviewed UI flows."
+  );
+}
+
+export function assertGenericFieldAllowed(providerId: CinemaProviderId, label: string): void {
+  if (isSensitiveFieldLabel(label)) {
+    throw new ProviderPolicyError("SENSITIVE_FIELD", "Sensitive authentication or payment fields must be entered by the user directly in Chrome.");
+  }
+  const capability = transactionCapabilityForLabel(label);
+  if (capability) {
+    assertProviderCapability(providerId, capability);
+    throw new ProviderPolicyError(
+      "UNREVIEWED_INTERACTION",
+      `Generic form filling does not implement reviewed transactional capability '${capability}'. Use a dedicated provider workflow after separate review.`
+    );
+  }
+  if (isReviewedReadFieldLabel(label)) return;
+  throw new ProviderPolicyError(
+    "UNREVIEWED_INTERACTION",
+    "Generic form filling is limited to explicitly reviewed read-only search/filter fields."
+  );
 }
 
 export function isSensitiveFieldLabel(value: string): boolean {

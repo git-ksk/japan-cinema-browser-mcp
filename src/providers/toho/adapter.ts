@@ -498,7 +498,7 @@ export class TohoReadAdapter implements CinemaReadAdapter<"toho", TohoTheater, T
     const status = await this.runtime.status();
     const currentUrl = typeof status.url === "string" ? status.url : "";
     if (!currentUrl.startsWith(TOHO_THEATER_LIST_URL)) {
-      await this.runtime.navigate(TOHO_THEATER_LIST_URL, "toho");
+      await this.runtime.navigateReviewed(TOHO_THEATER_LIST_URL, "toho");
     }
 
     let semantic = await this.runtime.evaluateSemanticState<TheaterSnapshot>("toho", THEATER_LIST_EXPRESSION);
@@ -538,7 +538,7 @@ export class TohoReadAdapter implements CinemaReadAdapter<"toho", TohoTheater, T
 
   async getShowtimes(input: ShowtimeQuery): Promise<ShowtimeResult<"toho", TohoTheater, TohoShowtime>> {
     const theater = await this.resolveTheater(input.theater);
-    await this.runtime.navigate(theater.url, "toho");
+    await this.runtime.navigateReviewed(theater.url, "toho");
 
     let semantic = await this.runtime.evaluateSemanticState<ScheduleSnapshot>("toho", SCHEDULE_EXPRESSION);
     let dates = normalizeDateCandidates(semantic.value);

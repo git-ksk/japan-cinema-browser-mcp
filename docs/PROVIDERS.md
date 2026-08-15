@@ -11,9 +11,9 @@ AEON Phase 1 read adapterレビュー日: 2026-08-13
 
 | Provider | 公式root | 現在の自動化範囲 | 購入 |
 |---|---|---|---|
-| TOHOシネマズ | `https://www.tohotheater.jp/` | 公式domain内navigation / bounded read / 劇場・日付・作品・上映回semantic read | 無効。seat/checkout未レビュー |
-| イオンシネマ | `https://www.aeoncinema.com/` | 公式domain内navigation / bounded read / 劇場・日付・作品・上映回semantic read | 無効。seat/checkout未レビュー |
-| 109シネマズ | `https://109cinemas.net/` | 公式domain内navigation / bounded read / 劇場・日付・作品・上映回semantic read | 無効。seat/checkout未レビュー |
+| TOHOシネマズ | `https://www.tohotheater.jp/` | reviewed public read surface / bounded read / 劇場・日付・作品・上映回semantic read | 無効。seat/checkout未レビュー |
+| イオンシネマ | `https://www.aeoncinema.com/` | reviewed public read surface / bounded read / 劇場・日付・作品・上映回semantic read | 無効。seat/checkout未レビュー |
+| 109シネマズ | `https://109cinemas.net/` | reviewed public read surface / bounded read / 劇場・日付・作品・上映回semantic read | 無効。seat/checkout未レビュー |
 
 ## 共通ルール
 
@@ -22,6 +22,8 @@ AEON Phase 1 read adapterレビュー日: 2026-08-13
 - 上映情報、座席表、HTML、画像、Cookie、決済情報を永続保存しない
 - 定期クロールやprovider-wide aggregationをしない
 - CAPTCHA、MFA、OTP、3-D Secure、待機列、未レビューのthird-party payment/identity surfaceはHuman Handoff
+- generic navigationはreview済みpublic read surfaceだけをpositive allow-listし、同一domain内の任意path/subdomainへ広げない
+- generic click/fillからseat/checkout/purchase capabilityを迂回しない
 - generic clickから最終購入/決済/予約確定を実行しない
 - provider-specific selectorはvisible public UIに限定する
 - UI構造が変わったら推測せずfail closed
@@ -123,7 +125,7 @@ TOHOの公開UIには、複数の劇場名が1つのschedule routeを共有す�
 - `list_theaters` — TOHO / AEON / 109 semantic capability有効
 - `get_showtimes` — TOHO / AEON / 109 semantic capability有効
 
-無効化されたseat/checkout/purchase capabilityをgeneric fuzzy automationへfallbackしません。
+無効化されたseat/checkout/purchase capabilityをgeneric fuzzy automationへfallbackしません。Provider adapter内部のread-only navigation/clickはgeneric toolと分離し、rendered public UIから採用したexplicit route/controlと遷移後identityをprovider固有に再検証します。
 
 ## Provider Capabilityを上げる前のチェック
 

@@ -54,6 +54,7 @@ provider registryと横断ポリシーを保持します。
 - provider ID
 - 公式root URL
 - domain allow-list
+- generic navigation用のreviewed public read-surface allow-list
 - granular capability matrix
 - capability enforcement
 - sensitive field判定
@@ -119,17 +120,21 @@ Chrome process lifecycleを管理します。
 
 CDP targetと、公開UIに対する最小限のbrowser primitiveを担当します。
 
-- official-domain navigation
+- generic tool向けreviewed public read-surface navigation
+- provider adapter向けexplicit reviewed navigation
 - current URL確認
 - bounded visible read
-- visible control検索・click
-- 非機密field入力
+- visible control検索
+- generic read-only click/fill policyとprovider capability enforcement
+- provider adapter向けreviewed read-only click primitive
 - generic上映時刻候補抽出
 - challenge検出
 - fail-closed error
 - provider-neutral semantic evaluation primitive
 
 `evaluateSemanticState()` はprovider IDのdomain checkとchallenge checkを通したうえで、adapterが渡すdeterministicなDOM評価式を既存CDP session上で実行します。provider固有selectorや映画館概念はruntimeへ持ち込みません。
+
+Northbound generic toolとadapter内部primitiveはpolicyを分離します。`navigate_cinema_official` はreview済みpublic read surfaceだけをpositive allow-listで許可し、adapter側はvisible public UIから採用済みのexplicit routeをadapter自身がshape/identity検証した上で `navigateReviewed()` へ渡します。generic click/fillはseat/checkout/purchase相当操作をcapability matrixへ接続し、未知のscript-driven interactionはfail closedします。
 
 ### `src/purchase-gate.ts`
 

@@ -86,7 +86,11 @@ MCP tool argumentとして以下を受け取りません。
 
 ### 重大操作はFail Closed
 
-通常のclick/navigation toolは、購入・支払・注文・予約の最終確定に見えるcontrolを拒否します。
+通常のgeneric navigationは、明示レビュー済みのpublic read surfaceだけをpositive allow-listで許可します。同一公式domain配下でも任意path/subdomainや未レビューrouteへは進みません。
+
+通常のgeneric click/fillはprovider capability matrixをruntime boundaryとして扱い、seat map / seat selection / checkout preparation / purchase submissionに相当する操作をcapability無効時に拒否します。未知のscript-driven controlや未レビューfieldもfail closedし、無効capabilityをfuzzy automationへfallbackしません。
+
+provider adapter内部のread-only操作はgeneric policyと分離し、rendered public UIから採用・検証したexplicit route/controlだけを利用します。購入・支払・注文・予約の最終確定に見えるcontrolはadapter内部でも通常clickしません。
 
 最終購入を実装する場合は、別のconfirmation flowを通します。
 
