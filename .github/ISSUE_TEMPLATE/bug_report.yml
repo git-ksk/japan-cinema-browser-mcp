@@ -1,0 +1,72 @@
+name: Bug report
+description: Report a reproducible problem in the MCP server or a reviewed provider read workflow.
+title: "bug: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Do not include credentials, cookies, session tokens, payment details, private browsing data, or sensitive screenshots. Security vulnerabilities must use Private Vulnerability Reporting instead of this form.
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight
+      options:
+        - label: I searched existing issues and pull requests for this problem.
+          required: true
+        - label: This report does not contain credentials, session data, payment data, or vulnerability details.
+          required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - Core / MCP protocol
+        - Chrome / CDP runtime
+        - TOHO Cinemas read workflow
+        - AEON Cinema read workflow
+        - 109 Cinemas read workflow
+        - Cross-provider showtime composition
+        - Documentation / installation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Observed behavior
+      description: Describe what happened. Redact any personal or session-specific data.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      description: Include the smallest safe reproduction. Do not include purchase, payment, credentials, or challenge-bypass steps.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Node.js version, npm version, Chrome/Chromium version, MCP client, and relevant non-secret configuration.
+      placeholder: |
+        OS:
+        Node:
+        npm:
+        Chrome/Chromium:
+        MCP client:
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional context
+      description: Logs or screenshots are optional. Redact paths/usernames if unnecessary and remove all sensitive data.

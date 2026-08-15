@@ -1,11 +1,12 @@
 # Provider対応方針・レビュー状況
 
-初回Private MVPレビュー日: 2026-08-12  
-TOHO Phase 1 read adapterレビュー日: 2026-08-13  
-AEON Phase 1 read adapterレビュー日: 2026-08-13  
-109 Phase 1 read adapterレビュー日: 2026-08-13
+- 初回Private MVPレビュー日: 2026-08-12
+- TOHO Phase 1 read adapterレビュー日: 2026-08-13
+- AEON Phase 1 read adapterレビュー日: 2026-08-13
+- 109 Phase 1 read adapterレビュー日: 2026-08-13
+- Public safety hardening / live smoke再確認日: 2026-08-15
 
-この文書は実装上の対応範囲と確認状況を管理するためのものです。法的助言を目的としたものではありません。購入機能を有効化する前、およびPublic化前には、各providerの現行利用規約・サイトポリシー・実際のUIを再確認します。
+この文書は実装上の対応範囲と確認状況を管理するためのものです。法的助言を目的としたものではありません。購入機能・seat/checkout capabilityを有効化する前、materialなautomation surface変更時、またはprovider規約/UI変更が疑われる場合は、各providerの現行利用規約・サイトポリシー・実際のUIを再確認します。Public repositoryであること自体はproviderの許諾や法的適合を意味しません。
 
 ## 現在の対応状況
 

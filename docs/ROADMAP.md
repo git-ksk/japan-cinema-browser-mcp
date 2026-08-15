@@ -15,7 +15,7 @@
 
 状態: ✅ ほぼ完了
 
-- ✅ Private repository
+- ✅ Public repository（2026-08-15 safety hardening後に公開）
 - ✅ Node.js + MCP SDK + `chrome-remote-interface` + Zod
 - ✅ CDP直接制御
 - ✅ 専用Chrome profile
@@ -101,7 +101,7 @@ AEONではrendered public UIだけを読みます。`schedule.json` 等のprivat
 
 - `list_theaters` — TOHO / AEON / 109有効
 - `get_showtimes` — TOHO / AEON / 109有効
-- `find_showtimes` — Phase 2の共通normalization後に追加
+- `find_showtimes` — TOHO / AEON / 109のbounded cross-provider searchとして実装済み
 
 Exit criteria:
 
@@ -219,45 +219,54 @@ Exit criteria:
 
 目的: providerごとの厳格な監査を通った場合のみ、最終購入を可能にする。
 
-状態: ⬜ 予定 / デフォルト無効
+状態: 🟡 generic confirmation infrastructure実装済み / provider purchase capabilityは全社無効
 
-providerごとに必須:
+共通runtime safety infrastructure:
 
-- ⬜ 規約/サイトポリシー再確認
+- ✅ material transaction summaryをconfirmationへbinding
+- ✅ current browser URL/contextへbinding
+- ✅ TTL / one-shot confirmation test
+- ✅ material context変更でconfirmation無効化
+- ✅ duplicate submission防止のone-shot semantics
+- ✅ timeout/disconnect後のno-auto-replay / `PURCHASE_UNKNOWN`思想
+- ✅ generic final-action controlを通常clickから分離
+
+providerごとに購入を解禁する前に必須:
+
+- ⬜ 現行規約/サイトポリシー再確認
+- ⬜ seat / checkout capabilityの個別review完了
 - ⬜ exact final control確認
-- ⬜ 劇場/作品/日時/座席/券種/金額を確認画面に固定
-- ⬜ confirmationをcurrent browser contextにbinding
-- ⬜ TTL / one-shot test
-- ⬜ material context変更で無効化
-- ⬜ duplicate submission防止
-- ⬜ `PURCHASE_UNKNOWN`定義・テスト
-- ⬜ timeout/disconnect時の自動replay禁止
-- ⬜ visible UIからsuccess/failureを確認
+- ⬜ 劇場/作品/日時/座席/券種/金額をprovider UIから再検証
+- ⬜ final submit後のvisible UI success/failure/unknown判定
+- ⬜ provider-specific purchase regression / live review
 
-目標tool:
+既存tools:
 
-- `confirm_purchase`
+- `prepare_purchase_confirmation` — confirmation作成のみ。購入しない
+- `confirm_purchase_action` — provider `purchaseSubmission=true` が必要。現在全providerで拒否
 
 購入対応はproviderごとに個別解禁します。3社同時ONは前提にしません。`CINEMA_ENABLE_PURCHASE=true` だけでは不十分で、providerの `purchaseSubmission` capabilityも明示的にtrueである必要があります。
 
-## Phase 6 — Public化前Hardening
+## Phase 6 — Public Hardening
 
-目的: Privateで動くだけでなく、公開しても設計意図と安全境界が明確な状態にする。
+目的: 公開しても設計意図、安全境界、contribution/security運用が明確な状態にする。
 
-状態: ⬜ 予定
+状態: ✅ repository public hardening complete — 2026-08-15
 
-- ⬜ provider review日付更新
-- ⬜ Git全履歴secret scan
-- ⬜ Cookie/token/payment data混入確認
-- ⬜ private/internal endpoint利用ゼロ確認
-- ⬜ read-only live smoke test
-- ⬜ purchase gate test
-- ⬜ SECURITY/COMPLIANCE最終確認
-- ⬜ trademark/non-affiliation表記確認
-- ⬜ dependency/license audit
-- ⬜ npm packaging確認
-- ⬜ changelog/versioning policy
-- ⬜ publication checklist通過後にPublic化
+- ✅ Git reachable history secret scan
+- ✅ historical GitHub Actions logs secret-like pattern scan
+- ✅ Cookie/token/payment/auth data path監査
+- ✅ private/internal endpoint / network interception非利用確認
+- ✅ generic navigation/click/fill capability bypass hardening
+- ✅ read-only live smoke: TOHO / AEON / 109
+- ✅ purchase gate / no-auto-replay regression
+- ✅ SECURITY / COMPLIANCE整合
+- ✅ trademark / non-affiliation表記
+- ✅ dependency/license audit
+- ✅ MIT LICENSE / lockfile / deterministic `npm ci`
+- ✅ Public repository化
+- ✅ secret scanning / push protection / Dependabot / CodeQL / protected `main`
+- 🟡 npm publication packaging / release versioning / changelog policy — package release時に確定
 
 **最初のPublic releaseに購入機能は必須ではありません。**
 
@@ -294,11 +303,11 @@ providerごとに必須:
 1. ✅ TOHO read adapter
 2. ✅ AEON read adapter
 3. ✅ 109 read adapter
-4. 🟡 common Theater / Showtime schema
-5. `find_showtimes` bounded cross-provider search
-6. seat mapをproviderごとに追加
-7. checkout preparationをproviderごとに追加
-8. final purchaseはprovider監査後のみ
-9. Public release hardening
+4. ✅ common Theater / Showtime schema
+5. ✅ `find_showtimes` + `resolve_theater_targets` bounded composition
+6. ✅ Public repository safety hardening / CI / security operations
+7. seat mapをproviderごとに個別reviewして追加
+8. checkout preparationをproviderごとに個別reviewして追加
+9. final purchaseはprovider監査後のみ
 
 providerごとに難易度や利用条件が違うため、feature parityを無理に揃えません。capability単位で安全にdegradeできる設計を優先します。

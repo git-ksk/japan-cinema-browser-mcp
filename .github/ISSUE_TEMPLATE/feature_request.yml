@@ -1,0 +1,51 @@
+name: Feature request
+description: Propose a bounded feature that fits the project's browser-first and fail-closed safety model.
+title: "feat: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Feature proposals are welcome, but provider automation must remain within reviewed public UI surfaces. Seat, checkout, purchase, private/internal APIs, challenge bypass, and high-frequency crawling require separate review and are not implied by a feature request.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What user problem would this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the smallest useful capability and its expected MCP interface.
+    validations:
+      required: true
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Provider scope
+      options:
+        - Provider-neutral
+        - TOHO Cinemas
+        - AEON Cinema
+        - 109 Cinemas
+        - Multiple providers
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: safety
+    attributes:
+      label: Safety / compliance considerations
+      description: Note any navigation, transaction, personal-data, rate, challenge, or provider-policy implications you can identify.
+    validations:
+      required: true
+  - type: checkboxes
+    id: boundary
+    attributes:
+      label: Boundary acknowledgement
+      options:
+        - label: I am not assuming that a same-domain URL, hidden endpoint, or purchase UI is automatically an approved automation surface.
+          required: true

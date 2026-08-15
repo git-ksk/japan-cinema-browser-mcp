@@ -8,9 +8,9 @@ Security fixes are currently made on the latest `main` branch. There is no separ
 
 Please do not publish exploit details, credentials, private browsing data, or other sensitive material in a public issue.
 
-For vulnerabilities in this repository, use GitHub's private vulnerability reporting / security-advisory flow when it is available for the repository. From the repository's **Security** tab, choose **Advisories** and **Report a vulnerability**.
+For vulnerabilities in this repository, use GitHub Private Vulnerability Reporting. From the repository's **Security** tab, choose **Advisories** and **Report a vulnerability**. Do not use a public issue for vulnerability details.
 
-If private vulnerability reporting is not available, contact the maintainer through the GitHub account associated with this repository and ask for a private reporting channel before sending sensitive details. A public issue may be used only to request contact, without vulnerability details.
+If GitHub's private reporting UI is temporarily unavailable, contact the maintainer through the GitHub account associated with this repository and ask for a private reporting channel before sending sensitive details. A public issue may be used only to request contact, without vulnerability details.
 
 A useful report includes the affected commit/version, the impacted MCP tool or provider flow, reproduction steps, expected versus observed behavior, and whether the issue can cross the documented browser, provider, capability, secret, or purchase-confirmation boundaries.
 
