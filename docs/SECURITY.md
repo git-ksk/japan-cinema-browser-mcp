@@ -218,6 +218,6 @@ final purchaseは次をすべて満たす場合のみ許可します。
 
 Public repositoryではGitHub Private Vulnerability Reportingを有効化し、外部向けの報告方法を [`.github/SECURITY.md`](../.github/SECURITY.md) に明示します。通常のIssueへexploit details、credential、Cookie/token、private browsing data、payment/auth dataを投稿しません。
 
-GitHub側ではsecret scanning / push protection / Dependabot security updates / CodeQL default setupを有効化します。`main` はrulesetでPR、required CI、linear history、force-push/delete禁止を強制し、CodeQL security resultもmerge protectionへ接続します。
+GitHub側ではsecret scanning / push protection / Dependabot security updates / CodeQL advanced setupを有効化します。`main` はrulesetでPR、required CI、linear history、force-push/delete禁止を強制し、CodeQL security resultもmerge protectionへ接続します。
 
 `CINEMA_CHROME_EXECUTABLE`、`CINEMA_CHROME_PROFILE_DIR`、`CINEMA_CDP_PORT` 等はローカルoperatorが起動時に与えるtrusted configurationです。MCP tool argument、provider page、external place result等のuntrusted inputからこれらを生成・上書きしてはいけません。
