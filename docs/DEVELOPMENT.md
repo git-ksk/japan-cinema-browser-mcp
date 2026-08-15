@@ -297,6 +297,7 @@ Actions workflowでは:
 - GitHub-owned actionsだけを許可
 - actionはfull commit SHAへpin
 - Dependabotでnpm dependencyとGitHub Actionsを週次更新
+- PRのdependency変更はDependency Reviewでmoderate以上の既知脆弱性を拒否
 - duplicate PR runはconcurrencyでcancel
 
 とします。
