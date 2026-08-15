@@ -193,17 +193,21 @@ Exit criteria:
 
 目的: 可逆・低リスク操作を自動化し、認証/決済はユーザーへ戻す。
 
-状態: ⬜ 予定
+状態: 🟡 generic Human Handoff基盤実装済み / checkout transaction capabilityは未解禁
 
 - ⬜ ticket type normalization
 - ⬜ member/non-member分岐
-- ⬜ 非機密field入力
-- ⬜ login required検出
-- ⬜ CAPTCHA / challenge検出
-- ⬜ MFA / OTP / 3-D Secure handoff
-- ⬜ third-party payment/identity検出
-- ⬜ human操作後のstate再検証
-- ⬜ checkout summary正規化
+- ⬜ 非機密checkout field入力
+- ✅ sign-in/authentication surface検出とHuman Handoff
+- ✅ CAPTCHA / access challenge検出とHuman Handoff（bypassなし）
+- ✅ OTP/MFA入力をMCPへ渡さずHuman-onlyに維持
+- ✅ consent / reviewed-flow外identity surfaceのHuman Handoff
+- ✅ Human操作後のofficial provider / challenge state再検証
+- ✅ semantic mutation / transactionのautomatic replay禁止
+- ✅ Human intervention開始時のprepared purchase confirmation破棄
+- ⬜ provider-specific checkout summary正規化
+
+`seatMap` / `seatSelection` / `checkoutPreparation` / `purchaseSubmission` は引き続き全providerでfalseです。Human Handoff実装はtransaction capabilityの解禁を意味しません。
 
 目標tool:
 

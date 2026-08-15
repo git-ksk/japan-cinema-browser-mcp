@@ -176,6 +176,10 @@ generic readのdefault上限は8,000文字です。
 
 stack traceやbrowser secretをMCP resultへ出しません。
 
+Execution Handoffでは `HUMAN_ACTION_REQUIRED` とintervention metadataをMRTR `input_required` へ変換します。owner claimはbrowser operation queueと同じserialized turnで行い、exact invocation / args / logical principal / epochが一致しないrequestStateを拒否します。
+
+Resume policyは `src/handoff-policy.ts` をsingle source of truthとします。pure read以外を安易に `replay_safe` へ変更しません。特にsemantic mutationとtransaction/payment actionは `never_replay`、MCP strategyは `require_fresh_semantic_action` を維持します。Human intervention開始時にpurchase confirmationをclearし、Human completionをapprovalへ変換しません。
+
 無効provider capabilityへgeneric readerで黙ってfallbackしません。
 
 ## Transaction State
@@ -285,7 +289,7 @@ npm run smoke:aeon
 npm run smoke:109
 ```
 
-通常の `npm test` / CIからは分離し、必要時だけ実ブラウザで実行します。challengeが出た場合は突破せず失敗扱いにします。
+通常の `npm test` / CIからは分離し、必要時だけ実ブラウザで実行します。challengeが出た場合は突破せず失敗扱いにします。 Execution Handoffのlive検証目的でchallengeを意図的に発生させません。pre-release upstream dependencyはimmutable commit archiveへpinし、`npm ci --ignore-scripts` で再現できる状態を維持します。
 
 ## Public Repo CI / dependency policy
 
