@@ -73,7 +73,7 @@ japan-cinema-browser-mcp
 
 - `@modelcontextprotocol/server`
 - `chrome-remote-interface`
-- `mcp-execution-handoff`（immutable commitへpinしたpre-release upstream）
+- `mcp-execution-handoff` v0.1.0（source release commitへimmutable pin）
 - `zod`
 
 PlaywrightやChromium本体は同梱しません。
@@ -150,7 +150,7 @@ npm start
 
 ## Execution Handoff
 
-Execution Handoffのgeneric control planeはpre-release upstream `git-ksk/mcp-execution-handoff` をimmutable commitで利用します。Cinema側にはprovider policy、Human surface classification、postcondition verification、resume policyを残します。
+Execution Handoffのgeneric control planeはupstream `git-ksk/mcp-execution-handoff` v0.1.0のsource release commitをimmutable pinして利用します。Cinema側にはprovider policy、Human surface classification、postcondition verification、resume policyを残します。
 
 | 操作class | core resume policy | MCP strategy |
 | --- | --- | --- |
