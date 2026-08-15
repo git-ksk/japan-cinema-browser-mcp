@@ -157,6 +157,22 @@ selectorがUI変更後に別controlへ当たる可能性があります。
 - capability downgrade
 - risky generic fallback禁止
 
+## Execution HandoffのInvariant
+
+Human-only surfaceは `mcp-execution-handoff` のgeneric control planeへ接続しますが、Cinema固有policyはconsumer側に残します。
+
+- AgentとHumanが同時にbrowser execution authorityを持たない
+- handoff ownerをexact tool / canonical args / intervention / resource epoch / logical principalへbindする
+- challenge/sign-in/consent検出からMCPへ返すのはcategoryだけとし、password、OTP/MFA、CAPTCHA answer、Cookie、payment data、raw page/dialog textをhandoff stateへ含めない
+- Human completionでresource epochを進めてからCinema固有verificationを行う
+- pure read以外はfresh semantic actionを要求し、semantic mutation / transactionは `never_replay`
+- Human intervention開始時にprepared purchase confirmationを破棄する
+- Human completionをpurchaseや別actionのapprovalとして扱わない
+- seat/checkout/purchase capabilityのfalseをhandoff経由で迂回しない
+- CAPTCHA/challenge bypass、solver、anti-bot evasionを追加しない
+
+仕様は [`EXECUTION_HANDOFF.md`](./EXECUTION_HANDOFF.md) を参照してください。
+
 ## 最終購入のInvariant
 
 final purchaseは次をすべて満たす場合のみ許可します。

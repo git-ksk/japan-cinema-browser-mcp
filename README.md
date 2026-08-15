@@ -1,5 +1,6 @@
 # japan-cinema-browser-mcp
 
+
 日本の映画館公式サイトを、ユーザー本人のブラウザ上で安全に操作するための Browser-first MCP です。
 
 当面の対応対象は次の3社です。
@@ -38,7 +39,9 @@
 - 定期クロールや全国上映データのDB化を行わない
 - 上映情報、座席表、HTML、画像、Cookie、決済情報を永続保存しない
 - CAPTCHA、MFA、OTP、3-D Secureなどを自動突破しない
-- パスワードやカード番号などの機密情報をMCP経由で入力しない
+- パスワード、OTP/MFA、CAPTCHA answer、カード/銀行情報などの機密情報をMCP経由で入力しない
+- Human handoff完了を別actionのapprovalとして扱わない
+- Human interventionで中断したstateful/consequential actionを自動replayしない
 - 購入確定などの重大操作は通常のclick toolから分離する
 - 最終購入はデフォルト無効とし、明示確認を必須にする
 - UIが変わった、対象が曖昧、状態が不明な場合は推測せず停止する
@@ -70,6 +73,7 @@ japan-cinema-browser-mcp
 
 - `@modelcontextprotocol/server`
 - `chrome-remote-interface`
+- `mcp-execution-handoff`（immutable commitへpinしたpre-release upstream）
 - `zod`
 
 PlaywrightやChromium本体は同梱しません。
@@ -101,6 +105,8 @@ Public repositoryとして、次の安全基盤とread capabilityを実装済み
 - TOHO / AEON / 109ともUI変更・曖昧状態・identity mismatchでfail closed
 
 Phase 1ではTOHO / AEON / 109の3社read-only adapterを有効化しています。seat map / seat selection / checkout preparation / purchase submissionは全社falseのままです。
+
+自然発生したaccess challenge/CAPTCHA、sign-in/authentication、consentはgeneric Execution Handoffへ接続しています。Agent/Human authorityは排他で、resource epoch、exact invocation/requestState binding、post-Human replay policyを適用します。これによってtransaction capabilityが有効になることはありません。
 
 109は `https://109cinemas.net/` の表示中劇場linkと、各劇場ページに表示された `/[theater]/schedules/YYYYMMDD.html...` の明示hrefだけを利用します。slug・日付route・query値を推測して生成しません。`オンラインチケット購入` 等の購入導線はread contextとして表示されてもadapterからclickしません。
 
@@ -141,6 +147,21 @@ CINEMA_ALLOW_EXTERNAL_CDP=true \
 CINEMA_CDP_PORT=9222 \
 npm start
 ```
+
+## Execution Handoff
+
+Execution Handoffのgeneric control planeはpre-release upstream `git-ksk/mcp-execution-handoff` をimmutable commitで利用します。Cinema側にはprovider policy、Human surface classification、postcondition verification、resume policyを残します。
+
+| 操作class | core resume policy | MCP strategy |
+| --- | --- | --- |
+| bounded pure read | `replay_safe` | `retry_original` |
+| navigation/provider semantic flow | `revalidate` | `require_fresh_semantic_action` |
+| semantic mutation | `never_replay` | `require_fresh_semantic_action` |
+| transaction/payment action | `never_replay` | `require_fresh_semantic_action` |
+
+Human handoffが始まった時点でprepared purchase confirmationを破棄します。seat selection / checkout / purchase / payment系はhandoff完了後もautomatic replayせず、fresh semantic actionと必要なexplicit confirmationを要求します。credential、OTP/MFA、CAPTCHA answer、payment dataはMCPへ渡しません。
+
+仕様は [`docs/EXECUTION_HANDOFF.md`](./docs/EXECUTION_HANDOFF.md) を参照してください。
 
 ## 購入機能
 
@@ -231,6 +252,7 @@ maps_search({ query: "映画館 横浜駅" })
 
 - [`docs/PROJECT.md`](./docs/PROJECT.md) — プロジェクト定義・非目標
 - [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) — 設計・状態境界
+- [`docs/EXECUTION_HANDOFF.md`](./docs/EXECUTION_HANDOFF.md) — Execution Handoff
 - [`docs/ROADMAP.md`](./docs/ROADMAP.md) — 開発ロードマップ
 - [`docs/SECURITY.md`](./docs/SECURITY.md) — セキュリティモデル
 - [`docs/DEVELOPMENT.md`](./docs/DEVELOPMENT.md) — 実装ルール

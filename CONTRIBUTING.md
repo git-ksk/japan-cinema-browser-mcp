@@ -49,6 +49,9 @@ Changes must preserve these boundaries unless a separate, explicit security revi
 - Disabled provider capabilities must not be recovered through generic fuzzy navigation, click, or fill fallbacks.
 - `seatMap`, `seatSelection`, `checkoutPreparation`, and `purchaseSubmission` are currently disabled for every provider.
 - Preserve one-shot/TTL purchase confirmation and the no-auto-replay rule for ambiguous purchase outcomes.
+- Preserve Execution Handoff owner/requestState binding and resource-epoch fencing. Human completion must never become approval for a different action.
+- Keep semantic mutation and transaction/payment handoff at `never_replay`; do not change them to automatic replay.
+- Keep the pre-release `mcp-execution-handoff` dependency pinned to an immutable commit until a release decision is made.
 - Do not add credential, Cookie, localStorage, sessionStorage, Authorization-header, or payment-data dump paths.
 
 Local process configuration such as `CINEMA_CHROME_EXECUTABLE`, `CINEMA_CHROME_PROFILE_DIR`, and explicit external-CDP opt-in is trusted operator configuration. It must never be populated from MCP tool arguments, provider pages, or other untrusted external input.

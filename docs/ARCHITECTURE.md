@@ -128,13 +128,22 @@ CDP targetと、公開UIに対する最小限のbrowser primitiveを担当しま
 - generic read-only click/fill policyとprovider capability enforcement
 - provider adapter向けreviewed read-only click primitive
 - generic上映時刻候補抽出
-- challenge検出
+- Human-only surface（access challenge/CAPTCHA、sign-in/authentication、consent）のcategory-only検出
+- Execution Handoff authority / resource epoch / exact invocation binding
 - fail-closed error
 - provider-neutral semantic evaluation primitive
 
-`evaluateSemanticState()` はprovider IDのdomain checkとchallenge checkを通したうえで、adapterが渡すdeterministicなDOM評価式を既存CDP session上で実行します。provider固有selectorや映画館概念はruntimeへ持ち込みません。
+`evaluateSemanticState()` はprovider IDのdomain checkとHuman-only surface checkを通したうえで、adapterが渡すdeterministicなDOM評価式を既存CDP session上で実行します。provider固有selectorや映画館概念はruntimeへ持ち込みません。
 
 Northbound generic toolとadapter内部primitiveはpolicyを分離します。`navigate_cinema_official` はreview済みpublic read surfaceだけをpositive allow-listで許可し、adapter側はvisible public UIから採用済みのexplicit routeをadapter自身がshape/identity検証した上で `navigateReviewed()` へ渡します。generic click/fillはseat/checkout/purchase相当操作をcapability matrixへ接続し、未知のscript-driven interactionはfail closedします。
+
+### Execution Handoff
+
+Generic control planeはpre-release upstream `git-ksk/mcp-execution-handoff` をimmutable commitでconsumeします。upstreamはAgent/Human authority、resource epoch、resume policy、adapter contract、MRTR requestState/owner bindingを担当し、Cinema固有のprovider URL/capability policy、Human surface classification、verification、replay policyはこのrepositoryへ残します。
+
+Cinema policyはpure readのみ `replay_safe` とし、navigationは `revalidate`、semantic mutationとtransaction/payment actionは `never_replay` です。navigation/mutation/transactionはMCP側でも `require_fresh_semantic_action` を要求するため、Human完了後にautomatic replayしません。Human intervention開始時にはprepared purchase confirmationも破棄します。
+
+詳細は [`EXECUTION_HANDOFF.md`](./EXECUTION_HANDOFF.md) を参照してください。
 
 ### `src/purchase-gate.ts`
 
