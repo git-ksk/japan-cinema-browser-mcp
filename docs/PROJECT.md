@@ -153,7 +153,7 @@ Public化の基準は「機能数」ではなく、安全に価値が出る縦�
 - 機密入力拒否がテストされている
 - 購入確認ゲートがテストされ、最終購入はデフォルト無効
 - Git履歴にSecret/Cookie/Token等がない
-- Public化直前にprovider規約・サイトポリシーを再確認する
+- materialなautomation surface変更、transaction capability解禁、またはrelease riskが変わる前にprovider規約・サイトポリシーを再確認する
 - README/Compliance/Security/Roadmapが実装と一致している
 
 購入機能は最初のPublic release必須条件ではありません。

@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/git-ksk/japan-cinema-browser-mcp/security/advisories/new
+    about: Use GitHub Private Vulnerability Reporting for security issues. Do not post exploit details or secrets publicly.

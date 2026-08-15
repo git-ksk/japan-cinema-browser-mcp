@@ -33,7 +33,7 @@ Phase 1 read adapterレビュー日: 2026-08-13
 - 劇場および運営会社の営業を妨げない
 - その他不適切と判断される行為を行わない
 
-この確認は法的判断ではありません。Phase 1ではリスクを広げないため、ユーザー要求時の低頻度な公式公開UI readに限定し、定期クロール、全国上映DB化、素材の再配布、private/internal endpoint利用、challenge回避、購入自動化を行いません。Public化や営利利用、transaction capabilityの解禁前には再レビューします。
+この確認は法的判断ではありません。Phase 1ではリスクを広げないため、ユーザー要求時の低頻度な公式公開UI readに限定し、定期クロール、全国上映DB化、素材の再配布、private/internal endpoint利用、challenge回避、購入自動化を行いません。営利利用、materialなautomation surface変更、transaction capabilityの解禁前には再レビューします。
 
 ## Phase 1で確認した公開導線
 

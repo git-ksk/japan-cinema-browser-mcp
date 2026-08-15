@@ -178,21 +178,22 @@ allow-list対象:
 
 provider domain配下のsubdomain追加や、third-party payment/identity domainをautomation対象へ追加する場合は、実装前に個別レビューします。
 
-## Public化Gate
+## Public Release Gate
 
-PrivateからPublicへ変更する前に最低限以下を実施します。
+Repository visibilityは2026-08-15にPublicへ変更しました。公開時のtechnical safety gateとして、Git history / Actions logsのsecret scan、sensitive-data path、private/internal API非利用、capability boundary、purchase confirmation、typecheck / unit test / build、3社non-purchasing live smoke、dependency audit、documentation整合を確認しました。
 
-1. providerの現行規約/サイトポリシー再確認
-2. `docs/providers/*` のreview date更新
-3. Git全履歴secret scan
-4. Cookie/token/payment/auth data混入確認
-5. private/internal API利用ゼロ確認
-6. destructive/consequential toolのconfirmation gate確認
-7. typecheck / unit test / build
-8. non-purchasing live UI smoke test
-9. `PURCHASE_UNKNOWN` / duplicate submission safety確認
-10. trademark / non-affiliation表記確認
-11. documentationと実装が一致していることを確認
+Public化はproviderの利用規約・サイトポリシーについて法的に問題がないことを意味しません。providerのautomation surfaceやcapabilityを広げる場合、materialなreleaseを行う場合、またはprovider規約/UIに変更が疑われる場合は、次を再確認します。
+
+1. providerの現行規約/サイトポリシーとreview date
+2. `docs/providers/*` のreviewed public surface
+3. Git/CI artifact/logへのsecret・Cookie・token・payment/auth data混入
+4. private/internal API・hidden endpoint・network interception非利用
+5. destructive/consequential toolのconfirmation gate
+6. typecheck / unit test / build / relevant regression
+7. 必要なproviderだけのnon-purchasing live UI smoke
+8. `PURCHASE_UNKNOWN` / duplicate submission safety
+9. trademark / non-affiliation表記
+10. documentationと実装の一致
 
 最初のPublic releaseにfinal purchase capabilityは必須ではありません。
 

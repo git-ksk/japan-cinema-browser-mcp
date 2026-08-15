@@ -76,7 +76,7 @@ PlaywrightやChromium本体は同梱しません。
 
 ## 現在の状態
 
-Private MVPでは、次の基盤まで実装済みです。
+Public repositoryとして、次の安全基盤とread capabilityを実装済みです。
 
 - 専用Chromeプロファイルの起動・再利用
 - CDP接続
@@ -113,7 +113,7 @@ Phase 1ではTOHO / AEON / 109の3社read-only adapterを有効化していま�
 - Google Chrome
 
 ```bash
-npm install
+npm ci --ignore-scripts
 npm run build
 npm start
 ```
@@ -187,10 +187,14 @@ CINEMA_ENABLE_PURCHASE=true npm start
 ## 開発時の確認
 
 ```bash
+npm ci --ignore-scripts
 npm run typecheck
 npm test
 npm run build
+git diff --check
 ```
+
+`main` はGitHub rulesetで保護し、pull request + squash merge、required CI、linear history、force-push/delete禁止を適用しています。GitHub ActionsはGitHub-owned actionだけを許可し、workflow内のactionはfull commit SHAへ固定します。依存関係とGitHub ActionsはDependabotで週次確認します。
 
 providerの非購入live smokeは通常CIには含めず、低頻度で明示実行します。
 
@@ -232,6 +236,9 @@ maps_search({ query: "映画館 横浜駅" })
 - [`docs/DEVELOPMENT.md`](./docs/DEVELOPMENT.md) — 実装ルール
 - [`docs/PROVIDERS.md`](./docs/PROVIDERS.md) — provider対応状況
 - [`COMPLIANCE.md`](./COMPLIANCE.md) — コンプライアンス方針
+- [`CONTRIBUTING.md`](./CONTRIBUTING.md) — contribution / safety / testルール
+- [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md) — community code of conduct
+- [`.github/SECURITY.md`](./.github/SECURITY.md) — vulnerability reporting policy
 
 ## 非公式プロジェクトであることについて
 

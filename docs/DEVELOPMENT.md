@@ -287,11 +287,21 @@ npm run smoke:109
 
 通常の `npm test` / CIからは分離し、必要時だけ実ブラウザで実行します。challengeが出た場合は突破せず失敗扱いにします。
 
-## Private RepoでのCI節約
+## Public Repo CI / dependency policy
 
-private repositoryでは、provider実装ごとにbranch pushでCIを何度も回さない方針です。
+Public repositoryの標準GitHub-hosted runnerは通常CIに利用します。PRと`main`で `npm ci --ignore-scripts`、typecheck、unit test、buildを実行し、Node.js 20 / 22 / 24の互換性も継続監視します。live provider smokeは引き続き通常CIへ含めません。
 
-PR前に以下を静的監査します。
+Actions workflowでは:
+
+- `GITHUB_TOKEN` はread-only
+- GitHub-owned actionsだけを許可
+- actionはfull commit SHAへpin
+- Dependabotでnpm dependencyとGitHub Actionsを週次更新
+- duplicate PR runはconcurrencyでcancel
+
+とします。
+
+PR前後に以下を確認します。
 
 1. changed files / diff
 2. TypeScript型とimport/export
@@ -300,10 +310,10 @@ PR前に以下を静的監査します。
 5. purchase/sensitive-data boundary
 6. fail-closed failure cases
 7. unit test coverage
-8. existing TOHO/AEON regression影響
+8. existing TOHO/AEON/109 regression影響
 9. docsとの整合
 
-変更は可能な限りまとめ、PR作成後に `typecheck / unit test / build` を原則1回確認します。CI失敗時は原因を静的に詰めてから修正し、無目的なrerunをしません。live provider smokeは通常CIへ入れません。
+CI greenはproviderの現行規約やlive UI互換性を保証しません。provider-specific changeでは必要に応じて低頻度のnon-purchasing live smokeを明示実行し、UI drift時は推測fallbackを追加せずfail closedの原因を調査します。
 
 ## Performance Review
 
