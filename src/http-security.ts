@@ -1,5 +1,3 @@
-import { timingSafeEqual } from "node:crypto";
-
 function normalizeHostname(value: string): string {
   let normalized = value.trim().toLowerCase();
   if (normalized.startsWith("[") && normalized.endsWith("]")) normalized = normalized.slice(1, -1);
