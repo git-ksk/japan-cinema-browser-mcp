@@ -117,7 +117,7 @@ The following can be provider-independent once a provider adapter supplies norma
 - aisle preference: adjacency to an observed aisle/gap boundary
 - pair/group handling: preserve provider-declared logical groups rather than splitting them accidentally
 
-Recommendation must default to confirmed `available` seats. `unknown` is not a synonym for available.
+Recommendation defaults to confirmed `available` seats. `unknown` is not a synonym for available. Special/accessibility seats remain independent attributes and are excluded from default recommendation unless the caller explicitly opts in.
 
 ## State stability / freshness
 
@@ -135,17 +135,18 @@ A recommendation is advisory only. It must never select a seat as part of refres
 
 First provider: **TOHO Cinemas**.
 
-Planned scope:
+Implemented first-slice scope:
 
 - provider-neutral seat intelligence model
 - TOHO-only `get_seat_availability`
 - TOHO-only `seatMap=true` via #32 reviewed read-only entry and fail-closed extraction
-- `recommend_seats`
-- row / seat normalization
+- `recommend_seats` with exactly two bounded read-only observations
+- row / seat normalization + rendered gap boundaries
+- explicit SCREEN orientation proof from rendered public UI
 - adjacent seat grouping
 - center / rear / rear-middle / aisle scoring
-- seat-state refresh / stale detection
-- unit tests and fail-closed UI-change tests
+- context / layout / state freshness fingerprints and fail-closed stale detection
+- unit tests and isolated live smoke without seat click
 
 Explicitly excluded from v0.3.0 first scope:
 

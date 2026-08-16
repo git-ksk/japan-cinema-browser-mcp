@@ -72,7 +72,7 @@ test("adjacent grouping never joins semantic rows that share the same physical d
     seat("HC-2", 2, 12, "available", { row: "HC", attributes: ["wheelchair"] }),
     seat("C-18", 2, 13, "available", { row: "C" })
   ]);
-  assert.deepEqual(findAdjacentSeatGroups(input, 2).map((group) => group.map((item) => item.id)), [["HC-1", "HC-2"]]);
+  assert.deepEqual(findAdjacentSeatGroups(input, 2, { includeSpecialSeats: true }).map((group) => group.map((item) => item.id)), [["HC-1", "HC-2"]]);
 });
 
 test("explicit pair/group identities are not split by default", () => {
@@ -83,20 +83,25 @@ test("explicit pair/group identities are not split by default", () => {
     seat("A-4", 0, 3)
   ]);
   assert.deepEqual(findAdjacentSeatGroups(input, 1).map((group) => group.map((item) => item.id)), [["A-1"], ["A-4"]]);
-  assert.deepEqual(findAdjacentSeatGroups(input, 2).map((group) => group.map((item) => item.id)), [["A-2", "A-3"]]);
+  assert.deepEqual(findAdjacentSeatGroups(input, 2, { includeSpecialSeats: true }).map((group) => group.map((item) => item.id)), [["A-2", "A-3"]]);
   assert.deepEqual(
-    findAdjacentSeatGroups(input, 1, { preserveGroups: false }).map((group) => group.map((item) => item.id)),
+    findAdjacentSeatGroups(input, 1, { preserveGroups: false, includeSpecialSeats: true }).map((group) => group.map((item) => item.id)),
     [["A-1"], ["A-2"], ["A-3"], ["A-4"]]
   );
 });
 
 
-test("special seat attributes remain independent from availability", () => {
+test("special seat attributes remain independent from availability and require explicit recommendation opt-in", () => {
   const input = map([
     seat("A-1", 0, 0, "available", { attributes: ["executive", "premium"] }),
-    seat("A-2", 0, 1, "unavailable", { attributes: ["wheelchair"], unavailableReason: "not_for_sale" })
+    seat("A-2", 0, 1, "unavailable", { attributes: ["wheelchair"], unavailableReason: "not_for_sale" }),
+    seat("A-3", 0, 2)
   ]);
-  assert.deepEqual(findAdjacentSeatGroups(input, 1).map((group) => group[0]?.id), ["A-1"]);
+  assert.deepEqual(findAdjacentSeatGroups(input, 1).map((group) => group[0]?.id), ["A-3"]);
+  assert.deepEqual(
+    findAdjacentSeatGroups(input, 1, { includeSpecialSeats: true }).map((group) => group[0]?.id),
+    ["A-1", "A-3"]
+  );
   assert.deepEqual(input.seats[0]?.attributes, ["executive", "premium"]);
   assert.equal(input.seats[0]?.state, "available");
 });

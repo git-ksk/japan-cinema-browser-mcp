@@ -97,6 +97,7 @@ Public repositoryとして、次の安全基盤とread capabilityを実装済み
 - TOHOシネマズの劇場・日付・作品・上映回semantic read
 - TOHOシネマズの日付切替後のselected-state再検証
 - TOHOシネマズのread-only `get_seat_availability`（seat identity / availability / rendered gap geometry、seat clickなし）
+- TOHOシネマズのread-only `recommend_seats`（2回のbounded readでcontext/layout/state freshnessを確認してから adjacent / center / rear / rear-middle / aisle候補を返す）
 - イオンシネマの公式「劇場を探す」UIからの劇場一覧semantic read
 - イオンシネマの公開 `theater.aeoncinema.com/theaters/{slug}` schedule route利用
 - イオンシネマの日付・作品・上映時間・screen・format/language semantic read
@@ -219,6 +220,7 @@ CINEMA_ENABLE_PURCHASE=true npm start
 - `list_theaters` — providerの公式公開UIから劇場をsemanticに読む。TOHO / AEON / 109有効
 - `get_showtimes` — 劇場・日付・作品・上映回をsemanticに読む。TOHO / AEON / 109有効
 - `get_seat_availability` — exact theater/date/movie/startTime/screenにbindingしたTOHOのlive seat mapをread-onlyで読む。seat click / hold生成なし
+- `recommend_seats` — 同一TOHO seat mapを2回readし、context/layout/state fingerprintが一致した時だけconfirmed availableの隣接候補を順位付けする。special seatは明示opt-in
 - `resolve_theater_targets` — Maps等のbounded external place labelsをprovider公式劇場UIで再照合し、最大3件のverified `{ provider, theater }` targetへ変換する
 - `find_showtimes` — 最大3件の明示provider/theater targetを同一request内で順次読み、共通contractでfilter・集約する。provider failureは`complete=false`と`failures`で明示
 - `click_cinema_control` — reviewed read surface内の明示的read操作だけを実行する。seat/checkout/purchase系はprovider capabilityで拒否
@@ -253,7 +255,7 @@ npm run smoke:109
 
 ## 次の段階
 
-3社のread capabilityに加え、Phase 2.1のprovider-neutral `CinemaTheater` / `CinemaShowtime` / result contractを `src/cinema.ts` に追加済みです。各provider adapterはこのinterfaceを実装し、provider固有route・selector・alias情報はadapter側に残します。
+3社のread capabilityに加え、provider-neutral `CinemaTheater` / `CinemaShowtime` / `CinemaSeatMap` contractを `src/cinema.ts` に追加済みです。Phase 3のTOHO first vertical sliceではread-only seat extraction、freshness fingerprint、deterministic seat recommendationまで実装し、provider固有route・selector・seat DOM semanticはadapter側に残します。
 
 Phase 2.2では `resolve_theater_targets` と `find_showtimes` を分離しています。`find_showtimes` は最大3件の明示 `{ provider, theater }` targetだけを受け、同じChrome/CDP session上で順次実行します。`date` / `movie` / `after` / `before` / canonical `format` filterを適用し、開始時刻順 + target入力順でdeterministicに集約します。
 

@@ -90,7 +90,17 @@ interface TohoSeatSnapshot {
   standardCapacity?: unknown;
   wheelchairCapacity?: unknown;
   gridX?: unknown;
+  screenMarker?: unknown;
   seats?: unknown;
+}
+
+interface TohoScreenMarkerSnapshot {
+  id?: unknown;
+  className?: unknown;
+  imageUrl?: unknown;
+  backgroundPosition?: unknown;
+  rootTop?: unknown;
+  seatMinTop?: unknown;
 }
 
 interface ScheduleSnapshot {
@@ -329,12 +339,37 @@ const SEAT_MAP_EXPRESSION = `(() => {
   const gridX = [...new Set(Array.from(root.querySelectorAll('img')).filter(visible).map((img) => img.getBoundingClientRect().x))].sort((a, b) => a - b);
   const body = normalize(document.body.innerText || document.body.textContent);
   const capacity = body.match(/(\\d+)\\s*席\\s*\\+\\s*(\\d+)\\s*車いす席/);
+  const screenRoot = document.querySelector('#screen-defimg.screen-map');
+  let screenMarker = null;
+  if (screenRoot) {
+    const screenRect = screenRoot.getBoundingClientRect();
+    const style = getComputedStyle(screenRoot);
+    const background = String(style.backgroundImage || '');
+    let backgroundUrl = '';
+    if (background.startsWith('url("') && background.endsWith('")')) backgroundUrl = background.slice(5, -2);
+    else if (background.startsWith("url('") && background.endsWith("')")) backgroundUrl = background.slice(5, -2);
+    else if (background.startsWith('url(') && background.endsWith(')')) backgroundUrl = background.slice(4, -1);
+    let imageUrl = '';
+    if (backgroundUrl) {
+      try { imageUrl = new URL(backgroundUrl, location.href).href; } catch {}
+    }
+    const seatTops = seats.map((seat) => seat.y).filter(Number.isFinite);
+    screenMarker = {
+      id: screenRoot.id,
+      className: String(screenRoot.className || ''),
+      imageUrl,
+      backgroundPosition: String(style.backgroundPosition || ''),
+      rootTop: screenRect.top,
+      seatMinTop: seatTops.length ? Math.min(...seatTops) : null
+    };
+  }
   return {
     title: document.title,
     selectedSummary: normalize(document.querySelector('#seatList1')?.textContent),
     standardCapacity: capacity ? Number(capacity[1]) : null,
     wheelchairCapacity: capacity ? Number(capacity[2]) : null,
     gridX,
+    screenMarker,
     seats
   };
 })()`;
@@ -661,6 +696,24 @@ function rawString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function reviewedTohoScreenEdge(value: unknown): CinemaSeatMap<"toho">["screenEdge"] {
+  if (!value || typeof value !== "object") return undefined;
+  const marker = value as TohoScreenMarkerSnapshot;
+  if (rawString(marker.id) !== "screen-defimg") return undefined;
+  if (!rawString(marker.className).split(/\s+/).includes("screen-map")) return undefined;
+  if (rawString(marker.backgroundPosition) !== "0% 0%") return undefined;
+  if (!finitePosition(marker.rootTop) || !finitePosition(marker.seatMinTop) || marker.seatMinTop <= marker.rootTop) return undefined;
+  const imageUrl = rawString(marker.imageUrl);
+  if (!imageUrl) return undefined;
+  try {
+    const url = assertOfficialUrl(imageUrl, "toho");
+    if (!url.pathname.endsWith("/screen.gif") || url.search || url.hash) return undefined;
+  } catch {
+    return undefined;
+  }
+  return "top";
+}
+
 export function normalizeTohoSeatSnapshot(
   snapshot: TohoSeatSnapshot,
   sourceUrl: string,
@@ -736,6 +789,26 @@ export function normalizeTohoSeatSnapshot(
       y: rowIndex
     });
   }
+  const seatsBySemanticRow = new Map<string, CinemaSeat[]>();
+  for (const seat of seats) {
+    const key = seat.row ?? "";
+    const rowSeats = seatsBySemanticRow.get(key) ?? [];
+    rowSeats.push(seat);
+    seatsBySemanticRow.set(key, rowSeats);
+  }
+  for (const rowSeats of seatsBySemanticRow.values()) {
+    rowSeats.sort((a, b) => (a.columnIndex ?? 0) - (b.columnIndex ?? 0));
+    for (let index = 1; index < rowSeats.length; index += 1) {
+      const left = rowSeats[index - 1]!;
+      const right = rowSeats[index]!;
+      if (left.columnIndex === undefined || right.columnIndex === undefined) continue;
+      if (right.columnIndex > left.columnIndex + 1) {
+        left.rightBoundary = "gap";
+        right.leftBoundary = "gap";
+      }
+    }
+  }
+  const screenEdge = reviewedTohoScreenEdge(snapshot.screenMarker);
   const standardCapacity = typeof snapshot.standardCapacity === "number" && Number.isInteger(snapshot.standardCapacity) ? snapshot.standardCapacity : undefined;
   const wheelchairCapacity = typeof snapshot.wheelchairCapacity === "number" && Number.isInteger(snapshot.wheelchairCapacity) ? snapshot.wheelchairCapacity : undefined;
   if (standardCapacity !== undefined && wheelchairCapacity !== undefined) {
@@ -760,6 +833,7 @@ export function normalizeTohoSeatSnapshot(
     ...(showtime.screen ? { screen: showtime.screen } : {}),
     showtimeIdentity: ["toho", theater.id, showtime.date, showtime.movie, showtime.startTime, showtime.endTime ?? "", showtime.screen ?? ""].join("|"),
     seats,
+    ...(screenEdge ? { screenEdge } : {}),
     observedAt,
     sourceUrl: url.href
   };
@@ -999,7 +1073,13 @@ export class TohoReadAdapter implements CinemaReadAdapter<"toho", TohoTheater, T
     if (!seatMatch || seatMatch[1] !== schedule.theater.id || current.search || current.hash) {
       throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO seat-map route did not settle on the resolved theater context.");
     }
-    const semantic = await this.runtime.evaluateSemanticState<TohoSeatSnapshot>("toho", SEAT_MAP_EXPRESSION);
+    let semantic = await this.runtime.evaluateSemanticState<TohoSeatSnapshot>("toho", SEAT_MAP_EXPRESSION);
+    for (let attempt = 0; attempt < 16; attempt += 1) {
+      const seatCount = Array.isArray(semantic.value.seats) ? semantic.value.seats.length : 0;
+      if (rawString(semantic.value.title).includes("座席指定") && seatCount >= 20 && seatCount <= 1000) break;
+      await sleep(180);
+      semantic = await this.runtime.evaluateSemanticState<TohoSeatSnapshot>("toho", SEAT_MAP_EXPRESSION);
+    }
     const seatMap = normalizeTohoSeatSnapshot(semantic.value, semantic.url, schedule.theater, showtime);
     return { provider: "toho", theater: schedule.theater, showtime, seatMap };
   }

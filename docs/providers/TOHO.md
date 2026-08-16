@@ -141,13 +141,9 @@ CAPTCHA/anti-bot等が表示された環境では突破せずsmokeを失敗さ�
 
 ## 今後の確認項目
 
-Seat Mapへ進む前に別途確認します。
+Phase 3 first sliceではseat-map entry / availability / row-seat normalization / rendered gap / SCREEN orientation / freshness / recommendationまでread-onlyで確認・実装済みです。seat clickは行っていません。
 
-- どの操作時点で座席仮押さえが発生するか
-- available/unavailable等をvisible UIから識別できるか
-- row/seat labelを正規化できるか
-- 可能な限りseat click前にrecommendationを計算できるか
-- seat state変更をどう検出するか
+次のmutation review前には、seat activation自体のhold開始点・release条件を別Issueで再確認します。`select_seats`はそれまで追加しません。
 
 Checkout automation前:
 
@@ -187,12 +183,15 @@ v0.3.0候補scope:
 
 - read-only `get_seat_availability`
 - `recommend_seats`
-- row / seat normalization
+- row / seat normalization + rendered gap boundaries
+- rendered SCREEN markerによるfront/rear orientation
 - adjacent / center / rear / rear-middle / aisle scoring
-- stale seat-state detection
+- context / layout / stateの3 fingerprintによるstale detection
 
 `select_seats` / seat click / hold生成は対象外です。
 
 #32実装ではexact theater/date/movie/startTime/screenを1上映にbindingし、visible `販売中` controlからのみ進入します。会員促進面は観測済みJ03/J04 routeとexact `ログインせずに購入する` controlだけをprovider-specific intermediate allow-listで扱い、generic click policyは緩和していません。live seat DOMはprovider-visible `A-6` / `HC-1` 等のidentity、clickable `seatSelect(...)` attributeの**存在だけ**、non-clickable状態、rendered grid slotを読みます。`seatSelect(...)` 自体は実行しません。
+
+#33ではrendered `#screen-defimg.screen-map` のofficial `screen.gif`とseat位置関係を検証できた場合だけ`screenEdge=top`を付与します。`recommend_seats`は同一seat mapを2回readし、context/layout/stateのSHA-256 fingerprintが全一致した時だけ2回目の状態をscoreします。special seatはdefault候補から除外し、明示opt-inが必要です。
 
 Discovery詳細: [`../PHASE3_SEAT_DISCOVERY.md`](../PHASE3_SEAT_DISCOVERY.md)

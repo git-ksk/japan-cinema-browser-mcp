@@ -348,6 +348,14 @@ test("TOHO seat-map normalization derives read-only availability and preserves p
       standardCapacity: 20,
       wheelchairCapacity: 2,
       gridX: Array.from({ length: 22 }, (_, index) => index),
+      screenMarker: {
+        id: "screen-defimg",
+        className: "screen-map",
+        imageUrl: "https://hlo.tohotheater.jp/layout/0361/ppt/03/screen.gif",
+        backgroundPosition: "0% 0%",
+        rootTop: 100,
+        seatMinTop: 220
+      },
       seats: rawSeats
     },
     "https://hlo.tohotheater.jp/net/ticket/036/TNPI2010J01.do",
@@ -357,7 +365,7 @@ test("TOHO seat-map normalization derives read-only availability and preserves p
   );
 
   assert.equal(seatMap.seats.length, 22);
-  assert.equal(seatMap.screenEdge, undefined);
+  assert.equal(seatMap.screenEdge, "top");
   assert.equal(seatMap.showtimeIdentity, "toho|036|2026-08-17|映画A|21:10|23:05|3");
   assert.equal(seatMap.seats.find((seat) => seat.id === "C-1")?.state, "available");
   assert.deepEqual(seatMap.seats.find((seat) => seat.id === "C-19"), {
@@ -366,6 +374,8 @@ test("TOHO seat-map normalization derives read-only availability and preserves p
   assert.deepEqual(seatMap.seats.find((seat) => seat.id === "HC-1")?.attributes, ["wheelchair"]);
   assert.equal(seatMap.seats.find((seat) => seat.id === "HC-1")?.state, "available");
   assert.notEqual(seatMap.seats.find((seat) => seat.id === "C-10")?.columnIndex, seatMap.seats.find((seat) => seat.id === "C-11")?.columnIndex);
+  assert.equal(seatMap.seats.find((seat) => seat.id === "C-10")?.rightBoundary, "gap");
+  assert.equal(seatMap.seats.find((seat) => seat.id === "C-11")?.leftBoundary, "gap");
 });
 
 test("TOHO seat-map normalization fails closed on selected-seat state and wrong theater route", () => {
@@ -480,4 +490,43 @@ test("TOHO getSeatAvailability uses only the exact reviewed showtime and non-mem
   assert.equal(result.seatMap.seats.length, 20);
   assert.equal(result.seatMap.seats.every((seat) => seat.state === "available"), true);
   assert.equal(result.seatMap.sourceUrl, seatUrl);
+});
+
+
+test("TOHO seat-map orientation is emitted only from the exact reviewed rendered screen marker", () => {
+  const theater = {
+    provider: "toho" as const,
+    id: "036",
+    name: "TOHOシネマズ ららぽーと横浜",
+    aliases: ["TOHOシネマズ ららぽーと横浜"],
+    url: "https://hlo.tohotheater.jp/net/schedule/036/TNPI2000J01.do",
+    sourceUrl: THEATER_LIST_URL
+  };
+  const showtime = {
+    provider: "toho" as const,
+    theaterId: "036", theater: theater.name, date: "2026-08-17", movie: "映画A", startTime: "21:10",
+    formats: [], screen: "3", availability: "unknown" as const, sourceUrl: theater.url
+  };
+  const seats = Array.from({ length: 20 }, (_, index) => ({
+    id: `C-${index + 1}`, row: "C", number: String(index + 1), src: "seat_1.gif",
+    onclick: `JavaScript:seatSelect('C','${index + 1}', '1');`, x: index, y: 220
+  }));
+  const base = {
+    title: "座席指定 || TOHOシネマズ",
+    selectedSummary: "",
+    gridX: seats.map((seat) => seat.x),
+    seats
+  };
+  const unreviewed = normalizeTohoSeatSnapshot({
+    ...base,
+    screenMarker: {
+      id: "screen-defimg",
+      className: "screen-map",
+      imageUrl: "https://example.com/screen.gif",
+      backgroundPosition: "0% 0%",
+      rootTop: 100,
+      seatMinTop: 220
+    }
+  }, "https://hlo.tohotheater.jp/net/ticket/036/TNPI2010J01.do", theater, showtime);
+  assert.equal(unreviewed.screenEdge, undefined);
 });

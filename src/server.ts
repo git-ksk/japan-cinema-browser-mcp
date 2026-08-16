@@ -36,6 +36,8 @@ import { CINEMA_HANDOFF_POLICY } from "./handoff-policy.js";
 import { SHOWTIME_FORMATS, type CinemaReadAdapter, type CinemaSeatReadAdapter } from "./cinema.js";
 import { findShowtimes } from "./find-showtimes.js";
 import { resolveTheaterTargets } from "./resolve-theater-targets.js";
+import { recommendSeats } from "./recommend-seats.js";
+import { SeatRecommendationError } from "./seat-recommendation.js";
 import {
   CINEMA_PROVIDERS,
   ProviderPolicyError,
@@ -85,6 +87,7 @@ function errorResult(error: unknown): CallToolResult {
     error instanceof BrowserRuntimeError ||
     error instanceof ProviderPolicyError ||
     error instanceof PurchaseGateError ||
+    error instanceof SeatRecommendationError ||
     error instanceof ExecutionHandoffError ||
     usageDenied;
   if (!known) console.error("[japan-cinema-browser-mcp] unexpected tool error", error);
@@ -94,7 +97,7 @@ function errorResult(error: unknown): CallToolResult {
     : known
       ? error.message
       : "The operation failed unexpectedly. Check the local MCP server logs.";
-  const details = error instanceof BrowserRuntimeError ? error.details : undefined;
+  const details = error instanceof BrowserRuntimeError || error instanceof SeatRecommendationError ? error.details : undefined;
   return {
     content: [{ type: "text" as const, text: JSON.stringify({ error: code, message, details }) }],
     isError: true
@@ -397,6 +400,12 @@ function findShowtimesTimeoutMs(targetCount: number): number {
   return config.policy.operationTimeoutMs * targetCount + 5_000;
 }
 
+function recommendSeatsTimeoutMs(): number {
+  // Freshness verification performs exactly two sequential read-only seat-map
+  // observations. Preserve one bounded provider budget for each observation.
+  return config.policy.operationTimeoutMs * 2 + 5_000;
+}
+
 export function buildServer(): McpServer {
   const server = new McpServer(
     { name: "japan-cinema-browser-mcp", version: SERVER_VERSION },
@@ -570,6 +579,45 @@ export function buildServer(): McpServer {
         startTime,
         ...(screen ? { screen } : {})
       })
+    })
+  );
+
+  server.registerTool(
+    "recommend_seats",
+    {
+      title: "Recommend cinema seats",
+      description: "Read the same exact reviewed seat map twice, fail closed if context/layout/availability changed, and rank only confirmed available adjacent TOHO seats. Supports center, rear, rear-middle, and aisle preferences. Never clicks or selects a seat.",
+      inputSchema: z.object({
+        provider: providerSchema,
+        theater: shortText,
+        date: isoDate,
+        movie: shortText,
+        startTime: clockTime,
+        screen: z.string().trim().min(1).max(40).optional(),
+        count: z.number().int().min(1).max(8),
+        preference: z.enum(["center", "rear", "rear-middle", "aisle"]),
+        limit: z.number().int().min(1).max(20).optional(),
+        includeSpecialSeats: z.boolean().optional()
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true }
+    },
+    async ({ provider, theater, date, movie, startTime, screen, count, preference, limit, includeSpecialSeats }, ctx) => runToolWithHandoff({
+      toolName: "recommend_seats",
+      args: {
+        provider, theater, date, movie, startTime,
+        ...(screen ? { screen } : {}),
+        count, preference, ...(limit !== undefined ? { limit } : {}),
+        ...(includeSpecialSeats !== undefined ? { includeSpecialSeats } : {})
+      },
+      resumeStrategy: CINEMA_HANDOFF_POLICY.navigation.resumeStrategy,
+      ctx,
+      timeoutMs: recommendSeatsTimeoutMs(),
+      task: () => recommendSeats({
+        provider, theater, date, movie, startTime,
+        ...(screen ? { screen } : {}),
+        count, preference, ...(limit !== undefined ? { limit } : {}),
+        ...(includeSpecialSeats !== undefined ? { includeSpecialSeats } : {})
+      }, requireSeatAdapter(provider))
     })
   );
 
