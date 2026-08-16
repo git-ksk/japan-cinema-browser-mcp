@@ -164,7 +164,7 @@ Exit criteria:
 
 目的: 無駄な仮押さえを作らず、表示中のseat mapを理解する。
 
-状態: 🟡 v0.3.0 implementation in progress — TOHO read-only seat map complete
+状態: 🟢 v0.3.0 first vertical slice implemented — release pending
 
 2026-08-17にTOHO / AEON / 109のPhase 3 Discoveryを実施しました。seat clickは一切行わず、公開rendered UIと公式公開手順だけからhold境界・seat semantic・geometry候補を比較しています。詳細は [`PHASE3_SEAT_DISCOVERY.md`](./PHASE3_SEAT_DISCOVERY.md) を参照してください。
 
@@ -179,7 +179,9 @@ Discovery結果:
 - ✅ TOHO live seat-map entryのread-only safety gateを実地確認（seat hold / material mutation / availability impactなし）
 - ✅ TOHO `get_seat_availability`（#32）
 - ✅ TOHO row / seat normalization + rendered gap geometry extraction（#32）
-- ⬜ `recommend_seats` tool wiring + seat state refresh / stale detection
+- ✅ `recommend_seats` + bounded reread + context/layout/state fingerprint freshness detection（#33）
+- ✅ rendered SCREEN markerからfront/rear orientationを明示検証。推測できない場合はscoringをfail closed
+- ✅ special/accessibility seatはdefault recommendationから除外し、明示opt-in時だけ候補化
 
 v0.3.0 first scope:
 

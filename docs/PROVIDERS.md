@@ -57,7 +57,7 @@ TOHO / AEON / 109のseat-map / seat-hold境界を、seat clickなしで再レビ
 - AEON: visible `予約購入` click後のnew browser targetがisolated Chromeで`about:blank`に留まり、live seat mapは未到達。public navigation/target handlingを#36で追跡
 - すべてのvalidation / smokeでseat clickは実施していない
 
-`v0.3.0 — Seat Intelligence` はTOHOのread-only `get_seat_availability` / `recommend_seats` をfirst vertical sliceとし、`select_seats` は含めません。
+`v0.3.0 — Seat Intelligence` のTOHO first vertical sliceはread-only `get_seat_availability` / `recommend_seats`、rendered gap/orientation、freshness検知まで実装済みです。`select_seats` は含めません。
 
 ## TOHO Phase 1 Read Adapter
 

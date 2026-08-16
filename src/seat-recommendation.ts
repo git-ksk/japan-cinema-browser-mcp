@@ -9,6 +9,8 @@ export interface SeatRecommendationRequest {
   limit?: number;
   /** Defaults to true. Explicit provider groups are never split when enabled. */
   preserveGroups?: boolean;
+  /** Defaults to false so accessibility/premium/provider-special seats require explicit opt-in. */
+  includeSpecialSeats?: boolean;
 }
 
 export interface SeatRecommendationScore {
@@ -143,7 +145,7 @@ function preservesObservedGroups(candidate: CinemaSeat[], groups: Map<string, Se
 export function findAdjacentSeatGroups(
   map: CinemaSeatMap,
   count: number,
-  options: { preserveGroups?: boolean } = {}
+  options: { preserveGroups?: boolean; includeSpecialSeats?: boolean } = {}
 ): CinemaSeat[][] {
   assertMapIntegrity(map);
   if (!finiteNonNegativeInteger(count) || count < 1 || count > 8) {
@@ -153,6 +155,7 @@ export function findAdjacentSeatGroups(
   const byRow = new Map<string, { rowIndex: number; entries: Array<{ seat: CinemaSeat; column: number }> }>();
   for (const seat of map.seats) {
     if (seat.state !== "available") continue;
+    if (seat.attributes.length > 0 && options.includeSpecialSeats !== true) continue;
     const geometry = recommendationGeometry(seat);
     if (!geometry) continue;
     const rowKey = `${geometry.row}|${seat.row ?? ""}`;
@@ -260,7 +263,10 @@ export function recommendSeatGroups(map: CinemaSeatMap, request: SeatRecommendat
     throw new SeatRecommendationError("INVALID_REQUEST", "Recommendation limit must be an integer from 1 through 20.", { limit });
   }
 
-  const groups = findAdjacentSeatGroups(map, request.count, { preserveGroups: request.preserveGroups });
+  const groups = findAdjacentSeatGroups(map, request.count, {
+    preserveGroups: request.preserveGroups,
+    includeSpecialSeats: request.includeSpecialSeats
+  });
   const recommendations = groups.map((group): SeatGroupRecommendation => {
     const score = groupGeometry(map, group);
     score.total = rounded(totalFor(request.preference, score));

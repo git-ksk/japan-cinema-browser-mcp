@@ -45,7 +45,7 @@ MCP toolの登録と引数検証を担当します。
 - bounded result返却
 - provider capabilityのruntime強制
 
-現在は `list_theaters` / `get_showtimes` をTOHO / AEON / 109で、`get_seat_availability` をTOHOだけで有効化しています。無効capabilityへのgeneric fuzzy fallbackはしません。
+現在は `list_theaters` / `get_showtimes` をTOHO / AEON / 109で、`get_seat_availability` / `recommend_seats` をTOHOだけで有効化しています。無効capabilityへのgeneric fuzzy fallbackはしません。
 
 ### `src/providers.ts`
 
@@ -76,6 +76,8 @@ Phase 1 showtime + Phase 3 seat intelligenceのTOHO read-only adapterです。
 - exact theater/date/movie/startTime/screenからvisible sellable showtimeを1件へbinding
 - reviewed non-member intermediateだけを通り、seat clickなしでlive `座席指定` DOMを読む
 - seat identity / availability / wheelchair attribute / rendered grid gapをprovider-neutral `CinemaSeatMap`へ正規化
+- rendered `#screen-defimg.screen-map` + official `screen.gif` + seat位置関係が一致した場合だけscreen edgeを確定
+- transient seat-map hydrationはbounded waitし、妥当なidentity countが出なければfail closed
 - selected-seat state、route drift、capacity mismatch、曖昧identityではfail closed
 - UI変更、曖昧grouping、movie/showtime対応不能時はfail closed
 
@@ -108,6 +110,21 @@ Phase 1の109 read-only adapterです。
 - `オンラインチケット購入` 等のpurchase controlはadapterからclickしない
 
 3社ともraw HTMLやfull DOMをadapter外へ返さず、CDP `Runtime.evaluate` 内で小さいstructured factへ落としてからNode側へ戻します。private/internal endpointやnetwork interceptionは利用しません。
+
+
+### `src/seat-freshness.ts`
+
+provider-neutral seat-map freshnessをdeterministic SHA-256 fingerprintへ落とします。`observedAt`はhashから除外し、同じ事実を別時刻に再readしても一致するようにします。
+
+- context: provider / theater / screen / showtime identity / public source
+- layout: seat identity / row / slot / attributes / gap/group / screen edge
+- state: seat identity / availability / unavailable reason
+
+### `src/seat-recommendation.ts` / `src/recommend-seats.ts`
+
+純粋なseat scoringとbrowser orchestrationを分離します。`recommend_seats`は同一exact showtimeを2回readし、context/layout/stateの3 fingerprintが全一致した場合だけ2回目の観測からrecommendationを作ります。1席でも変化した場合はstale resultを返さずfail closedします。
+
+推薦はconfirmed `available`だけを対象にし、semantic row、rendered gap、provider groupを尊重します。special/accessibility seatはavailabilityから独立して保持し、default推薦からは外して明示opt-inを要求します。
 
 ### `src/browser/chrome-process.ts`
 
@@ -176,7 +193,7 @@ MCP Tools
    ▼
 Provider read routing
    │
-   ├─ TOHO adapter      ← Phase 1 read-only
+   ├─ TOHO adapter      ← Phase 1 showtime + Phase 3 read-only seat intelligence
    ├─ AEON adapter      ← Phase 1 read-only
    └─ 109 adapter       ← Phase 1 read-only
    │
