@@ -155,7 +155,7 @@ function securityHeaders(nonce: string): Headers {
       "default-src 'none'",
       `script-src 'nonce-${nonce}'`,
       `style-src 'nonce-${nonce}'`,
-      "connect-src https://identitytoolkit.googleapis.com",
+      "connect-src 'self' https://identitytoolkit.googleapis.com",
       "form-action 'none'",
       "frame-ancestors 'none'",
       "base-uri 'none'"

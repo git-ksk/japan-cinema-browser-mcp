@@ -243,6 +243,7 @@ test("authorization session keeps credentials out of the Cinema server form boun
   assert.equal(page.headers.get("cache-control"), "no-store");
   assert.equal(page.headers.get("referrer-policy"), "no-referrer");
   assert.equal(page.headers.get("x-frame-options"), "DENY");
+  assert.match(page.headers.get("content-security-policy") ?? "", /connect-src 'self' https:\/\/identitytoolkit\.googleapis\.com/);
 });
 
 test("authorization code is PKCE-bound and one-shot; refresh rotates and revocation invalidates access", async () => {
