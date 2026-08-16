@@ -584,14 +584,18 @@ export class CinemaBrowserRuntime {
 
   private async ensureConnected(): Promise<void> {
     this.assertOperationActive();
-    if (this.client) {
+    const existingClient = this.client;
+    if (existingClient) {
       try {
-        await this.client.Runtime.evaluate({ expression: "1", returnByValue: true });
+        await existingClient.Runtime.evaluate({ expression: "1", returnByValue: true });
+        this.assertOperationActive();
         return;
       } catch {
-        await this.client.close().catch(() => undefined);
-        this.client = undefined;
-        this.targetId = undefined;
+        await existingClient.close().catch(() => undefined);
+        if (this.client === existingClient) {
+          this.client = undefined;
+          this.targetId = undefined;
+        }
       }
     }
 
@@ -609,9 +613,19 @@ export class CinemaBrowserRuntime {
       }
       const target = officialTargets[0] ?? await CDP.New({ port: this.port, url: "about:blank" });
       this.targetId = target.id;
-      this.client = await CDP({ port: this.port, target: this.targetId });
-      await Promise.all([this.client.Page.enable(), this.client.Runtime.enable(), this.client.DOM.enable()]);
-      this.assertOperationActive();
+      const client = await CDP({ port: this.port, target: this.targetId });
+      this.client = client;
+      try {
+        await Promise.all([client.Page.enable(), client.Runtime.enable(), client.DOM.enable()]);
+        this.assertOperationActive();
+      } catch (error) {
+        await client.close().catch(() => undefined);
+        if (this.client === client) {
+          this.client = undefined;
+          this.targetId = undefined;
+        }
+        throw error;
+      }
     } catch (error) {
       if (error instanceof BrowserRuntimeError) throw error;
       console.error("[japan-cinema-browser-mcp] Chrome/CDP connection failed", error);

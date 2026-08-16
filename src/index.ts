@@ -254,7 +254,7 @@ async function startHttp(): Promise<void> {
   // result before the tool boundary returns it.
   httpServer.requestTimeout = Math.max(
     40_000,
-    Math.min(150_000, config.policy.operationTimeoutMs * 3 + 45_000)
+    Math.min(420_000, config.policy.operationTimeoutMs * 3 + 60_000)
   );
   httpServer.keepAliveTimeout = 5_000;
 

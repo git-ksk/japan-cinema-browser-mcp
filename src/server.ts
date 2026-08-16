@@ -381,13 +381,11 @@ function requireReadAdapter(provider: CinemaProviderId, capability: "theaters" |
   );
 }
 
-const MAX_FIND_SHOWTIMES_TIMEOUT_MS = 120_000;
-
 function findShowtimesTimeoutMs(targetCount: number): number {
-  return Math.min(
-    MAX_FIND_SHOWTIMES_TIMEOUT_MS,
-    config.policy.operationTimeoutMs * targetCount + 5_000
-  );
+  // Input is capped at three targets and operationTimeoutMs is capped by config,
+  // so this remains bounded while still giving every target its full isolated
+  // provider budget before the aggregate envelope can fire.
+  return config.policy.operationTimeoutMs * targetCount + 5_000;
 }
 
 export function buildServer(): McpServer {

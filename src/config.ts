@@ -214,7 +214,7 @@ export function loadConfig(): AppConfig {
       usage: {
         projectId: usageProjectId,
         dailyLimit: envInt("MCP_USAGE_DAILY_LIMIT", 100, 1, 10_000),
-        leaseTtlMs: envInt("MCP_USAGE_LEASE_TTL_MS", 60_000, 10_000, 600_000)
+        leaseTtlMs: envInt("MCP_USAGE_LEASE_TTL_MS", 300_000, 10_000, 600_000)
       }
     } : {}),
     policy: {
