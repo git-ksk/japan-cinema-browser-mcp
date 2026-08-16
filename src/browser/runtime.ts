@@ -25,6 +25,9 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+const REVIEWED_NAVIGATION_RETRY_MS = 10_000;
+const REVIEWED_NAVIGATION_POLL_MS = 200;
+
 type CdpClient = Awaited<ReturnType<typeof CDP>>;
 
 export type CinemaInterventionReason =
@@ -273,7 +276,7 @@ export class CinemaBrowserRuntime {
     await Promise.race([loaded, sleep(5_000)]);
     this.assertOperationActive();
     await this.assertNoIntervention(CINEMA_HANDOFF_POLICY.navigation.resumePolicy);
-    const current = await this.assertOfficialCurrentUrl(expectedProvider);
+    const current = await this.waitForExpectedOfficialUrl(client, expectedProvider);
     this.handoff.advanceResourceEpoch();
     return current;
   }
@@ -519,6 +522,33 @@ export class CinemaBrowserRuntime {
   ): never {
     const intervention = this.handoff.begin({ reason, resumePolicy });
     throw new BrowserRuntimeError("HUMAN_ACTION_REQUIRED", message, undefined, intervention);
+  }
+
+  private async waitForExpectedOfficialUrl(
+    client: CdpClient,
+    expectedProvider: CinemaProviderId
+  ): Promise<string> {
+    const deadline = Date.now() + REVIEWED_NAVIGATION_RETRY_MS;
+    let lastUrl = "";
+    let lastError: unknown;
+    while (true) {
+      this.assertOperationActive();
+      lastUrl = await this.currentUrlUnchecked(client);
+      try {
+        assertOfficialUrl(lastUrl, expectedProvider);
+        return lastUrl;
+      } catch (error) {
+        lastError = error;
+        const isTransientReviewedSurface = lastUrl === "about:blank" || Boolean(providerForUrl(lastUrl));
+        if (!isTransientReviewedSurface || Date.now() >= deadline) break;
+      }
+      await sleep(Math.min(REVIEWED_NAVIGATION_POLL_MS, Math.max(0, deadline - Date.now())));
+    }
+    throw new BrowserRuntimeError(
+      "URL_NOT_ALLOWED",
+      lastError instanceof Error ? lastError.message : "Current URL is not allowed",
+      { url: lastUrl }
+    );
   }
 
   private async assertOfficialCurrentUrl(expectedProvider?: CinemaProviderId): Promise<string> {
