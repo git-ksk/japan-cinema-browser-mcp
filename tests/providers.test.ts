@@ -37,11 +37,11 @@ test("lookalike, insecure, credentialed and non-default-port URLs are rejected",
   assert.throws(() => assertOfficialUrl("https://example.com/"));
 });
 
-test("TOHO exposes reviewed read-only seatMap while all providers keep seat selection and transaction capabilities disabled", () => {
+test("TOHO and 109 expose reviewed read-only seatMap while all providers keep seat selection and transaction capabilities disabled", () => {
   for (const provider of [CINEMA_PROVIDERS.toho, CINEMA_PROVIDERS.aeon, CINEMA_PROVIDERS["109"]]) {
     assert.equal(provider.capabilities.theaters, true, provider.id);
     assert.equal(provider.capabilities.showtimes, true, provider.id);
-    assert.equal(provider.capabilities.seatMap, provider.id === "toho", provider.id);
+    assert.equal(provider.capabilities.seatMap, provider.id === "toho" || provider.id === "109", provider.id);
     assert.equal(provider.capabilities.seatSelection, false, provider.id);
     assert.equal(provider.capabilities.checkoutPreparation, false, provider.id);
     assert.equal(provider.capabilities.purchaseSubmission, false, provider.id);
@@ -58,7 +58,8 @@ test("provider capability matrix is enforced as a runtime policy boundary", () =
   }
 
   assert.doesNotThrow(() => assertProviderCapability("toho", "seatMap"));
-  for (const providerId of ["aeon", "109"] as const) {
+  assert.doesNotThrow(() => assertProviderCapability("109", "seatMap"));
+  for (const providerId of ["aeon"] as const) {
     assert.throws(
       () => assertProviderCapability(providerId, "seatMap"),
       (error) => error instanceof ProviderPolicyError && error.code === "UNSUPPORTED_CAPABILITY",

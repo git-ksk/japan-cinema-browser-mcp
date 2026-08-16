@@ -60,7 +60,7 @@ provider registryと横断ポリシーを保持します。
 - sensitive field判定
 - final purchase control判定
 
-TOHO / AEON / 109は `theaters=true / showtimes=true`。TOHOだけreview済みread-only `seatMap=true`、AEON / 109はfalseです。`seatSelection / checkoutPreparation / purchaseSubmission` は全providerでfalseで、`CINEMA_ENABLE_PURCHASE=true` でも最終submitは実行できません。
+TOHO / AEON / 109は `theaters=true / showtimes=true`。TOHOと109はreview済みread-only `seatMap=true`、AEONはfalseです。`seatSelection / checkoutPreparation / purchaseSubmission` は全providerでfalseで、`CINEMA_ENABLE_PURCHASE=true` でも最終submitは実行できません。
 
 ### `src/providers/toho/adapter.ts`
 
@@ -108,6 +108,9 @@ Phase 1の109 read-only adapterです。
 - unavailable dateはhrefを生成せず `dateAvailable=false`
 - ambiguous time group、movie/screen binding不能、wrong theater/date/routeでfail closed
 - `オンラインチケット購入` 等のpurchase controlはadapterからclickしない
+- Phase 3ではschedule rowのexact rendered `cinema.109cinemas.net` hrefだけを採用し、read-only seat mapへ進む
+- 10分session timerとselected=0を検証し、`input.seat` / `data-seat-key`からavailabilityとgap geometryを読む
+- screen/front orientationは見える証拠がない限り推測しない
 
 3社ともraw HTMLやfull DOMをadapter外へ返さず、CDP `Runtime.evaluate` 内で小さいstructured factへ落としてからNode側へ戻します。private/internal endpointやnetwork interceptionは利用しません。
 

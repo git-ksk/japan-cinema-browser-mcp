@@ -15,7 +15,7 @@
 |---|---|---|---|
 | TOHOシネマズ | `https://www.tohotheater.jp/` | reviewed public read surface / bounded read / 劇場・日付・作品・上映回 + read-only座席表semantic read | 購入無効。seat selection / checkout未レビュー |
 | イオンシネマ | `https://www.aeoncinema.com/` | reviewed public read surface / bounded read / 劇場・日付・作品・上映回semantic read | 無効。seat/checkout未レビュー |
-| 109シネマズ | `https://109cinemas.net/` | reviewed public read surface / bounded read / 劇場・日付・作品・上映回semantic read | 無効。seat/checkout未レビュー |
+| 109シネマズ | `https://109cinemas.net/` | reviewed public read surface / bounded read / 劇場・日付・作品・上映回 + read-only座席表semantic read | 購入無効。seat selection / checkout未レビュー |
 
 ## 共通ルール
 
@@ -39,21 +39,21 @@
 | Generic bounded read | ✅ | ✅ | ✅ |
 | 劇場一覧/選択semantic | ✅ | ✅ | ✅ |
 | 上映情報semantic | ✅ | ✅ | ✅ |
-| 座席表read | ✅ | ⬜ | ⬜ |
+| 座席表read | ✅ | ⬜ | ✅ |
 | 座席選択 | ⬜ | ⬜ | ⬜ |
 | Checkout preparation | ⬜ | ⬜ | ⬜ |
 | Final purchase | ⬜ | ⬜ | ⬜ |
 
 `✅` はそのcapabilityについて実装済み、`⬜` は未着手を表します。
 
-TOHOのみreview済みread-only `seatMap=true` です。`seatSelection=false / checkoutPreparation=false / purchaseSubmission=false` は3社とも維持し、AEON / 109の `seatMap` もfalseです。
+TOHOと109でreview済みread-only `seatMap=true` です。109はseat-map entryで10分session timerが開始しますがselected=0を必須検証します。`seatSelection=false / checkoutPreparation=false / purchaseSubmission=false` は3社とも維持し、AEONの `seatMap` はfalseです。
 
 ## Phase 3 Seat Intelligence Discovery — 2026-08-17
 
 TOHO / AEON / 109のseat-map / seat-hold境界を、seat clickなしで再レビューしました。詳細比較とv0.3.0 scopeは [`PHASE3_SEAT_DISCOVERY.md`](./PHASE3_SEAT_DISCOVERY.md) に記録しています。
 
 - TOHO: live `座席指定` までseat clickなしで検証し、entry時selected=0 / visible timerなし。#32でread-only adapterを実装し `seatMap=true` へ昇格
-- 109: live seat-map entryで10分session timer開始を確認する一方、`選択座席 0／8席`かつ独立session間のseat-state fingerprint一致を確認。read-only候補は#35
+- 109: live seat-map entryで10分session timer開始を確認する一方、`選択座席 0／8席`かつ独立session間のseat-state fingerprint一致を確認。#35でexact rendered public href + checkbox semantic adapterを実装し `seatMap=true`
 - AEON: visible `予約購入` click後のnew browser targetがisolated Chromeで`about:blank`に留まり、live seat mapは未到達。public navigation/target handlingを#36で追跡
 - すべてのvalidation / smokeでseat clickは実施していない
 

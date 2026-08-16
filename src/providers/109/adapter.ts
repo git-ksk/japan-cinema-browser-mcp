@@ -1,11 +1,13 @@
 import { BrowserRuntimeError, CinemaBrowserRuntime } from "../../browser/runtime.js";
-import type { CinemaReadAdapter, CinemaShowtime, CinemaTheater, ShowtimeFormat, ShowtimeQuery, ShowtimeResult, TheaterListResult } from "../../cinema.js";
+import type { CinemaReadAdapter, CinemaSeat, CinemaSeatMap, CinemaSeatReadAdapter, CinemaShowtime, CinemaTheater, SeatAvailabilityQuery, SeatAvailabilityResult, ShowtimeFormat, ShowtimeQuery, ShowtimeResult, TheaterListResult } from "../../cinema.js";
 import { assertOfficialUrl } from "../../providers.js";
 
 const CINEMAS_109_HOME_URL = "https://109cinemas.net/";
 const CINEMAS_109_HOST = "109cinemas.net";
 const THEATER_ROUTE = /^\/([a-z0-9-]+)\/$/;
 const SCHEDULE_ROUTE = /^\/([a-z0-9-]+)\/schedules\/(20\d{6})\.html$/;
+const SEAT_ENTRY_HOST = "cinema.109cinemas.net";
+const SEAT_ENTRY_PATH = "/cgi-bin/pc/resv/resv_shw_ppt.cgi";
 const MIN_REVIEWED_THEATER_COUNT = 18;
 const MAX_REVIEWED_THEATER_COUNT = 32;
 const THEATER_READY_ATTEMPTS = 20;
@@ -54,6 +56,27 @@ interface ScheduleSnapshotRow {
   screenContext?: unknown;
   availability?: unknown;
   context?: unknown;
+}
+
+interface SeatEntrySnapshot {
+  matched?: unknown;
+  hrefs?: unknown;
+}
+
+interface SeatSnapshotRow {
+  value?: unknown;
+  disabled?: unknown;
+  checked?: unknown;
+  seatKey?: unknown;
+  universal?: unknown;
+  group?: unknown;
+}
+
+interface SeatSnapshot {
+  title?: unknown;
+  timerVisible?: unknown;
+  selectedSummary?: unknown;
+  seats?: unknown;
 }
 
 interface ScheduleSnapshot {
@@ -237,6 +260,68 @@ const SCHEDULE_EXPRESSION = `(() => {
     ambiguousTimeGroups,
     unresolvedGroupCount,
     emptySchedule: /(?:上映スケジュールが未確定|上映スケジュールはありません|上映予定はありません|上映回はありません)/.test(bodyText)
+  };
+})()`;
+
+
+function seatEntryExpression(showtime: Cinemas109Showtime): string {
+  const movie = JSON.stringify(showtime.movie);
+  const start = JSON.stringify(showtime.startTime);
+  const end = JSON.stringify(showtime.endTime ?? "");
+  const screen = JSON.stringify(showtime.screen ?? "");
+  return `(() => {
+    const movie = ${movie};
+    const start = ${start};
+    const end = ${end};
+    const screen = ${screen};
+    const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+    const visible = (el) => {
+      const r = el.getBoundingClientRect();
+      const s = getComputedStyle(el);
+      return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
+    };
+    const hrefs = [];
+    let matched = 0;
+    for (const article of Array.from(document.querySelectorAll('article')).filter(visible)) {
+      const titles = Array.from(article.querySelectorAll('header h2')).filter(visible).map((el) => normalize(el.textContent));
+      if (titles.length !== 1 || titles[0] !== movie) continue;
+      for (const timetable of Array.from(article.children).filter((el) => el.matches?.('ul.timetable') && visible(el))) {
+        const theaterRows = Array.from(timetable.children).filter((el) => el.matches?.('li.theatre') && visible(el));
+        if (theaterRows.length !== 1) continue;
+        const screenText = normalize(theaterRows[0].textContent);
+        const observedScreen = screenText.match(/(?:シアター|THEATER)\\s*([A-Z0-9-]+)/i)?.[1] || '';
+        if (screen && observedScreen !== screen) continue;
+        for (const row of Array.from(timetable.children).filter((el) => el.matches?.('li:not(.theatre)') && visible(el))) {
+          const observedStart = normalize(row.querySelector('time.start')?.textContent).replace(/：/g, ':').padStart(5, '0');
+          const observedEnd = normalize(row.querySelector('time.end')?.textContent).replace(/：/g, ':').padStart(5, '0');
+          if (observedStart !== start || (end && observedEnd !== end)) continue;
+          matched += 1;
+          const anchors = Array.from(row.querySelectorAll('a[href]')).filter(visible);
+          if (anchors.length === 1) hrefs.push(String(anchors[0].href || ''));
+        }
+      }
+    }
+    return { matched, hrefs };
+  })()`;
+}
+
+const SEAT_MAP_EXPRESSION = `(() => {
+  const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+  const body = normalize(document.body.innerText || document.body.textContent);
+  const seats = Array.from(document.querySelectorAll('input.seat[type="checkbox"]')).map((el) => ({
+    value: String(el.value || ''),
+    disabled: Boolean(el.disabled),
+    checked: Boolean(el.checked),
+    seatKey: String(el.getAttribute('data-seat-key') || ''),
+    universal: String(el.getAttribute('data-universal') || ''),
+    group: String(el.getAttribute('seat-group') || '')
+  }));
+  const selected = body.match(/選択座席\\s*([0-9０-９]+)\\s*[／/]\\s*([0-9０-９]+)席/);
+  return {
+    title: document.title,
+    timerVisible: /今から\\s*10分以内に購入が完了しない場合、?\\s*座席が解放されます/.test(body),
+    selectedSummary: selected ? selected[0] : '',
+    seats
   };
 })()`;
 
@@ -638,6 +723,132 @@ export function normalize109ScheduleSnapshot(
   });
 }
 
+
+export function review109SeatEntryUrl(value: string, date: string, startTime: string): string {
+  let url: URL;
+  try { url = assertOfficialUrl(value, "109"); } catch (error) {
+    throw new BrowserRuntimeError("URL_NOT_ALLOWED", error instanceof Error ? error.message : "109 Cinemas seat entry URL is not allowed.");
+  }
+  if (url.hostname !== SEAT_ENTRY_HOST || url.pathname !== SEAT_ENTRY_PATH || url.hash) {
+    throw new BrowserRuntimeError("UI_STATE_CHANGED", "109 Cinemas seat entry URL is outside the reviewed rendered public route.");
+  }
+  const entries = [...url.searchParams.entries()];
+  const allowed = new Set(["ttc", "tsc", "tssc", "ymd", "cs", "stt"]);
+  if (entries.length !== 6 || entries.some(([key]) => !allowed.has(key)) || new Set(entries.map(([key]) => key)).size !== 6) {
+    throw new BrowserRuntimeError("UI_STATE_CHANGED", "109 Cinemas seat entry query no longer matches the reviewed public shape.");
+  }
+  if (!/^\d+$/.test(url.searchParams.get("ttc") ?? "") || !/^\d+$/.test(url.searchParams.get("tsc") ?? "") || !/^\d+$/.test(url.searchParams.get("tssc") ?? "")) {
+    throw new BrowserRuntimeError("UI_STATE_CHANGED", "109 Cinemas seat entry identity query is malformed.");
+  }
+  if (!/^[A-Za-z0-9_-]*$/.test(url.searchParams.get("cs") ?? "")) {
+    throw new BrowserRuntimeError("UI_STATE_CHANGED", "109 Cinemas seat entry optional public context value is malformed.");
+  }
+  if (url.searchParams.get("ymd") !== date || url.searchParams.get("stt") !== startTime.replace(":", "")) {
+    throw new BrowserRuntimeError("UI_STATE_CHANGED", "109 Cinemas seat entry URL does not match the requested showtime date/time.", {
+      expectedDate: date,
+      expectedStartTime: startTime
+    });
+  }
+  return url.href;
+}
+
+function rawString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function asciiDigits(value: string): string {
+  return value.replace(/[０-９]/g, (digit) => String.fromCharCode(digit.charCodeAt(0) - 0xfee0));
+}
+
+export function normalize109SeatSnapshot(
+  snapshot: SeatSnapshot,
+  sourceUrl: string,
+  theater: Cinemas109Theater,
+  showtime: Cinemas109Showtime,
+  observedAt = new Date().toISOString()
+): CinemaSeatMap<"109"> {
+  const reviewed = review109SeatEntryUrl(sourceUrl, showtime.date, showtime.startTime);
+  if (!rawString(snapshot.title).includes("座席選択")) {
+    throw new BrowserRuntimeError("UI_STATE_CHANGED", "109 Cinemas seat-map title is missing from the rendered public surface.");
+  }
+  if (snapshot.timerVisible !== true) {
+    throw new BrowserRuntimeError("UI_STATE_CHANGED", "109 Cinemas 10-minute timed-session notice is missing from the reviewed seat-map surface.");
+  }
+  const selectedSummary = asciiDigits(rawString(snapshot.selectedSummary));
+  const selectedMatch = selectedSummary.match(/選択座席\s*(\d+)\s*[／/]\s*(\d+)席/);
+  if (!selectedMatch || Number(selectedMatch[1]) !== 0) {
+    throw new BrowserRuntimeError("UI_STATE_CHANGED", "109 Cinemas read-only seat-map entry unexpectedly contains selected seats.", { selectedSummary });
+  }
+  if (!Array.isArray(snapshot.seats) || snapshot.seats.length < 20 || snapshot.seats.length > 1000) {
+    throw new BrowserRuntimeError("UI_STATE_CHANGED", "109 Cinemas seat-map identity list is missing or implausible.", {
+      count: Array.isArray(snapshot.seats) ? snapshot.seats.length : 0
+    });
+  }
+  const ids = new Set<string>();
+  const positions = new Set<string>();
+  const seats: CinemaSeat[] = [];
+  for (const raw of snapshot.seats.slice(0, 1000) as SeatSnapshotRow[]) {
+    const value = rawString(raw.value);
+    const match = value.match(/^([A-Z]+)\s*-\s*(\d+)$/);
+    const key = rawString(raw.seatKey).match(/^(\d+)-(\d+)$/);
+    if (!match?.[1] || !match[2] || !key?.[1] || !key[2]) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "109 Cinemas seat identity/layout key became ambiguous.", { value });
+    }
+    const id = `${match[1]}-${match[2]}`;
+    const rowIndex = Number(key[1]) - 1;
+    const columnIndex = Number(key[2]) - 1;
+    const position = `${rowIndex}:${columnIndex}`;
+    if (ids.has(id) || positions.has(position) || rowIndex < 0 || columnIndex < 0) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "109 Cinemas seat identity/layout position is duplicated or invalid.", { seatId: id, position });
+    }
+    ids.add(id); positions.add(position);
+    const checked = raw.checked === true;
+    if (checked) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "109 Cinemas read-only seat map unexpectedly contains a checked seat.", { seatId: id });
+    }
+    const unavailable = raw.disabled === true;
+    const universal = rawString(raw.universal) === "1";
+    const group = rawString(raw.group);
+    seats.push({
+      id,
+      row: match[1],
+      number: match[2],
+      state: unavailable ? "unavailable" : "available",
+      ...(unavailable ? { unavailableReason: "unknown" as const } : {}),
+      attributes: universal ? ["provider:universal"] : [],
+      rowIndex,
+      columnIndex,
+      x: columnIndex,
+      y: rowIndex,
+      ...(group ? { groupId: `109:${group}` } : {})
+    });
+  }
+  const byRow = new Map<string, CinemaSeat[]>();
+  for (const seat of seats) {
+    const row = byRow.get(seat.row ?? "") ?? [];
+    row.push(seat); byRow.set(seat.row ?? "", row);
+  }
+  for (const row of byRow.values()) {
+    row.sort((a, b) => (a.columnIndex ?? 0) - (b.columnIndex ?? 0));
+    for (let i = 1; i < row.length; i += 1) {
+      const left = row[i - 1]!, right = row[i]!;
+      if (left.columnIndex !== undefined && right.columnIndex !== undefined && right.columnIndex > left.columnIndex + 1) {
+        left.rightBoundary = "gap"; right.leftBoundary = "gap";
+      }
+    }
+  }
+  return {
+    provider: "109",
+    theaterId: theater.id,
+    theater: theater.name,
+    ...(showtime.screen ? { screen: showtime.screen } : {}),
+    showtimeIdentity: ["109", theater.id, showtime.date, showtime.movie, showtime.startTime, showtime.endTime ?? "", showtime.screen ?? ""].join("|"),
+    seats,
+    observedAt,
+    sourceUrl: reviewed
+  };
+}
+
 function isTheaterListUrl(value: string): boolean {
   try {
     const url = assertOfficialUrl(value, "109");
@@ -675,7 +886,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export class Cinemas109ReadAdapter implements CinemaReadAdapter<"109", Cinemas109Theater, Cinemas109Showtime> {
+export class Cinemas109ReadAdapter implements CinemaReadAdapter<"109", Cinemas109Theater, Cinemas109Showtime>, CinemaSeatReadAdapter<"109", Cinemas109Theater, Cinemas109Showtime> {
   constructor(private readonly runtime: CinemaBrowserRuntime) {}
 
   async listTheaters(query?: string): Promise<TheaterListResult<"109", Cinemas109Theater>> {
@@ -745,6 +956,52 @@ export class Cinemas109ReadAdapter implements CinemaReadAdapter<"109", Cinemas10
       sourceUrl: semantic.url,
       showtimes
     };
+  }
+
+  async getSeatAvailability(input: SeatAvailabilityQuery): Promise<SeatAvailabilityResult<"109", Cinemas109Theater, Cinemas109Showtime>> {
+    const schedule = await this.getShowtimes({ theater: input.theater, date: input.date, movie: input.movie });
+    if (!schedule.dateAvailable) {
+      throw new BrowserRuntimeError("UI_ELEMENT_NOT_FOUND", "109 Cinemas requested seat-availability date is not exposed by the current public schedule.");
+    }
+    let matches = schedule.showtimes.filter((showtime) => showtime.startTime === input.startTime);
+    if (input.screen?.trim()) matches = matches.filter((showtime) => showtime.screen === input.screen!.trim());
+    if (matches.length !== 1) {
+      throw new BrowserRuntimeError("UI_ELEMENT_NOT_FOUND", "109 Cinemas showtime did not resolve to one unique rendered schedule row for seat availability.", {
+        movie: input.movie,
+        startTime: input.startTime,
+        screen: input.screen,
+        candidates: matches.slice(0, 8).map((showtime) => ({ movie: showtime.movie, startTime: showtime.startTime, screen: showtime.screen }))
+      });
+    }
+    const showtime = matches[0]!;
+    if (!showtime.screen) throw new BrowserRuntimeError("UI_STATE_CHANGED", "109 Cinemas seat availability requires an observed screen identity.");
+    if (showtime.availability === "sold_out" || showtime.availability === "unavailable") {
+      throw new BrowserRuntimeError("UI_ELEMENT_NOT_FOUND", "109 Cinemas showtime is not currently represented by a sellable seat-map entry.");
+    }
+    const entry = await this.runtime.evaluateSemanticState<SeatEntrySnapshot>("109", seatEntryExpression(showtime));
+    const hrefs = uniqueStrings(entry.value.hrefs, 4);
+    if (entry.value.matched !== 1 || hrefs.length !== 1) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "109 Cinemas showtime no longer exposes one exact rendered public seat-map href.", {
+        matchedRows: entry.value.matched,
+        hrefCount: hrefs.length
+      });
+    }
+    const reviewedEntry = review109SeatEntryUrl(hrefs[0]!, showtime.date, showtime.startTime);
+    const destination = await this.runtime.navigateReviewed(reviewedEntry, "109");
+    if (destination !== reviewedEntry) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "109 Cinemas seat-map navigation changed the exact rendered public entry URL.", {
+        expected: reviewedEntry,
+        observed: destination
+      });
+    }
+    let semantic = await this.runtime.evaluateSemanticState<SeatSnapshot>("109", SEAT_MAP_EXPRESSION);
+    for (let attempt = 0; attempt < 16; attempt += 1) {
+      if (rawString(semantic.value.title).includes("座席選択") && Array.isArray(semantic.value.seats) && semantic.value.seats.length >= 20) break;
+      await sleep(READY_POLL_MS);
+      semantic = await this.runtime.evaluateSemanticState<SeatSnapshot>("109", SEAT_MAP_EXPRESSION);
+    }
+    const seatMap = normalize109SeatSnapshot(semantic.value, semantic.url, schedule.theater, showtime);
+    return { provider: "109", theater: schedule.theater, showtime, seatMap };
   }
 
   private async readTheaters(): Promise<{ sourceUrl: string; theaters: Cinemas109TheaterCandidate[] }> {

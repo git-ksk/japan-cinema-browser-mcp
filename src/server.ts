@@ -387,9 +387,20 @@ function requireReadAdapter(provider: CinemaProviderId, capability: "theaters" |
 function requireSeatAdapter(provider: CinemaProviderId): CinemaSeatReadAdapter {
   assertProviderCapability(provider, "seatMap");
   if (provider === "toho") return tohoReadAdapter;
+  if (provider === "109") return cinemas109ReadAdapter;
   throw new ProviderPolicyError(
     "UNSUPPORTED_CAPABILITY",
     `Read-only seat-map adapter for '${provider}' is not available.`
+  );
+}
+
+
+function requireRecommendationSeatAdapter(provider: CinemaProviderId): CinemaSeatReadAdapter {
+  assertProviderCapability(provider, "seatMap");
+  if (provider === "toho") return tohoReadAdapter;
+  throw new ProviderPolicyError(
+    "UNSUPPORTED_CAPABILITY",
+    `Seat recommendation for '${provider}' is not enabled until provider-specific screen orientation is reviewed.`
   );
 }
 
@@ -556,7 +567,7 @@ export function buildServer(): McpServer {
     "get_seat_availability",
     {
       title: "Get cinema seat availability",
-      description: "Enter one exact reviewed public TOHO Cinemas showtime in read-only mode and return rendered seat identities, availability, and layout geometry. This never clicks a seat and does not support seat selection, checkout, payment, or purchase. Other providers remain disabled until separately reviewed.",
+      description: "Enter one exact reviewed public cinema showtime in read-only mode and return rendered seat identities, availability, and layout geometry. TOHO and 109 are enabled through separately reviewed read-only entry flows. 109 entry starts its documented 10-minute purchase/session timer but never selects a seat. Seat selection, checkout, payment, and purchase remain disabled.",
       inputSchema: z.object({
         provider: providerSchema,
         theater: shortText,
@@ -617,7 +628,7 @@ export function buildServer(): McpServer {
         ...(screen ? { screen } : {}),
         count, preference, ...(limit !== undefined ? { limit } : {}),
         ...(includeSpecialSeats !== undefined ? { includeSpecialSeats } : {})
-      }, requireSeatAdapter(provider))
+      }, requireRecommendationSeatAdapter(provider))
     })
   );
 

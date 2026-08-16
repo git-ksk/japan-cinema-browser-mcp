@@ -4,10 +4,12 @@ import { BrowserRuntimeError, CinemaBrowserRuntime } from "../src/browser/runtim
 import {
   Cinemas109ReadAdapter,
   normalize109ScheduleSnapshot,
+  normalize109SeatSnapshot,
   normalize109TheaterPageSnapshot,
   normalize109TheaterSnapshot,
   normalize109TheaterQuery,
   review109ScheduleUrl,
+  review109SeatEntryUrl,
   type Cinemas109Theater
 } from "../src/providers/109/adapter.js";
 
@@ -301,4 +303,120 @@ test("109 theater query normalizes width/spacing and only uses locality labels r
 
   const unsupportedInference = await adapter.listTheaters("横浜");
   assert.deepEqual(unsupportedInference.theaters, [], "do not invent city aliases absent from the reviewed public theater list");
+});
+
+
+test("109 reviewed seat entry accepts only the exact rendered public route shape bound to date/time", () => {
+  const url = "https://cinema.109cinemas.net/cgi-bin/pc/resv/resv_shw_ppt.cgi?ttc=52350&tsc=13&tssc=17&ymd=2026-08-17&cs=&stt=1115";
+  assert.equal(review109SeatEntryUrl(url, "2026-08-17", "11:15"), url);
+  for (const bad of [
+    "https://109cinemas.net/cgi-bin/pc/resv/resv_shw_ppt.cgi?ttc=52350&tsc=13&tssc=17&ymd=2026-08-17&cs=&stt=1115",
+    "https://cinema.109cinemas.net/cgi-bin/pc/resv/other.cgi?ttc=52350&tsc=13&tssc=17&ymd=2026-08-17&cs=&stt=1115",
+    "https://cinema.109cinemas.net/cgi-bin/pc/resv/resv_shw_ppt.cgi?ttc=52350&tsc=13&tssc=17&ymd=2026-08-18&cs=&stt=1115",
+    "https://cinema.109cinemas.net/cgi-bin/pc/resv/resv_shw_ppt.cgi?ttc=52350&tsc=13&tssc=17&ymd=2026-08-17&cs=&stt=1115&extra=1"
+  ]) {
+    assert.throws(
+      () => review109SeatEntryUrl(bad, "2026-08-17", "11:15"),
+      (error) => error instanceof BrowserRuntimeError
+    );
+  }
+});
+
+test("109 seat-map normalization preserves rendered slot gaps and never treats selected seats as read-only", () => {
+  const theater = kohokuTheater();
+  const showtime = {
+    provider: "109" as const,
+    theaterId: "kohoku",
+    theater: theater.name,
+    date: "2026-08-17",
+    movie: "映画A",
+    startTime: "11:15",
+    endTime: "13:05",
+    formats: ["2D" as const],
+    screen: "5",
+    availability: "unknown" as const,
+    sourceUrl: "https://109cinemas.net/kohoku/schedules/20260817.html?theater_code=13"
+  };
+  const seats = Array.from({ length: 24 }, (_, index) => {
+    const row = index < 12 ? "A" : "B";
+    const seatNo = index % 12 + 1;
+    const slot = seatNo >= 10 ? seatNo + 1 : seatNo;
+    return {
+      value: `${row} -${String(seatNo).padStart(3, "0")}`,
+      disabled: index < 2,
+      checked: false,
+      seatKey: `${row === "A" ? 1 : 2}-${slot}`,
+      universal: index === 0 ? "1" : "",
+      group: ""
+    };
+  });
+  const sourceUrl = "https://cinema.109cinemas.net/cgi-bin/pc/resv/resv_shw_ppt.cgi?ttc=52350&tsc=13&tssc=17&ymd=2026-08-17&cs=&stt=1115";
+  const map = normalize109SeatSnapshot(
+    { title: "座席選択 | １０９シネマズ", timerVisible: true, selectedSummary: "選択座席 0／8席", seats },
+    sourceUrl,
+    theater,
+    showtime
+  );
+  assert.equal(map.seats.length, 24);
+  assert.equal(map.seats[0]?.state, "unavailable");
+  assert.deepEqual(map.seats[0]?.attributes, ["provider:universal"]);
+  assert.equal(map.seats.find((seat) => seat.id === "A-009")?.rightBoundary, "gap");
+  assert.equal(map.seats.find((seat) => seat.id === "A-010")?.leftBoundary, "gap");
+  assert.equal(map.screenEdge, undefined, "do not infer 109 screen orientation from row naming");
+
+  const selected = seats.map((seat, index) => index === 5 ? { ...seat, checked: true } : seat);
+  assert.throws(
+    () => normalize109SeatSnapshot(
+      { title: "座席選択 | １０９シネマズ", timerVisible: true, selectedSummary: "選択座席 1／8席", seats: selected },
+      sourceUrl,
+      theater,
+      showtime
+    ),
+    (error) => error instanceof BrowserRuntimeError && error.code === "UI_STATE_CHANGED"
+  );
+});
+
+test("109 getSeatAvailability adopts one exact rendered showtime href and performs no seat activation", async () => {
+  const theater = kohokuTheater();
+  const showtime = {
+    provider: "109" as const,
+    theaterId: "kohoku",
+    theater: theater.name,
+    date: "2026-08-17",
+    movie: "映画A",
+    startTime: "11:15",
+    endTime: "13:05",
+    formats: ["2D" as const],
+    screen: "5",
+    availability: "unknown" as const,
+    sourceUrl: "https://109cinemas.net/kohoku/schedules/20260817.html?theater_code=13"
+  };
+  const entryUrl = "https://cinema.109cinemas.net/cgi-bin/pc/resv/resv_shw_ppt.cgi?ttc=52350&tsc=13&tssc=17&ymd=2026-08-17&cs=&stt=1115";
+  const seats = Array.from({ length: 24 }, (_, index) => ({
+    value: `${index < 12 ? "A" : "B"} -${String(index % 12 + 1).padStart(3, "0")}`,
+    disabled: false,
+    checked: false,
+    seatKey: `${index < 12 ? 1 : 2}-${index % 12 + 1}`,
+    universal: "",
+    group: ""
+  }));
+  let currentUrl = showtime.sourceUrl;
+  const navigations: string[] = [];
+  const runtime = {
+    navigateReviewed: async (url: string) => { navigations.push(url); currentUrl = url; return url; },
+    evaluateSemanticState: async (_provider: string, expression: string) => {
+      if (expression.includes("input.seat")) {
+        return { url: currentUrl, value: { title: "座席選択 | １０９シネマズ", timerVisible: true, selectedSummary: "選択座席 0／8席", seats } };
+      }
+      return { url: currentUrl, value: { matched: 1, hrefs: [entryUrl] } };
+    }
+  } as unknown as CinemaBrowserRuntime;
+  const adapter = new Cinemas109ReadAdapter(runtime);
+  (adapter as unknown as { getShowtimes: (input: unknown) => Promise<unknown> }).getShowtimes = async () => ({
+    provider: "109", theater, date: showtime.date, dateAvailable: true, availableDates: [showtime.date], sourceUrl: showtime.sourceUrl, showtimes: [showtime]
+  });
+  const result = await adapter.getSeatAvailability({ theater: "港北", date: showtime.date, movie: showtime.movie, startTime: showtime.startTime, screen: showtime.screen });
+  assert.deepEqual(navigations, [entryUrl]);
+  assert.equal(result.seatMap.seats.length, 24);
+  assert.equal(result.seatMap.seats.every((seat) => seat.state === "available"), true);
 });
