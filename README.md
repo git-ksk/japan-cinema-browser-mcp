@@ -124,7 +124,24 @@ npm run build
 npm start
 ```
 
-MCPはstdioで動作し、ログはstderrに出します。
+MCPは標準ではstdioで動作し、ログはstderrに出します。
+
+### Single-user Cloud Run mode
+
+`--http` と明示的なremote設定を組み合わせると、headless Chromiumを使うsingle-user向けStreamable HTTP deploymentも利用できます。これはlocal stdioの代替となる汎用multi-user hostingではありません。
+
+Cloud Run modeでは次を強制します。
+
+- static bearerによるapplication-layer認証
+- exact Host / Origin boundary
+- headless dedicated browser profile
+- external CDP禁止
+- purchase execution禁止
+- challenge / sign-in / consent時はHuman Handoffせずfail closed
+- browser operation timeout
+- Firestore-backed `mcp-usage-control` によるdurable daily budget
+
+詳細は [`docs/CLOUD_RUN.md`](./docs/CLOUD_RUN.md) を参照してください。
 
 ## Chromeの使い方
 

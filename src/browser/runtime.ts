@@ -44,7 +44,8 @@ export class BrowserRuntimeError extends Error {
       | "UI_STATE_CHANGED"
       | "HUMAN_ACTION_REQUIRED"
       | "SENSITIVE_FIELD"
-      | "FINAL_ACTION_REQUIRES_CONFIRMATION",
+      | "FINAL_ACTION_REQUIRES_CONFIRMATION"
+      | "OPERATION_TIMEOUT",
     message: string,
     public readonly details?: Record<string, unknown>,
     public readonly intervention?: CinemaIntervention
