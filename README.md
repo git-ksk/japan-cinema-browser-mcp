@@ -132,7 +132,9 @@ MCPは標準ではstdioで動作し、ログはstderrに出します。
 
 Cloud Run modeでは次を強制します。
 
-- static bearerによるapplication-layer認証
+- MCP Runtime Firebase Auth ID Tokenによるapplication-layer認証
+- Firebase Authで検証したUIDをlogical principalへbind
+- single-user Cloud Runでは許可UIDを明示allowlist
 - exact Host / Origin boundary
 - headless dedicated browser profile
 - external CDP禁止

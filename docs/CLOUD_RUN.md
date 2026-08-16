@@ -6,7 +6,7 @@ This document defines the bounded single-user remote runtime. Local stdio remain
 
 The Cloud Run profile is intentionally narrow:
 
-- single logical user / one bearer credential
+- single logical user / one allowlisted Firebase UID
 - headless dedicated Chromium
 - read/navigation cinema workflows
 - no external CDP attachment
@@ -28,7 +28,10 @@ CINEMA_ENABLE_PURCHASE=false
 MCP_HTTP_HOST=0.0.0.0
 MCP_ALLOW_NONLOOPBACK=true
 MCP_ALLOWED_HOSTS=<exact-service-hostname>
-MCP_BEARER_TOKEN=<secret-manager-injected-value>
+MCP_FIREBASE_PROJECT_ID=<firebase-project-id>
+MCP_FIREBASE_WEB_API_KEY=<firebase-web-api-key>
+MCP_ALLOWED_FIREBASE_UIDS=<single-owner-uid>
+MCP_FIREBASE_LOOKUP_TIMEOUT_MS=5000
 MCP_USAGE_REQUIRED=true
 MCP_USAGE_FIRESTORE_PROJECT_ID=<gcp-project-id>
 MCP_USAGE_DAILY_LIMIT=100
@@ -36,13 +39,13 @@ MCP_USAGE_LEASE_TTL_MS=60000
 CINEMA_OPERATION_TIMEOUT_MS=30000
 ```
 
-Do not commit `MCP_BEARER_TOKEN`. The server requires a non-whitespace bearer value of at least 32 characters before non-loopback or remote mode can start.
+The Firebase Web API key identifies the Firebase project and is not accepted as caller authorization by itself. Do not commit live project-specific configuration into this public repository. Firebase ID Tokens and refresh tokens are credentials and must not be logged or committed. Remote mode requires an explicit Firebase project, Web API key, and non-empty allowed UID list.
 
 Endpoints:
 
 - `GET /health` — passive unauthenticated liveness; does not start Chromium
-- `GET /ready` — bearer-authenticated browser readiness
-- `POST /mcp` — bearer-authenticated Streamable HTTP MCP endpoint
+- `GET /ready` — Firebase ID Token-authenticated browser readiness
+- `POST /mcp` — Firebase ID Token-authenticated Streamable HTTP MCP endpoint
 
 Cloud Run reserves some paths ending in `z`; the deployment therefore uses `/health` and `/ready`, not `healthz` / `readyz`.
 
@@ -53,14 +56,15 @@ Remote browser tools use vendored `mcp-usage-control` v0.4.0 with the Firestore 
 Lifecycle:
 
 ```text
-authenticated principal
+Firebase-authenticated UID
+  -> derive opaque principal binding
   -> reserve 1 unit
   -> mark liable
   -> execute browser operation
   -> settle completed/error
 ```
 
-The default budget is 100 metered browser operations per UTC day for the single bearer principal. Budget and reservation updates are Firestore transactions. Identifiers are hashed by the usage adapter before becoming document IDs; raw credentials and cinema page content are not usage metadata.
+The default budget is 100 metered browser operations per UTC day for each allowed Firebase UID. Budget and reservation updates are Firestore transactions. Identifiers are hashed by the usage adapter before becoming document IDs; raw credentials and cinema page content are not usage metadata.
 
 Static metadata and passive liveness are not counted as browser operations.
 
@@ -90,9 +94,9 @@ Keep only the actively deployed container image where practical. Chromium makes 
 
 ## Identity boundary
 
-The Phase 3 deployment uses one high-entropy application bearer as its logical principal. It is **not** a multi-user identity system.
+The Phase 3 deployment validates Firebase ID Tokens through the Firebase Auth backend, re-checks project/issuer/subject/time claims and the user's `validSince` revocation boundary, then binds the Firebase UID to the MCP principal. The Cloud Run profile still allowlists one owner UID because one process owns one browser/profile.
 
-Future Firebase Auth or another end-user identity provider must replace the static principal with an authenticated stable non-secret subject and must add principal-specific browser/profile isolation before multi-user hosting is enabled.
+This is **not** multi-user browser isolation. Adding more allowed UIDs without principal-specific browser/profile/runtime isolation is prohibited. A future multi-user deployment must isolate browser/profile state per authenticated principal before expanding the allowlist.
 
 ## Chromium sandbox
 

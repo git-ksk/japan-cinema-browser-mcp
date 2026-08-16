@@ -33,15 +33,6 @@ export function originAllowed(originHeader: string | undefined, allowedOrigins: 
   }
 }
 
-export function bearerAllowed(authorizationHeader: string | undefined, expected: string): boolean {
-  const match = authorizationHeader ? /^Bearer +(\S+)$/i.exec(authorizationHeader) : undefined;
-  const supplied = match?.[1];
-  if (!supplied) return false;
-  const a = Buffer.from(supplied);
-  const b = Buffer.from(expected);
-  return a.length === b.length && timingSafeEqual(a, b);
-}
-
 export function parseContentLength(value: string | undefined, maxBytes: number): number | undefined {
   if (value === undefined) return undefined;
   if (!/^\d+$/.test(value.trim())) throw new Error("invalid_content_length");

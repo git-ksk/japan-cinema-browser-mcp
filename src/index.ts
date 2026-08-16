@@ -6,8 +6,9 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { buildServer, config, probeBrowserReady, shutdownRuntime } from "./server.js";
-import { bearerAllowed, hostAllowed, originAllowed, parseContentLength } from "./http-security.js";
-import { runWithRequestPrincipal } from "./request-principal.js";
+import { hostAllowed, originAllowed, parseContentLength } from "./http-security.js";
+import { FirebaseAuthVerifier } from "./firebase-auth.js";
+import { runWithRequestPrincipal, type RequestPrincipal } from "./request-principal.js";
 
 class HttpRequestError extends Error {
   constructor(readonly status: number, readonly code: string) {
@@ -37,14 +38,20 @@ function validateProbeMethod(req: IncomingMessage, res: ServerResponse): boolean
   return false;
 }
 
-function authorize(req: IncomingMessage, res: ServerResponse): boolean {
-  const token = config.http.bearerToken;
-  if (!token || !bearerAllowed(req.headers.authorization, token)) {
-    res.setHeader("www-authenticate", 'Bearer realm="japan-cinema-browser-mcp"');
-    reject(res, 401, "invalid_token");
-    return false;
+async function authorize(
+  auth: FirebaseAuthVerifier,
+  req: IncomingMessage,
+  res: ServerResponse
+): Promise<RequestPrincipal | undefined> {
+  const decision = await auth.authorize(req.headers.authorization);
+  if (!decision.allowed) {
+    if (decision.status === 401) {
+      res.setHeader("www-authenticate", 'Bearer realm="japan-cinema-browser-mcp", error="invalid_token"');
+    }
+    reject(res, decision.status, decision.code);
+    return undefined;
   }
-  return true;
+  return { subject: `firebase:${decision.principal.uid}` };
 }
 
 async function readRequestBody(req: IncomingMessage): Promise<string | undefined> {
@@ -118,7 +125,8 @@ function makeAbortController(req: IncomingMessage, res: ServerResponse): AbortCo
 }
 
 async function startHttp(): Promise<void> {
-  if (!config.http.bearerToken) throw new Error("HTTP mode requires MCP_BEARER_TOKEN");
+  if (!config.auth) throw new Error("HTTP mode requires Firebase Auth configuration");
+  const auth = new FirebaseAuthVerifier(config.auth);
   const mcpHandler = createMcpHandler(() => buildServer());
   const httpServer = createServer((req, res) => {
     if (!hostAllowed(req.headers.host, config.http.allowedHosts)) {
@@ -134,17 +142,21 @@ async function startHttp(): Promise<void> {
       return;
     }
     if (requestUrl.pathname === "/ready") {
-      if (!validateProbeMethod(req, res) || !authorize(req, res)) return;
-      void runWithRequestPrincipal({ subject: "static-bearer" }, async () => {
-        try {
-          await probeBrowserReady();
-          privateHeaders(res);
-          res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-          res.end(req.method === "HEAD" ? undefined : JSON.stringify({ ok: true, browser: "ready" }));
-        } catch {
-          reject(res, 503, "browser_unavailable");
-        }
-      });
+      if (!validateProbeMethod(req, res)) return;
+      void (async () => {
+        const principal = await authorize(auth, req, res);
+        if (!principal) return;
+        await runWithRequestPrincipal(principal, async () => {
+          try {
+            await probeBrowserReady();
+            privateHeaders(res);
+            res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+            res.end(req.method === "HEAD" ? undefined : JSON.stringify({ ok: true, browser: "ready" }));
+          } catch {
+            reject(res, 503, "browser_unavailable");
+          }
+        });
+      })();
       return;
     }
     if (requestUrl.pathname !== "/mcp") {
@@ -160,28 +172,30 @@ async function startHttp(): Promise<void> {
       reject(res, 403, "origin_not_allowed");
       return;
     }
-    if (!authorize(req, res)) return;
-
     const controller = makeAbortController(req, res);
-    void runWithRequestPrincipal({ subject: "static-bearer", operationScope: randomUUID() }, async () => {
-      try {
-        const request = await toWebRequest(req, controller.signal);
-        const response = await mcpHandler.fetch(request);
-        await writeWebResponse(response, res);
-      } catch (error) {
-        if (error instanceof HttpRequestError) {
-          if (error.status === 413) res.setHeader("connection", "close");
-          reject(res, error.status, error.code);
-          return;
+    void (async () => {
+      const principal = await authorize(auth, req, res);
+      if (!principal) return;
+      await runWithRequestPrincipal({ ...principal, operationScope: randomUUID() }, async () => {
+        try {
+          const request = await toWebRequest(req, controller.signal);
+          const response = await mcpHandler.fetch(request);
+          await writeWebResponse(response, res);
+        } catch (error) {
+          if (error instanceof HttpRequestError) {
+            if (error.status === 413) res.setHeader("connection", "close");
+            reject(res, error.status, error.code);
+            return;
+          }
+          if (!controller.signal.aborted) {
+            console.error("[japan-cinema-browser-mcp] MCP HTTP error", {
+              errorName: error instanceof Error ? error.name : "UnknownError"
+            });
+            reject(res, 500, "mcp_handler_error");
+          }
         }
-        if (!controller.signal.aborted) {
-          console.error("[japan-cinema-browser-mcp] MCP HTTP error", {
-            errorName: error instanceof Error ? error.name : "UnknownError"
-          });
-          reject(res, 500, "mcp_handler_error");
-        }
-      }
-    });
+      });
+    })();
   });
 
   httpServer.maxHeadersCount = 64;

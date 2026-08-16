@@ -144,7 +144,7 @@ generic navigation/click/fillからseat selectionやcheckoutへ進み、provider
 - external CDPは明示opt-in
 - runtimeはreviewed cinema targetへscope
 - local stdioでは専用profileを標準にする
-- Phase 3 Cloud Runはsingle-user bearer principal + dedicated headless profile + max instance 1に限定する
+- Phase 3 Cloud Runはsingle allowlisted Firebase UID + dedicated headless profile + max instance 1に限定する
 - multi-user remote化時はprincipal単位のbrowser/profile isolationを別途実装するまで禁止
 
 
@@ -152,13 +152,13 @@ generic navigation/click/fillからseat selectionやcheckoutへ進み、provider
 
 Phase 3 remote runtimeは汎用browser hostingではありません。以下をsecurity invariantとします。
 
-- non-loopback bindは明示opt-in + 32文字以上のbearer secretが必須
-- bearerはSecret Manager等から注入し、repository・ログ・MCP resultへ出さない
+- non-loopback bindは明示opt-in + Firebase Auth設定 + single-user UID allowlistが必須
+- Firebase ID Token / refresh tokenをrepository・ログ・MCP resultへ出さない。Refresh tokenはclient-side secure storageへ置く
 - Host allowlistをexact Cloud Run hostnameへ固定する
 - remote modeはheadless必須、external CDP禁止、purchase flag false必須
 - challenge / sign-in / consentはHuman Handoffへ昇格せずfail closed
 - operation timeout超過時はdedicated browser sessionを閉じる
-- MCPUsageはauthenticated logical principalへbindし、Firestore transactionでreserve / liable / settleする
+- Firebase UIDからderiveしたauthenticated logical principalへMCPUsageをbindし、Firestore transactionでreserve / liable / settleする
 - usage stateへraw credential、page text、Cookie、bearer、payment/auth dataを保存しない
 - `/health` はpassive livenessのみ、browser起動を伴う `/ready` と `/mcp` はbearer必須
 - Chromium sandboxは既定で有効。`CINEMA_ALLOW_UNSANDBOXED_CHROMIUM` はverified incompatibility時だけの明示fallback

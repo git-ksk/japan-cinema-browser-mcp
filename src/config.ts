@@ -66,8 +66,13 @@ export interface AppConfig {
     port: number;
     allowedHosts: string[];
     allowedOrigins: string[];
-    bearerToken?: string;
     maxBodyBytes: number;
+  };
+  auth?: {
+    projectId: string;
+    webApiKey: string;
+    allowedUids: string[];
+    lookupTimeoutMs: number;
   };
   remote: {
     enabled: boolean;
@@ -102,18 +107,23 @@ export function loadConfig(): AppConfig {
   const enablePurchase = envBool("CINEMA_ENABLE_PURCHASE", false);
   const host = process.env.MCP_HTTP_HOST?.trim() || "127.0.0.1";
   const allowNonLoopback = envBool("MCP_ALLOW_NONLOOPBACK", false);
-  const bearerToken = process.env.MCP_BEARER_TOKEN?.trim() || undefined;
-  if (bearerToken && (bearerToken.length < 32 || /\s/.test(bearerToken))) {
-    throw new Error("MCP_BEARER_TOKEN must contain at least 32 non-whitespace characters");
-  }
-  if (!isLoopback(host) && (!allowNonLoopback || !bearerToken)) {
-    throw new Error("Non-loopback MCP_HTTP_HOST requires MCP_ALLOW_NONLOOPBACK=true and MCP_BEARER_TOKEN");
+  const firebaseProjectId = process.env.MCP_FIREBASE_PROJECT_ID?.trim() || undefined;
+  const firebaseWebApiKey = process.env.MCP_FIREBASE_WEB_API_KEY?.trim() || undefined;
+  const allowedFirebaseUids = [...new Set((process.env.MCP_ALLOWED_FIREBASE_UIDS ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean))];
+  const authConfigured = Boolean(firebaseProjectId && firebaseWebApiKey && allowedFirebaseUids.length > 0);
+  if (!isLoopback(host) && !allowNonLoopback) {
+    throw new Error("Non-loopback MCP_HTTP_HOST requires MCP_ALLOW_NONLOOPBACK=true");
   }
   if (remoteEnabled) {
     if (!headless) throw new Error("CINEMA_REMOTE_MODE=true requires CINEMA_HEADLESS=true");
     if (externalCdpPort !== undefined) throw new Error("CINEMA_REMOTE_MODE=true forbids external CDP attachment");
     if (enablePurchase) throw new Error("CINEMA_REMOTE_MODE=true requires CINEMA_ENABLE_PURCHASE=false");
-    if (!bearerToken) throw new Error("CINEMA_REMOTE_MODE=true requires MCP_BEARER_TOKEN");
+    if (!firebaseProjectId) throw new Error("CINEMA_REMOTE_MODE=true requires MCP_FIREBASE_PROJECT_ID");
+    if (!firebaseWebApiKey) throw new Error("CINEMA_REMOTE_MODE=true requires MCP_FIREBASE_WEB_API_KEY");
+    if (allowedFirebaseUids.length === 0) throw new Error("CINEMA_REMOTE_MODE=true requires MCP_ALLOWED_FIREBASE_UIDS");
   }
 
   const usageRequired = envBool("MCP_USAGE_REQUIRED", false);
@@ -143,9 +153,16 @@ export function loadConfig(): AppConfig {
       port: httpPort,
       allowedHosts: envHosts("MCP_ALLOWED_HOSTS", ["localhost", "127.0.0.1", "::1"]),
       allowedOrigins: envOrigins("MCP_ALLOWED_ORIGINS"),
-      bearerToken,
       maxBodyBytes: envInt("MCP_MAX_BODY_BYTES", 262_144, 1_024, 4_194_304)
     },
+    ...(authConfigured ? {
+      auth: {
+        projectId: firebaseProjectId!,
+        webApiKey: firebaseWebApiKey!,
+        allowedUids: allowedFirebaseUids,
+        lookupTimeoutMs: envInt("MCP_FIREBASE_LOOKUP_TIMEOUT_MS", 5_000, 1_000, 15_000)
+      }
+    } : {}),
     remote: {
       enabled: remoteEnabled,
       disableHumanHandoff: remoteEnabled
