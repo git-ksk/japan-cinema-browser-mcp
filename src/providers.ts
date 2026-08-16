@@ -58,7 +58,8 @@ export const CINEMA_PROVIDERS: Record<CinemaProviderId, CinemaProviderDefinition
     capabilities: {
       theaters: true,
       showtimes: true,
-      ...NO_TRANSACTION_CAPABILITIES
+      ...NO_TRANSACTION_CAPABILITIES,
+      seatMap: true
     }
   }
 };
