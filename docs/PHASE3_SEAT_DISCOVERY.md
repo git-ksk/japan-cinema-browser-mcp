@@ -40,7 +40,7 @@ Discovery does **not** authorize a seat click for any provider.
 
 The strongest current evidence is TOHO's official FAQ: the purchase timeout begins after the user has decided the desired seat, and a temporarily held seat is released later. This places the documented hold boundary at or after seat decision rather than at ordinary schedule browsing.
 
-The bounded follow-up validation passed the implementation safety gate: the visible public non-member path reached `座席指定` with no visible countdown and no selected seat. The implementation criterion is **no seat hold, material reservation mutation, or availability impact caused by read-only entry**, not literal absence of all server-side session state. `seatMap` still stays disabled until #32 implements and tests the read-only adapter.
+The bounded follow-up validation passed the implementation safety gate: the visible public non-member path reached `座席指定` with no visible countdown and no selected seat. The implementation criterion is **no seat hold, material reservation mutation, or availability impact caused by read-only entry**, not literal absence of all server-side session state. #32 has now implemented and tested the reviewed read-only adapter, so TOHO alone exposes `seatMap=true`; seat selection remains disabled.
 
 ### AEON
 
@@ -139,7 +139,7 @@ Planned scope:
 
 - provider-neutral seat intelligence model
 - TOHO-only `get_seat_availability`
-- TOHO-only `seatMap=true` after #32 implements the now-verified read-only entry and fail-closed extraction
+- TOHO-only `seatMap=true` via #32 reviewed read-only entry and fail-closed extraction
 - `recommend_seats`
 - row / seat normalization
 - adjacent seat grouping

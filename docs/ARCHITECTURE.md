@@ -45,7 +45,7 @@ MCP toolの登録と引数検証を担当します。
 - bounded result返却
 - provider capabilityのruntime強制
 
-Phase 1では `list_theaters` / `get_showtimes` のsemantic read capabilityをTOHO / AEON / 109で有効化しています。無効capabilityへのgeneric fuzzy fallbackはしません。
+現在は `list_theaters` / `get_showtimes` をTOHO / AEON / 109で、`get_seat_availability` をTOHOだけで有効化しています。無効capabilityへのgeneric fuzzy fallbackはしません。
 
 ### `src/providers.ts`
 
@@ -60,11 +60,11 @@ provider registryと横断ポリシーを保持します。
 - sensitive field判定
 - final purchase control判定
 
-TOHO / AEON / 109は `theaters=true / showtimes=true`、seat/checkout/purchase系はfalseです。`CINEMA_ENABLE_PURCHASE=true` でも、providerの `purchaseSubmission` がfalseなら最終submitは実行できません。
+TOHO / AEON / 109は `theaters=true / showtimes=true`。TOHOだけreview済みread-only `seatMap=true`、AEON / 109はfalseです。`seatSelection / checkoutPreparation / purchaseSubmission` は全providerでfalseで、`CINEMA_ENABLE_PURCHASE=true` でも最終submitは実行できません。
 
 ### `src/providers/toho/adapter.ts`
 
-Phase 1のTOHO read-only adapterです。
+Phase 1 showtime + Phase 3 seat intelligenceのTOHO read-only adapterです。
 
 - 公式劇場一覧のvisible theater linkをsemanticに抽出
 - 公開schedule routeをschedule groupとして正規化
@@ -73,6 +73,10 @@ Phase 1のTOHO read-only adapterです。
 - 日付切替後のselected stateを再検証
 - 作品 / 上映時刻 / format / 字幕・吹替 / screen / availabilityを必要な範囲だけ抽出
 - source URLを返却
+- exact theater/date/movie/startTime/screenからvisible sellable showtimeを1件へbinding
+- reviewed non-member intermediateだけを通り、seat clickなしでlive `座席指定` DOMを読む
+- seat identity / availability / wheelchair attribute / rendered grid gapをprovider-neutral `CinemaSeatMap`へ正規化
+- selected-seat state、route drift、capacity mismatch、曖昧identityではfail closed
 - UI変更、曖昧grouping、movie/showtime対応不能時はfail closed
 
 ### `src/providers/aeon/adapter.ts`
@@ -127,6 +131,7 @@ CDP targetと、公開UIに対する最小限のbrowser primitiveを担当しま
 - visible control検索
 - generic read-only click/fill policyとprovider capability enforcement
 - provider adapter向けreviewed read-only click primitive
+- TOHO exact non-member continuation専用のnarrow intermediate-control primitive（generic purchase matcherは緩和しない）
 - generic上映時刻候補抽出
 - Human-only surface（access challenge/CAPTCHA、sign-in/authentication、consent）のcategory-only検出
 - Execution Handoff authority / resource epoch / exact invocation binding
@@ -182,7 +187,7 @@ Browser Semantic Primitives
 CDP Runtime
 ```
 
-3社read adapterが揃ったため、次のPhaseではここに大きなgeneric workflow engineを挟まず、まずprovider-neutral `Theater` / `Showtime` contractを追加します。そのcontractの上にboundedな `find_showtimes` orchestrationを置きます。
+provider-neutral `Theater` / `Showtime` contractとbounded `find_showtimes` orchestrationに加え、Phase 3ではavailabilityとspecial-seat attributeを分離した `CinemaSeatMap` contractとdeterministic recommendation coreを追加しています。provider固有DOM/routeはadapter内に閉じ込めます。
 
 ## Provider Adapter
 

@@ -166,7 +166,7 @@ Final purchase前:
 
 ## 方針
 
-TOHOについてはまずread-only上映取得だけを有効化します。seat map以降はPhase 1の成功と切り離し、provider UI・規約・仮押さえ挙動を個別確認した後にcapability単位で昇格させます。
+TOHOはPhase 1のread-only上映取得に加え、Phase 3でread-only seat mapを個別レビューして有効化します。seat selection以降は引き続き別capabilityとして無効化し、provider UI・規約・仮押さえ挙動を再レビューした場合だけ昇格させます。
 
 ## Phase 3 Seat Intelligence Discovery — 2026-08-17
 
@@ -181,7 +181,7 @@ Phase 3 Discoveryでは、ららぽーと横浜の現行schedule surfaceを確�
 - FAQでは「希望座席を決定してから15分以内」に購入完了しないとtimeout
 - 仮押さえしたseatは一定時間後に再解放
 
-このためTOHOをv0.3.0のfirst providerに選定します。追加validationではseat-map entry時にvisible countdownもselected-seat stateもなく、read-only entryの安全ゲートを通過しました。ここでの基準は「全server-side stateがゼロ」ではなく、seat hold / material reservation mutation / availability impactを起こさないことです。`seatMap`は#32のadapterとfail-closed testが完成するまでfalseを維持します。
+このためTOHOをv0.3.0のfirst providerに選定します。追加validationではseat-map entry時にvisible countdownもselected-seat stateもなく、read-only entryの安全ゲートを通過しました。ここでの基準は「全server-side stateがゼロ」ではなく、seat hold / material reservation mutation / availability impactを起こさないことです。#32でadapter / fail-closed test / isolated live smokeまで完了し、TOHOのみ `seatMap=true` へ昇格しました。`seatSelection=false` は維持します。
 
 v0.3.0候補scope:
 
@@ -192,5 +192,7 @@ v0.3.0候補scope:
 - stale seat-state detection
 
 `select_seats` / seat click / hold生成は対象外です。
+
+#32実装ではexact theater/date/movie/startTime/screenを1上映にbindingし、visible `販売中` controlからのみ進入します。会員促進面は観測済みJ03/J04 routeとexact `ログインせずに購入する` controlだけをprovider-specific intermediate allow-listで扱い、generic click policyは緩和していません。live seat DOMはprovider-visible `A-6` / `HC-1` 等のidentity、clickable `seatSelect(...)` attributeの**存在だけ**、non-clickable状態、rendered grid slotを読みます。`seatSelect(...)` 自体は実行しません。
 
 Discovery詳細: [`../PHASE3_SEAT_DISCOVERY.md`](../PHASE3_SEAT_DISCOVERY.md)

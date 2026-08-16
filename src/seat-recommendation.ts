@@ -150,21 +150,24 @@ export function findAdjacentSeatGroups(
     throw new SeatRecommendationError("INVALID_REQUEST", "Seat count must be an integer from 1 through 8.", { count });
   }
 
-  const byRow = new Map<number, Array<{ seat: CinemaSeat; column: number }>>();
+  const byRow = new Map<string, { rowIndex: number; entries: Array<{ seat: CinemaSeat; column: number }> }>();
   for (const seat of map.seats) {
     if (seat.state !== "available") continue;
     const geometry = recommendationGeometry(seat);
     if (!geometry) continue;
-    const row = byRow.get(geometry.row) ?? [];
-    row.push({ seat, column: geometry.column });
-    byRow.set(geometry.row, row);
+    const rowKey = `${geometry.row}|${seat.row ?? ""}`;
+    const row = byRow.get(rowKey) ?? { rowIndex: geometry.row, entries: [] };
+    row.entries.push({ seat, column: geometry.column });
+    byRow.set(rowKey, row);
   }
 
   const groups = observedGroupMembers(map);
   const preserveGroups = options.preserveGroups !== false;
   const candidates: CinemaSeat[][] = [];
-  const rowEntries = [...byRow.entries()].sort(([a], [b]) => a - b);
-  for (const [, entries] of rowEntries) {
+  const rowEntries = [...byRow.values()].sort((a, b) =>
+    a.rowIndex - b.rowIndex || compareText(a.entries[0]?.seat.row ?? "", b.entries[0]?.seat.row ?? "")
+  );
+  for (const { entries } of rowEntries) {
     entries.sort((a, b) => a.column - b.column || compareText(a.seat.id, b.seat.id));
     for (let start = 0; start + count <= entries.length; start += 1) {
       const window = entries.slice(start, start + count);

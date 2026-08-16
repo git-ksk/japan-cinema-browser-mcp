@@ -64,6 +64,17 @@ test("adjacent grouping respects explicit gap and aisle boundaries plus layout-s
   assert.deepEqual(findAdjacentSeatGroups(input, 2).map((group) => group.map((item) => item.id)), [["A-2", "A-3"], ["A-5", "A-6"]]);
 });
 
+
+test("adjacent grouping never joins semantic rows that share the same physical depth", () => {
+  const input = map([
+    seat("C-17", 2, 10, "available", { row: "C" }),
+    seat("HC-1", 2, 11, "available", { row: "HC", attributes: ["wheelchair"] }),
+    seat("HC-2", 2, 12, "available", { row: "HC", attributes: ["wheelchair"] }),
+    seat("C-18", 2, 13, "available", { row: "C" })
+  ]);
+  assert.deepEqual(findAdjacentSeatGroups(input, 2).map((group) => group.map((item) => item.id)), [["HC-1", "HC-2"]]);
+});
+
 test("explicit pair/group identities are not split by default", () => {
   const input = map([
     seat("A-1", 0, 0),

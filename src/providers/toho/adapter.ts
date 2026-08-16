@@ -1,9 +1,24 @@
 import { BrowserRuntimeError, CinemaBrowserRuntime } from "../../browser/runtime.js";
-import type { CinemaReadAdapter, CinemaShowtime, CinemaTheater, ShowtimeFormat, ShowtimeQuery, ShowtimeResult, TheaterListResult } from "../../cinema.js";
+import type {
+  CinemaReadAdapter,
+  CinemaSeat,
+  CinemaSeatMap,
+  CinemaSeatReadAdapter,
+  CinemaShowtime,
+  CinemaTheater,
+  SeatAvailabilityQuery,
+  SeatAvailabilityResult,
+  ShowtimeFormat,
+  ShowtimeQuery,
+  ShowtimeResult,
+  TheaterListResult
+} from "../../cinema.js";
 import { assertOfficialUrl } from "../../providers.js";
 
 const TOHO_THEATER_LIST_URL = "https://www.tohotheater.jp/theater/find.html";
 const TOHO_SCHEDULE_PATH = /^\/net\/schedule\/(\d{3})\/TNPI2000J01\.do$/;
+const TOHO_PROMOTION_PATH = /^\/net\/ticket\/(\d{3})\/TNPI2040J0[34]\.do$/;
+const TOHO_SEAT_PATH = /^\/net\/ticket\/(\d{3})\/TNPI2010J01\.do$/;
 const MIN_THEATER_SCHEDULE_LINKS = 20;
 const TOHO_SALE_STATE_SETTLE_ATTEMPTS = 16;
 const TOHO_SALE_STATE_SETTLE_POLL_MS = 180;
@@ -45,6 +60,37 @@ interface ShowtimeSnapshotRow {
   label?: unknown;
   titleCandidates?: unknown;
   context?: unknown;
+}
+
+
+interface SeatEntrySnapshot {
+  matched?: unknown;
+  labels?: unknown;
+}
+
+interface PromotionSnapshot {
+  title?: unknown;
+  exactNonMemberControls?: unknown;
+  sensitiveFields?: unknown;
+}
+
+interface TohoSeatSnapshotRow {
+  id?: unknown;
+  row?: unknown;
+  number?: unknown;
+  src?: unknown;
+  onclick?: unknown;
+  x?: unknown;
+  y?: unknown;
+}
+
+interface TohoSeatSnapshot {
+  title?: unknown;
+  selectedSummary?: unknown;
+  standardCapacity?: unknown;
+  wheelchairCapacity?: unknown;
+  gridX?: unknown;
+  seats?: unknown;
 }
 
 interface ScheduleSnapshot {
@@ -234,8 +280,109 @@ const SCHEDULE_EXPRESSION = `(() => {
   };
 })()`;
 
+const PROMOTION_EXPRESSION = `(() => {
+  const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+  const visible = (el) => {
+    const r = el.getBoundingClientRect();
+    const s = getComputedStyle(el);
+    return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' && !el.disabled;
+  };
+  const controls = Array.from(document.querySelectorAll('button,input[type="button"],input[type="submit"]'))
+    .filter(visible)
+    .filter((el) => normalize(el.getAttribute('aria-label') || el.value || el.textContent) === 'ログインせずに購入する');
+  const sensitiveFields = Array.from(document.querySelectorAll('input')).filter((el) => {
+    const type = String(el.getAttribute('type') || '').toLowerCase();
+    const autocomplete = String(el.getAttribute('autocomplete') || '').toLowerCase();
+    const label = normalize(el.getAttribute('aria-label') || el.getAttribute('name') || el.id);
+    return type === 'password' || autocomplete === 'one-time-code' || /otp|認証コード|verification/i.test(label);
+  });
+  return { title: document.title, exactNonMemberControls: controls.length, sensitiveFields: sensitiveFields.length };
+})()`;
+
+const SEAT_MAP_EXPRESSION = `(() => {
+  const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+  const visible = (el) => {
+    const r = el.getBoundingClientRect();
+    const s = getComputedStyle(el);
+    return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
+  };
+  const root = document.querySelector('#screen-list-frame-inner');
+  if (!root) return { title: document.title, seats: [], gridX: [] };
+  const seats = [];
+  for (const img of Array.from(root.querySelectorAll('img[id]')).filter(visible)) {
+    const id = String(img.id || '').trim();
+    const match = id.match(/^([A-Z]+)-(\\d+)$/);
+    if (!match) continue;
+    const rect = img.getBoundingClientRect();
+    let src = '';
+    try { src = new URL(img.src, location.href).pathname.split('/').pop() || ''; } catch {}
+    seats.push({
+      id,
+      row: match[1],
+      number: match[2],
+      src,
+      onclick: String(img.getAttribute('onclick') || '').trim(),
+      x: rect.x,
+      y: rect.y
+    });
+  }
+  const gridX = [...new Set(Array.from(root.querySelectorAll('img')).filter(visible).map((img) => img.getBoundingClientRect().x))].sort((a, b) => a - b);
+  const body = normalize(document.body.innerText || document.body.textContent);
+  const capacity = body.match(/(\\d+)\\s*席\\s*\\+\\s*(\\d+)\\s*車いす席/);
+  return {
+    title: document.title,
+    selectedSummary: normalize(document.querySelector('#seatList1')?.textContent),
+    standardCapacity: capacity ? Number(capacity[1]) : null,
+    wheelchairCapacity: capacity ? Number(capacity[2]) : null,
+    gridX,
+    seats
+  };
+})()`;
+
+function seatEntryExpression(showtime: TohoShowtime): string {
+  const start = JSON.stringify(showtime.startTime);
+  const end = JSON.stringify(showtime.endTime ?? "");
+  const screen = JSON.stringify(showtime.screen ?? "");
+  return `(() => {
+    const start = ${start};
+    const end = ${end};
+    const screen = ${screen};
+    const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+    const asciiDigits = (value) => normalize(value).replace(/[０-９]/g, (digit) => String.fromCharCode(digit.charCodeAt(0) - 0xfee0));
+    const visible = (el) => {
+      const r = el.getBoundingClientRect();
+      const s = getComputedStyle(el);
+      return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' && !el.disabled;
+    };
+    const rows = Array.from(document.querySelectorAll('.schedule-body-section-item .schedule-item')).filter(visible);
+    const matched = rows.filter((row) => {
+      const observedStart = normalize(row.querySelector('.time .start')?.textContent).replace(/：/g, ':').padStart(5, '0');
+      const observedEnd = normalize(row.querySelector('.time .end')?.textContent).replace(/：/g, ':').padStart(5, '0');
+      const context = asciiDigits(row.innerText || row.textContent).replace(/\\s+/g, '');
+      if (observedStart !== start) return false;
+      if (end && observedEnd !== end) return false;
+      if (screen && !context.includes('スクリーン' + screen) && !context.toUpperCase().includes('SCREEN' + screen)) return false;
+      return true;
+    });
+    const labels = [];
+    for (const row of matched) {
+      const controls = Array.from(row.querySelectorAll('a.wrapper')).filter(visible);
+      if (controls.length !== 1) continue;
+      const label = normalize(controls[0].getAttribute('aria-label') || controls[0].textContent);
+      const href = String(controls[0].getAttribute('href') || '');
+      if (!/販売中/.test(label) || !/^javascript:ScheduleUtils\\.purchaseTicket\\(/.test(href)) continue;
+      labels.push(label);
+    }
+    return { matched: matched.length, labels };
+  })()`;
+}
+
 function normalizeText(value: string): string {
   return value.replace(/\s+/g, " ").trim();
+}
+
+function normalizeAsciiDigits(value: string): string {
+  return value.replace(/[０-９]/g, (digit) => String.fromCharCode(digit.charCodeAt(0) - 0xfee0));
 }
 
 function normalizeTheaterQuery(value: string): string {
@@ -445,7 +592,7 @@ function normalizeScheduleRows(snapshot: ScheduleSnapshot, theater: TohoTheater,
     }
     const context = typeof raw.context === "string" ? normalizeText(raw.context).slice(0, 650) : "";
     const semanticText = `${movie} ${context}`;
-    const screenMatch = semanticText.match(/(?:スクリーン|SCREEN)\s*(?:No\.?\s*)?(\d{1,2}[A-Z]?)/i);
+    const screenMatch = normalizeAsciiDigits(semanticText).match(/(?:スクリーン|SCREEN)\s*(?:No\.?\s*)?(\d{1,2}[A-Z]?)/i);
     const language = /字幕|SUBTITLED/i.test(semanticText)
       ? "subtitled" as const
       : /吹替|DUBBED/i.test(semanticText)
@@ -506,7 +653,119 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export class TohoReadAdapter implements CinemaReadAdapter<"toho", TohoTheater, TohoShowtime> {
+function finitePosition(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function rawString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+export function normalizeTohoSeatSnapshot(
+  snapshot: TohoSeatSnapshot,
+  sourceUrl: string,
+  theater: TohoTheater,
+  showtime: TohoShowtime,
+  observedAt = new Date().toISOString()
+): CinemaSeatMap<"toho"> {
+  let url: URL;
+  try { url = assertOfficialUrl(sourceUrl, "toho"); } catch {
+    throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO seat map left the reviewed official provider boundary.");
+  }
+  const pathMatch = url.pathname.match(TOHO_SEAT_PATH);
+  if (!pathMatch || pathMatch[1] !== theater.id || url.search || url.hash) {
+    throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO seat-map route no longer matches the resolved theater context.");
+  }
+  if (!rawString(snapshot.title).includes("座席指定")) {
+    throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO seat-map title is missing from the rendered public surface.");
+  }
+  if (rawString(snapshot.selectedSummary)) {
+    throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO read-only seat-map entry unexpectedly contains a selected seat state.");
+  }
+  if (!Array.isArray(snapshot.seats) || snapshot.seats.length < 20 || snapshot.seats.length > 1000) {
+    throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO seat-map identity list is missing or implausible.", { count: Array.isArray(snapshot.seats) ? snapshot.seats.length : 0 });
+  }
+  const gridX = Array.isArray(snapshot.gridX) ? snapshot.gridX.filter(finitePosition).sort((a, b) => a - b) : [];
+  const uniqueGridX = [...new Set(gridX)];
+  if (uniqueGridX.length < 2) {
+    throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO rendered seat layout no longer exposes usable horizontal slots.");
+  }
+  const rawSeats = snapshot.seats as TohoSeatSnapshotRow[];
+  const yValues = [...new Set(rawSeats.map((seat) => seat.y).filter(finitePosition))].sort((a, b) => a - b);
+  const ids = new Set<string>();
+  const positions = new Set<string>();
+  const seats: CinemaSeat[] = [];
+  for (const raw of rawSeats) {
+    const id = rawString(raw.id);
+    const row = rawString(raw.row);
+    const number = rawString(raw.number);
+    if (!id || id !== `${row}-${number}` || !/^[A-Z]+-\d+$/.test(id) || ids.has(id) || !finitePosition(raw.x) || !finitePosition(raw.y)) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO seat identity or rendered position became ambiguous.", { seatId: id || undefined });
+    }
+    ids.add(id);
+    const columnIndex = uniqueGridX.indexOf(raw.x);
+    const rowIndex = yValues.indexOf(raw.y);
+    if (columnIndex < 0 || rowIndex < 0) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO seat position no longer maps to the rendered layout grid.", { seatId: id });
+    }
+    const position = `${rowIndex}:${columnIndex}`;
+    if (positions.has(position)) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO rendered seat positions are not unique.", { seatId: id, position });
+    }
+    positions.add(position);
+    const src = rawString(raw.src);
+    const onclick = rawString(raw.onclick);
+    const clickMatch = onclick.match(/^JavaScript:seatSelect\('([A-Z]+)','(\d+)',\s*'\d+'\);$/);
+    const clickMatchesIdentity = Boolean(clickMatch && clickMatch[1] === row && clickMatch[2] === number);
+    let state: CinemaSeat["state"] = "unknown";
+    if (clickMatchesIdentity && (src === "seat_1.gif" || (row === "HC" && src === "seat_4.gif"))) {
+      state = "available";
+    } else if (!onclick && (src === "seat_0.gif" || src === "seat_2.gif")) {
+      state = "unavailable";
+    }
+    seats.push({
+      id,
+      row,
+      number,
+      state,
+      ...(state === "unavailable" ? { unavailableReason: "unknown" as const } : {}),
+      attributes: row === "HC" ? ["wheelchair"] : [],
+      rowIndex,
+      columnIndex,
+      x: columnIndex,
+      y: rowIndex
+    });
+  }
+  const standardCapacity = typeof snapshot.standardCapacity === "number" && Number.isInteger(snapshot.standardCapacity) ? snapshot.standardCapacity : undefined;
+  const wheelchairCapacity = typeof snapshot.wheelchairCapacity === "number" && Number.isInteger(snapshot.wheelchairCapacity) ? snapshot.wheelchairCapacity : undefined;
+  if (standardCapacity !== undefined && wheelchairCapacity !== undefined) {
+    if (standardCapacity + wheelchairCapacity !== seats.length) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO rendered seat count no longer matches the visible capacity summary.", {
+        expected: standardCapacity + wheelchairCapacity,
+        observed: seats.length
+      });
+    }
+    const wheelchairSeats = seats.filter((seat) => seat.attributes.includes("wheelchair")).length;
+    if (wheelchairSeats !== wheelchairCapacity) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO wheelchair-seat identities no longer match the visible capacity summary.", {
+        expected: wheelchairCapacity,
+        observed: wheelchairSeats
+      });
+    }
+  }
+  return {
+    provider: "toho",
+    theaterId: theater.id,
+    theater: theater.name,
+    ...(showtime.screen ? { screen: showtime.screen } : {}),
+    showtimeIdentity: ["toho", theater.id, showtime.date, showtime.movie, showtime.startTime, showtime.endTime ?? "", showtime.screen ?? ""].join("|"),
+    seats,
+    observedAt,
+    sourceUrl: url.href
+  };
+}
+
+export class TohoReadAdapter implements CinemaReadAdapter<"toho", TohoTheater, TohoShowtime>, CinemaSeatReadAdapter<"toho", TohoTheater, TohoShowtime> {
   constructor(private readonly runtime: CinemaBrowserRuntime) {}
 
   async listTheaters(query?: string): Promise<TheaterListResult<"toho", TohoTheater>> {
@@ -654,6 +913,95 @@ export class TohoReadAdapter implements CinemaReadAdapter<"toho", TohoTheater, T
       sourceUrl: semantic.url,
       showtimes
     };
+  }
+
+  async getSeatAvailability(input: SeatAvailabilityQuery): Promise<SeatAvailabilityResult<"toho", TohoTheater, TohoShowtime>> {
+    if (!/^\d{2}:\d{2}$/.test(input.startTime)) {
+      throw new BrowserRuntimeError("UI_ELEMENT_NOT_FOUND", "TOHO seat availability requires an exact 24-hour showtime startTime.");
+    }
+    const schedule = await this.getShowtimes({ theater: input.theater, date: input.date, movie: input.movie });
+    if (!schedule.dateAvailable) {
+      throw new BrowserRuntimeError("UI_ELEMENT_NOT_FOUND", "TOHO requested seat-availability date is not exposed by the current public schedule.", { date: input.date });
+    }
+    let matches = schedule.showtimes.filter((showtime) => showtime.startTime === input.startTime);
+    if (input.screen?.trim()) matches = matches.filter((showtime) => showtime.screen === input.screen!.trim());
+    if (matches.length !== 1) {
+      throw new BrowserRuntimeError("UI_ELEMENT_NOT_FOUND", "TOHO showtime did not resolve to one unique rendered schedule row for seat availability.", {
+        movie: input.movie,
+        startTime: input.startTime,
+        screen: input.screen,
+        candidates: matches.slice(0, 8).map((showtime) => ({ movie: showtime.movie, startTime: showtime.startTime, screen: showtime.screen }))
+      });
+    }
+    const showtime = matches[0]!;
+    if (!showtime.screen) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO seat availability requires an observed screen identity from the rendered schedule row.");
+    }
+    if (showtime.availability === "sold_out" || showtime.availability === "unavailable") {
+      throw new BrowserRuntimeError("UI_ELEMENT_NOT_FOUND", "TOHO showtime is not currently represented as a sellable seat-map entry.", { availability: showtime.availability });
+    }
+
+    const entry = await this.runtime.evaluateSemanticState<SeatEntrySnapshot>("toho", seatEntryExpression(showtime));
+    const labels = stringArray(entry.value.labels, 4);
+    if (entry.value.matched !== 1 || labels.length !== 1) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO sellable showtime is no longer represented by one reviewed public seat-map entry control.", {
+        matchedRows: entry.value.matched,
+        controls: labels
+      });
+    }
+    await this.runtime.clickReviewedControl(labels[0]!, "toho");
+
+    let status = await this.runtime.status();
+    let currentUrl = typeof status.url === "string" ? status.url : "";
+    let current = assertOfficialUrl(currentUrl, "toho");
+    let seatMatch = current.pathname.match(TOHO_SEAT_PATH);
+    const promotionMatch = current.pathname.match(TOHO_PROMOTION_PATH);
+    if (!seatMatch) {
+      if (!promotionMatch || promotionMatch[1] !== schedule.theater.id || current.search || current.hash) {
+        throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO showtime entry did not reach the reviewed seat or non-member intermediate surface.");
+      }
+      let promotionReady = false;
+      for (let attempt = 0; attempt < 16; attempt += 1) {
+        status = await this.runtime.status();
+        currentUrl = typeof status.url === "string" ? status.url : "";
+        current = assertOfficialUrl(currentUrl, "toho");
+        const currentPromotion = current.pathname.match(TOHO_PROMOTION_PATH);
+        if (!currentPromotion || currentPromotion[1] !== schedule.theater.id || current.search || current.hash) {
+          throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO non-member intermediate surface left the reviewed theater context while settling.");
+        }
+        const promotion = await this.runtime.evaluateSemanticState<PromotionSnapshot>("toho", PROMOTION_EXPRESSION);
+        if (
+          rawString(promotion.value.title).includes("TOHOシネマズ") &&
+          promotion.value.exactNonMemberControls === 1 &&
+          promotion.value.sensitiveFields === 0
+        ) {
+          promotionReady = true;
+          break;
+        }
+        await sleep(180);
+      }
+      if (!promotionReady) {
+        throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO non-member intermediate surface did not expose the exact reviewed continuation within the bounded wait.");
+      }
+      await this.runtime.clickReviewedIntermediateControl("ログインせずに購入する", "toho");
+      for (let attempt = 0; attempt < 16; attempt += 1) {
+        status = await this.runtime.status();
+        currentUrl = typeof status.url === "string" ? status.url : "";
+        current = assertOfficialUrl(currentUrl, "toho");
+        seatMatch = current.pathname.match(TOHO_SEAT_PATH);
+        if (seatMatch) break;
+        if (!current.pathname.match(TOHO_PROMOTION_PATH)) {
+          throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO non-member continuation left the reviewed seat-map flow.");
+        }
+        await sleep(180);
+      }
+    }
+    if (!seatMatch || seatMatch[1] !== schedule.theater.id || current.search || current.hash) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO seat-map route did not settle on the resolved theater context.");
+    }
+    const semantic = await this.runtime.evaluateSemanticState<TohoSeatSnapshot>("toho", SEAT_MAP_EXPRESSION);
+    const seatMap = normalizeTohoSeatSnapshot(semantic.value, semantic.url, schedule.theater, showtime);
+    return { provider: "toho", theater: schedule.theater, showtime, seatMap };
   }
 
   private async clickDateControl(label: string): Promise<void> {

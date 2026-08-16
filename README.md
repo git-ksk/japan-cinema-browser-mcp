@@ -96,6 +96,7 @@ Public repositoryとして、次の安全基盤とread capabilityを実装済み
 - TOHOシネマズの劇場一覧semantic read
 - TOHOシネマズの劇場・日付・作品・上映回semantic read
 - TOHOシネマズの日付切替後のselected-state再検証
+- TOHOシネマズのread-only `get_seat_availability`（seat identity / availability / rendered gap geometry、seat clickなし）
 - イオンシネマの公式「劇場を探す」UIからの劇場一覧semantic read
 - イオンシネマの公開 `theater.aeoncinema.com/theaters/{slug}` schedule route利用
 - イオンシネマの日付・作品・上映時間・screen・format/language semantic read
@@ -104,7 +105,7 @@ Public repositoryとして、次の安全基盤とread capabilityを実装済み
 - 109シネマズの日付・作品・上映時間・screen・format/language/availability semantic read
 - TOHO / AEON / 109ともUI変更・曖昧状態・identity mismatchでfail closed
 
-Phase 1ではTOHO / AEON / 109の3社read-only adapterを有効化しています。seat map / seat selection / checkout preparation / purchase submissionは全社falseのままです。
+TOHO / AEON / 109の3社showtime read adapterを有効化し、Phase 3ではTOHOだけread-only `seatMap=true` を有効化しています。`seatSelection / checkoutPreparation / purchaseSubmission` は全社falseのままです。AEON / 109のseat mapも未有効化です。
 
 自然発生したaccess challenge/CAPTCHA、sign-in/authentication、consentはgeneric Execution Handoffへ接続しています。Agent/Human authorityは排他で、resource epoch、exact invocation/requestState binding、post-Human replay policyを適用します。これによってtransaction capabilityが有効になることはありません。
 
@@ -217,6 +218,7 @@ CINEMA_ENABLE_PURCHASE=true npm start
 - `extract_showtime_candidates` — 表示中の上映時刻候補を抽出する
 - `list_theaters` — providerの公式公開UIから劇場をsemanticに読む。TOHO / AEON / 109有効
 - `get_showtimes` — 劇場・日付・作品・上映回をsemanticに読む。TOHO / AEON / 109有効
+- `get_seat_availability` — exact theater/date/movie/startTime/screenにbindingしたTOHOのlive seat mapをread-onlyで読む。seat click / hold生成なし
 - `resolve_theater_targets` — Maps等のbounded external place labelsをprovider公式劇場UIで再照合し、最大3件のverified `{ provider, theater }` targetへ変換する
 - `find_showtimes` — 最大3件の明示provider/theater targetを同一request内で順次読み、共通contractでfilter・集約する。provider failureは`complete=false`と`failures`で明示
 - `click_cinema_control` — reviewed read surface内の明示的read操作だけを実行する。seat/checkout/purchase系はprovider capabilityで拒否

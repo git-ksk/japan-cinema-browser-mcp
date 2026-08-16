@@ -5,6 +5,7 @@
 - AEON Phase 1 read adapterレビュー日: 2026-08-13
 - 109 Phase 1 read adapterレビュー日: 2026-08-13
 - Public safety hardening / live smoke再確認日: 2026-08-15
+- TOHO Phase 3 read-only seat adapterレビュー日: 2026-08-17
 
 この文書は実装上の対応範囲と確認状況を管理するためのものです。法的助言を目的としたものではありません。購入機能・seat/checkout capabilityを有効化する前、materialなautomation surface変更時、またはprovider規約/UI変更が疑われる場合は、各providerの現行利用規約・サイトポリシー・実際のUIを再確認します。Public repositoryであること自体はproviderの許諾や法的適合を意味しません。
 
@@ -12,7 +13,7 @@
 
 | Provider | 公式root | 現在の自動化範囲 | 購入 |
 |---|---|---|---|
-| TOHOシネマズ | `https://www.tohotheater.jp/` | reviewed public read surface / bounded read / 劇場・日付・作品・上映回semantic read | 無効。seat/checkout未レビュー |
+| TOHOシネマズ | `https://www.tohotheater.jp/` | reviewed public read surface / bounded read / 劇場・日付・作品・上映回 + read-only座席表semantic read | 購入無効。seat selection / checkout未レビュー |
 | イオンシネマ | `https://www.aeoncinema.com/` | reviewed public read surface / bounded read / 劇場・日付・作品・上映回semantic read | 無効。seat/checkout未レビュー |
 | 109シネマズ | `https://109cinemas.net/` | reviewed public read surface / bounded read / 劇場・日付・作品・上映回semantic read | 無効。seat/checkout未レビュー |
 
@@ -38,24 +39,23 @@
 | Generic bounded read | ✅ | ✅ | ✅ |
 | 劇場一覧/選択semantic | ✅ | ✅ | ✅ |
 | 上映情報semantic | ✅ | ✅ | ✅ |
-| 座席表read | ⬜ | ⬜ | ⬜ |
+| 座席表read | ✅ | ⬜ | ⬜ |
 | 座席選択 | ⬜ | ⬜ | ⬜ |
 | Checkout preparation | ⬜ | ⬜ | ⬜ |
 | Final purchase | ⬜ | ⬜ | ⬜ |
 
 `✅` はそのcapabilityについて実装済み、`⬜` は未着手を表します。
 
-3社のread-only `✅` はseat selectionやpurchase capabilityの解禁を意味しません。現在は全providerで `seatMap=false / seatSelection=false / checkoutPreparation=false / purchaseSubmission=false` です。
+TOHOのみreview済みread-only `seatMap=true` です。`seatSelection=false / checkoutPreparation=false / purchaseSubmission=false` は3社とも維持し、AEON / 109の `seatMap` もfalseです。
 
 ## Phase 3 Seat Intelligence Discovery — 2026-08-17
 
 TOHO / AEON / 109のseat-map / seat-hold境界を、seat clickなしで再レビューしました。詳細比較とv0.3.0 scopeは [`PHASE3_SEAT_DISCOVERY.md`](./PHASE3_SEAT_DISCOVERY.md) に記録しています。
 
-- TOHO: 希望座席決定後の15分timeoutと仮押さえ解放、selected=赤 / sold=黒を公式公開手順で確認。v0.3.0 first provider候補
-- 109: 10分のseat holdを公式公開手順で確認。exact start transitionは未確定
-- AEON: 未完了予約に伴うavailability変化は確認できるが、hold開始点/timeoutは未確定
-- 3社ともDiscovery中はpurchase seat mapへ自動進入せず、seat clickを実施していない
-- TOHO `seatMap` も現時点ではfalseのまま。live seat-map entryがnon-mutatingと別途確認できた場合のみ昇格する
+- TOHO: live `座席指定` までseat clickなしで検証し、entry時selected=0 / visible timerなし。#32でread-only adapterを実装し `seatMap=true` へ昇格
+- 109: live seat-map entryで10分session timer開始を確認する一方、`選択座席 0／8席`かつ独立session間のseat-state fingerprint一致を確認。read-only候補は#35
+- AEON: visible `予約購入` click後のnew browser targetがisolated Chromeで`about:blank`に留まり、live seat mapは未到達。public navigation/target handlingを#36で追跡
+- すべてのvalidation / smokeでseat clickは実施していない
 
 `v0.3.0 — Seat Intelligence` はTOHOのread-only `get_seat_availability` / `recommend_seats` をfirst vertical sliceとし、`select_seats` は含めません。
 
@@ -137,6 +137,7 @@ TOHOの公開UIには、複数の劇場名が1つのschedule routeを共有す�
 
 - `list_theaters` — TOHO / AEON / 109 semantic capability有効
 - `get_showtimes` — TOHO / AEON / 109 semantic capability有効
+- `get_seat_availability` — TOHOのみ。exact showtimeからread-only seat mapへ入り、seat identity/state/layoutを返す。seat clickなし
 
 無効化されたseat/checkout/purchase capabilityをgeneric fuzzy automationへfallbackしません。Provider adapter内部のread-only navigation/clickはgeneric toolと分離し、rendered public UIから採用したexplicit route/controlと遷移後identityをprovider固有に再検証します。
 
