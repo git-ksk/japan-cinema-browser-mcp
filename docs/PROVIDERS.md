@@ -47,6 +47,18 @@
 
 3社のread-only `✅` はseat selectionやpurchase capabilityの解禁を意味しません。現在は全providerで `seatMap=false / seatSelection=false / checkoutPreparation=false / purchaseSubmission=false` です。
 
+## Phase 3 Seat Intelligence Discovery — 2026-08-17
+
+TOHO / AEON / 109のseat-map / seat-hold境界を、seat clickなしで再レビューしました。詳細比較とv0.3.0 scopeは [`PHASE3_SEAT_DISCOVERY.md`](./PHASE3_SEAT_DISCOVERY.md) に記録しています。
+
+- TOHO: 希望座席決定後の15分timeoutと仮押さえ解放、selected=赤 / sold=黒を公式公開手順で確認。v0.3.0 first provider候補
+- 109: 10分のseat holdを公式公開手順で確認。exact start transitionは未確定
+- AEON: 未完了予約に伴うavailability変化は確認できるが、hold開始点/timeoutは未確定
+- 3社ともDiscovery中はpurchase seat mapへ自動進入せず、seat clickを実施していない
+- TOHO `seatMap` も現時点ではfalseのまま。live seat-map entryがnon-mutatingと別途確認できた場合のみ昇格する
+
+`v0.3.0 — Seat Intelligence` はTOHOのread-only `get_seat_availability` / `recommend_seats` をfirst vertical sliceとし、`select_seats` は含めません。
+
 ## TOHO Phase 1 Read Adapter
 
 2026-08-13時点で以下の公開導線を確認しています。
