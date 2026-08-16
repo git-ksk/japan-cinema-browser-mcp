@@ -141,6 +141,89 @@ test("TOHO showtime normalization returns compact semantic facts and does not mi
   assert.equal(result.showtimes[1]?.availability, "unavailable");
 });
 
+test("TOHO waits for a switched future date sale placeholder to hydrate before reporting availability", async () => {
+  const rows = theaterRows();
+  const scheduleUrl = rows[0]!.url;
+  const initial = {
+    theaterNames: ["TOHOシネマズ テスト1"],
+    scheduleHeadingCount: 1,
+    dates: [
+      { label: "2026年8月16日", selected: true, clickable: false },
+      { label: "2026年8月17日", selected: false, clickable: true }
+    ],
+    showtimes: [{ label: "10:00 ～ 12:05", titleCandidates: ["映画A"], context: "販売中 スクリーン 1" }],
+    emptySchedule: false
+  };
+  const switchedPlaceholder = {
+    theaterNames: ["TOHOシネマズ テスト1"],
+    scheduleHeadingCount: 1,
+    dates: [
+      { label: "2026年8月16日", selected: false, clickable: true },
+      { label: "2026年8月17日", selected: true, clickable: false }
+    ],
+    showtimes: [{ label: "13:00 ～ 15:05", titleCandidates: ["映画A"], context: "販売期間外 スクリーン 2" }],
+    emptySchedule: false
+  };
+  const hydrated = {
+    ...switchedPlaceholder,
+    showtimes: [{ label: "13:00 ～ 15:05", titleCandidates: ["映画A"], context: "販売中 スクリーン 2" }]
+  };
+  const runtime = fakeRuntime([
+    { url: THEATER_LIST_URL, value: { rows } },
+    { url: scheduleUrl, value: initial },
+    { url: scheduleUrl, value: { matched: 1, clicked: true } },
+    { url: scheduleUrl, value: switchedPlaceholder },
+    { url: scheduleUrl, value: hydrated }
+  ]);
+  const adapter = new TohoReadAdapter(runtime);
+
+  const result = await adapter.getShowtimes({ theater: "テスト1", date: "2026-08-17" });
+
+  assert.equal(result.date, "2026-08-17");
+  assert.equal(result.showtimes.length, 1);
+  assert.equal(result.showtimes[0]?.startTime, "13:00");
+  assert.equal(result.showtimes[0]?.availability, "unknown");
+  assert.equal(result.showtimes[0]?.screen, "2");
+});
+
+test("TOHO preserves a genuinely stable unavailable state after the bounded hydration wait", async () => {
+  const rows = theaterRows();
+  const scheduleUrl = rows[0]!.url;
+  const initial = {
+    theaterNames: ["TOHOシネマズ テスト1"],
+    scheduleHeadingCount: 1,
+    dates: [
+      { label: "2026年8月16日", selected: true, clickable: false },
+      { label: "2026年8月17日", selected: false, clickable: true }
+    ],
+    showtimes: [{ label: "10:00 ～ 12:05", titleCandidates: ["映画A"], context: "販売中 スクリーン 1" }],
+    emptySchedule: false
+  };
+  const stableUnavailable = {
+    theaterNames: ["TOHOシネマズ テスト1"],
+    scheduleHeadingCount: 1,
+    dates: [
+      { label: "2026年8月16日", selected: false, clickable: true },
+      { label: "2026年8月17日", selected: true, clickable: false }
+    ],
+    showtimes: [{ label: "13:00 ～ 15:05", titleCandidates: ["映画A"], context: "販売期間外 スクリーン 2" }],
+    emptySchedule: false
+  };
+  const runtime = fakeRuntime([
+    { url: THEATER_LIST_URL, value: { rows } },
+    { url: scheduleUrl, value: initial },
+    { url: scheduleUrl, value: { matched: 1, clicked: true } },
+    { url: scheduleUrl, value: stableUnavailable },
+    ...Array.from({ length: 16 }, () => ({ url: scheduleUrl, value: stableUnavailable }))
+  ]);
+  const adapter = new TohoReadAdapter(runtime);
+
+  const result = await adapter.getShowtimes({ theater: "テスト1", date: "2026-08-17" });
+
+  assert.equal(result.showtimes.length, 1);
+  assert.equal(result.showtimes[0]?.availability, "unavailable");
+});
+
 test("TOHO accepts the observed official schedule subdomain redirect only when the reviewed theater path is unchanged", async () => {
   const rows = theaterRows();
   rows[0] = {
