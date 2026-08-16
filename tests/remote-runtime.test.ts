@@ -42,6 +42,7 @@ test("remote mode is bounded, authenticated, headless, purchase-disabled and usa
     assert.equal(config.policy.operationTimeoutMs, 30_000);
     assert.equal(config.usage?.dailyLimit, 100);
     assert.equal(config.usage?.projectId, "test-mcp-runtime");
+    assert.equal(config.usage?.leaseTtlMs, 300_000);
     assert.equal(config.oauth?.publicBaseUrl, "https://cinema.example");
     assert.deepEqual(config.oauth?.allowedClientHosts, ["chatgpt.com"]);
     assert.equal(config.oauth?.accessTokenTtlMs, 3_600_000);

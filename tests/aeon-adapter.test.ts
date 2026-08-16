@@ -5,6 +5,7 @@ import {
   AeonReadAdapter,
   buildAeonScheduleUrl,
   normalizeAeonScheduleSnapshot,
+  normalizeAeonTheaterQuery,
   normalizeAeonTheaterSnapshot
 } from "../src/providers/aeon/adapter.js";
 
@@ -13,6 +14,7 @@ interface TheaterRowFixture {
   href: string;
   route?: string;
   code?: string;
+  area?: string;
 }
 
 function theaterRows(count = 55): TheaterRowFixture[] {
@@ -224,4 +226,42 @@ test("AEON dateAvailable remains a date-level fact when a movie filter matches n
   assert.equal(result.dateAvailable, true);
   assert.deepEqual(result.showtimes, []);
   assert.ok(result.availableDates.includes("2026-08-15"));
+});
+
+
+test("AEON theater query normalizes width/spacing and searches only rendered area context", async () => {
+  assert.equal(normalizeAeonTheaterQuery(" イオン　シネマ 港北ニュータウン "), "港北ニュータウン");
+
+  const rows = theaterRows();
+  rows[0] = {
+    label: "港北ニュータウン ULTILA D-BOX",
+    href: "https://www.aeoncinema.com/cinema/kohoku/",
+    area: "神奈川"
+  };
+  rows[1] = {
+    label: "みなとみらい 4DX",
+    href: "https://www.aeoncinema.com/cinema/minatomirai/",
+    area: "神奈川"
+  };
+  for (let index = 2; index < rows.length; index += 1) rows[index]!.area = "北海道";
+
+  const runtime = {
+    status: async () => ({ connected: true, url: "https://www.aeoncinema.com/theater/", provider: "aeon", officialSurface: true }),
+    navigateReviewed: async (url: string) => url,
+    evaluateSemanticState: async () => ({
+      url: "https://www.aeoncinema.com/theater/",
+      value: { headingCount: 1, rows }
+    }),
+    clickReviewedControl: async () => ({ clicked: true })
+  } as unknown as CinemaBrowserRuntime;
+  const adapter = new AeonReadAdapter(runtime);
+
+  const normalized = await adapter.listTheaters("イオン　シネマ 港北ニュータウン");
+  assert.deepEqual(normalized.theaters.map((theater) => theater.name), ["イオンシネマ 港北ニュータウン"]);
+
+  const locality = await adapter.listTheaters("神奈川");
+  assert.deepEqual(locality.theaters.map((theater) => theater.name).sort(), ["イオンシネマ みなとみらい", "イオンシネマ 港北ニュータウン"].sort());
+
+  const unsupportedInference = await adapter.listTheaters("横浜");
+  assert.deepEqual(unsupportedInference.theaters, [], "do not infer city aliases not present in the public theater list");
 });

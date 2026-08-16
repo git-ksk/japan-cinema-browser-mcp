@@ -39,8 +39,8 @@ MCP_FIREBASE_LOOKUP_TIMEOUT_MS=5000
 MCP_USAGE_REQUIRED=true
 MCP_USAGE_FIRESTORE_PROJECT_ID=<gcp-project-id>
 MCP_USAGE_DAILY_LIMIT=100
-MCP_USAGE_LEASE_TTL_MS=60000
-CINEMA_OPERATION_TIMEOUT_MS=30000
+MCP_USAGE_LEASE_TTL_MS=420000
+CINEMA_OPERATION_TIMEOUT_MS=90000
 ```
 
 Optional OAuth lifetime controls default to:
@@ -127,16 +127,23 @@ region: us-central1
 billing: request-based / CPU throttling enabled
 startup CPU boost: disabled
 CPU: 1
-memory: 1 GiB
+memory: 4 GiB
 concurrency: 1
 min instances: 0
 max instances: 1
-request timeout: 60 seconds
-browser operation timeout: 30 seconds
+request timeout: 360 seconds
+browser operation timeout: 90 seconds per explicit provider target
+find_showtimes aggregate timeout: 275 seconds for three targets
 daily metered browser operations: 100
 ```
 
-`1 GiB` is intentional: Chromium needs more working room than a typical API-only Node process. Do not reduce memory merely to make the nominal configuration smaller without measuring browser reliability.
+`4 GiB` is intentional. Live Cloud Run validation on 2026-08-16 first observed Chromium crossing the previous 1 GiB limit (1047 MiB used), then reproduced the same failure at the 2 GiB limit (2054 MiB used) during sequential provider reads. The 4 GiB profile preserves headroom for the controlled Chromium session while concurrency remains 1. Do not reduce memory without measuring browser reliability under the three-provider workflow.
+
+The remote provider timeout is set to `90000` ms because live AEON validation from Cloud Run still exceeded 60 seconds after the memory OOM was removed. This does not bypass the public-UI safety path: AEON still re-resolves the theater from the rendered theater list and follows reviewed public navigation before reading the rendered schedule.
+
+The longer HTTP request envelope does **not** make provider reads unbounded. `CINEMA_OPERATION_TIMEOUT_MS` remains the per-provider semantic budget. `find_showtimes` runs at most three explicit targets sequentially, isolates a timed-out target, and gives each target its full bounded provider budget before the aggregate envelope can fire. With the recommended 90-second provider budget, three targets are bounded to 275 seconds of browser work. The 360-second HTTP timeout leaves room for cold Chromium startup plus OAuth/usage-control work so a structured partial result can reach the MCP client instead of being cut off by transport cancellation.
+
+`MCP_USAGE_LEASE_TTL_MS=420000` intentionally exceeds the maximum recommended browser-work envelope. Usage admission and `markLiable()` still happen before browser work; post-liability settlement is best-effort accounting and cannot erase the charged reservation if a lease expires.
 
 The daily usage budget is an application guardrail, not a billing hard cap. Cloud Run health/startup work, OAuth metadata/token traffic, image storage, build minutes, and authenticated unmetered control calls remain separate. Keep billing alerts enabled and inspect actual usage.
 

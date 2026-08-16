@@ -248,3 +248,152 @@ test("find_showtimes resolves one Tokyo date per request and forwards the same m
     { provider: "109", date: "2026-08-15", movie: "対象作品" }
   ]);
 });
+
+
+test("find_showtimes isolates three targets with one success and two failures", async () => {
+  const date = "2026-08-16";
+  const calls: CinemaProviderId[] = [];
+  const success = adapterReturning(result("toho", "036", "TOHOシネマズ ららぽーと横浜", date, [
+    showtime("toho", "036", "TOHOシネマズ ららぽーと横浜", date, "18:00", "スパイダーマン")
+  ]));
+  const failureAdapter = (provider: "109" | "aeon"): CinemaReadAdapter => ({
+    listTheaters: async () => ({ provider, sourceUrl: providerUrls(provider).theater, theaters: [] }),
+    getShowtimes: async () => {
+      calls.push(provider);
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", `${provider} fixture failure`, { provider });
+    }
+  });
+  const adapters = new Map<CinemaProviderId, CinemaReadAdapter>([
+    ["toho", {
+      ...success,
+      getShowtimes: async (query) => {
+        calls.push("toho");
+        return success.getShowtimes(query);
+      }
+    }],
+    ["109", failureAdapter("109")],
+    ["aeon", failureAdapter("aeon")]
+  ]);
+
+  const found = await findShowtimes({
+    targets: [
+      { provider: "toho", theater: "TOHOシネマズ ららぽーと横浜" },
+      { provider: "109", theater: "109シネマズゆめが丘" },
+      { provider: "aeon", theater: "イオンシネマ 港北ニュータウン" }
+    ],
+    date
+  }, (provider) => adapters.get(provider)!);
+
+  assert.deepEqual(calls, ["toho", "109", "aeon"]);
+  assert.equal(found.complete, false);
+  assert.equal(found.successes.length, 1);
+  assert.equal(found.showtimes.length, 1);
+  assert.deepEqual(found.failures.map((failure) => failure.target.provider), ["109", "aeon"]);
+});
+
+test("find_showtimes marks all targets successful only when every target succeeds", async () => {
+  const date = "2026-08-16";
+  const adapters = new Map<CinemaProviderId, CinemaReadAdapter>([
+    ["toho", adapterReturning(result("toho", "036", "TOHOシネマズ ららぽーと横浜", date, [showtime("toho", "036", "TOHOシネマズ ららぽーと横浜", date, "18:00")]))],
+    ["109", adapterReturning(result("109", "yumegaoka", "109シネマズゆめが丘", date, [showtime("109", "yumegaoka", "109シネマズゆめが丘", date, "18:50")]))],
+    ["aeon", adapterReturning(result("aeon", "kohoku", "イオンシネマ 港北ニュータウン", date, [showtime("aeon", "kohoku", "イオンシネマ 港北ニュータウン", date, "19:25")]))]
+  ]);
+
+  const found = await findShowtimes({
+    targets: [
+      { provider: "toho", theater: "TOHOシネマズ ららぽーと横浜" },
+      { provider: "109", theater: "109シネマズゆめが丘" },
+      { provider: "aeon", theater: "イオンシネマ 港北ニュータウン" }
+    ],
+    date
+  }, (provider) => adapters.get(provider)!);
+
+  assert.equal(found.complete, true);
+  assert.equal(found.successes.length, 3);
+  assert.equal(found.failures.length, 0);
+});
+
+test("find_showtimes returns structured failures when every target fails", async () => {
+  const date = "2026-08-16";
+  const adapters = new Map<CinemaProviderId, CinemaReadAdapter>();
+  for (const provider of ["toho", "109", "aeon"] as const) {
+    adapters.set(provider, {
+      listTheaters: async () => ({ provider, sourceUrl: providerUrls(provider).theater, theaters: [] }),
+      getShowtimes: async () => { throw new BrowserRuntimeError("UI_STATE_CHANGED", `${provider} failed`); }
+    });
+  }
+
+  const found = await findShowtimes({
+    targets: [
+      { provider: "toho", theater: "TOHOシネマズ ららぽーと横浜" },
+      { provider: "109", theater: "109シネマズゆめが丘" },
+      { provider: "aeon", theater: "イオンシネマ 港北ニュータウン" }
+    ],
+    date
+  }, (provider) => adapters.get(provider)!);
+
+  assert.equal(found.complete, false);
+  assert.equal(found.successes.length, 0);
+  assert.equal(found.showtimes.length, 0);
+  assert.equal(found.failures.length, 3);
+  assert.ok(found.failures.every((failure) => failure.error.code === "UI_STATE_CHANGED"));
+});
+
+test("find_showtimes contains a raw adapter exception instead of leaking it across the MCP boundary", async () => {
+  const date = "2026-08-16";
+  const rawFailure: CinemaReadAdapter = {
+    listTheaters: async () => ({ provider: "109", sourceUrl: providerUrls("109").theater, theaters: [] }),
+    getShowtimes: async () => {
+      throw new AggregateError([new Error("raw adapter secret-ish stack detail")], "unhandled errors in a TaskGroup");
+    }
+  };
+
+  const found = await findShowtimes(
+    { targets: [{ provider: "109", theater: "109シネマズゆめが丘" }], date },
+    () => rawFailure
+  );
+
+  assert.equal(found.complete, false);
+  assert.equal(found.failures[0]?.error.code, "INTERNAL_ERROR");
+  assert.doesNotMatch(found.failures[0]?.error.message ?? "", /TaskGroup|secret-ish|stack detail/);
+});
+
+test("find_showtimes treats a target timeout as one structured failure and continues to later siblings", async () => {
+  const date = "2026-08-16";
+  const observed: CinemaProviderId[] = [];
+  const adapters = new Map<CinemaProviderId, CinemaReadAdapter>([
+    ["toho", adapterReturning(result("toho", "036", "TOHOシネマズ ららぽーと横浜", date, [showtime("toho", "036", "TOHOシネマズ ららぽーと横浜", date, "18:00")]))],
+    ["109", adapterReturning(result("109", "yumegaoka", "109シネマズゆめが丘", date, [showtime("109", "yumegaoka", "109シネマズゆめが丘", date, "18:50")]))],
+    ["aeon", adapterReturning(result("aeon", "kohoku", "イオンシネマ 港北ニュータウン", date, [showtime("aeon", "kohoku", "イオンシネマ 港北ニュータウン", date, "19:25")]))]
+  ]);
+
+  const found = await findShowtimes(
+    {
+      targets: [
+        { provider: "toho", theater: "TOHOシネマズ ららぽーと横浜" },
+        { provider: "109", theater: "109シネマズゆめが丘" },
+        { provider: "aeon", theater: "イオンシネマ 港北ニュータウン" }
+      ],
+      date
+    },
+    (provider) => adapters.get(provider)!,
+    new Date(),
+    {
+      runTarget: async (target, task) => {
+        observed.push(target.provider);
+        if (target.provider === "109") {
+          throw new BrowserRuntimeError("OPERATION_TIMEOUT", "109 timed out", { scope: "find_showtimes_target" });
+        }
+        return task();
+      }
+    }
+  );
+
+  assert.deepEqual(observed, ["toho", "109", "aeon"]);
+  assert.equal(found.complete, false);
+  assert.equal(found.successes.length, 2);
+  assert.equal(found.failures.length, 1);
+  assert.equal(found.failures[0]?.target.provider, "109");
+  assert.equal(found.failures[0]?.error.code, "OPERATION_TIMEOUT");
+  assert.equal(found.showtimes.length, 2);
+});
