@@ -3,11 +3,18 @@
 import { once } from "node:events";
 import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { createMcpHandler } from "@modelcontextprotocol/server";
+import {
+  bearerAuthChallengeResponse,
+  createMcpHandler,
+  verifyBearerToken,
+  type AuthInfo
+} from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { buildServer, config, probeBrowserReady, shutdownRuntime } from "./server.js";
 import { hostAllowed, originAllowed, parseContentLength } from "./http-security.js";
 import { FirebaseAuthVerifier } from "./firebase-auth.js";
+import { CinemaOAuthServer, cinemaOAuthResourceScope } from "./oauth-server.js";
+import { FirestoreCinemaOAuthStore } from "./oauth-store.js";
 import { runWithRequestPrincipal, type RequestPrincipal } from "./request-principal.js";
 
 class HttpRequestError extends Error {
@@ -39,19 +46,31 @@ function validateProbeMethod(req: IncomingMessage, res: ServerResponse): boolean
 }
 
 async function authorize(
-  auth: FirebaseAuthVerifier,
+  oauth: CinemaOAuthServer,
   req: IncomingMessage,
   res: ServerResponse
-): Promise<RequestPrincipal | undefined> {
-  const decision = await auth.authorize(req.headers.authorization);
-  if (!decision.allowed) {
-    if (decision.status === 401) {
-      res.setHeader("www-authenticate", 'Bearer realm="japan-cinema-browser-mcp", error="invalid_token"');
-    }
-    reject(res, decision.status, decision.code);
+): Promise<{ principal: RequestPrincipal; authInfo: AuthInfo } | undefined> {
+  const authorization = Array.isArray(req.headers.authorization) ? undefined : req.headers.authorization;
+  let authInfo: AuthInfo;
+  try {
+    authInfo = await verifyBearerToken(authorization, {
+      verifier: oauth.accessTokenVerifier,
+      requiredScopes: [cinemaOAuthResourceScope],
+      resourceMetadataUrl: oauth.resourceMetadataUrl
+    });
+  } catch (error) {
+    await writeWebResponse(bearerAuthChallengeResponse(error, {
+      requiredScopes: [cinemaOAuthResourceScope],
+      resourceMetadataUrl: oauth.resourceMetadataUrl
+    }), res);
     return undefined;
   }
-  return { subject: `firebase:${decision.principal.uid}` };
+  const uid = authInfo.extra?.uid;
+  if (typeof uid !== "string" || uid.length === 0) {
+    reject(res, 500, "auth_context_invalid");
+    return undefined;
+  }
+  return { principal: { subject: `firebase:${uid}` }, authInfo };
 }
 
 async function readRequestBody(req: IncomingMessage): Promise<string | undefined> {
@@ -125,8 +144,15 @@ function makeAbortController(req: IncomingMessage, res: ServerResponse): AbortCo
 }
 
 async function startHttp(): Promise<void> {
-  if (!config.auth) throw new Error("HTTP mode requires Firebase Auth configuration");
-  const auth = new FirebaseAuthVerifier(config.auth);
+  if (!config.auth || !config.oauth) throw new Error("HTTP mode requires Firebase Auth and MCP OAuth configuration");
+  const firebaseAuth = new FirebaseAuthVerifier(config.auth);
+  const { firestoreProjectId, ...oauthRuntimeConfig } = config.oauth;
+  const oauthStore = new FirestoreCinemaOAuthStore(firestoreProjectId);
+  const oauth = new CinemaOAuthServer({
+    ...oauthRuntimeConfig,
+    firebaseWebApiKey: config.auth.webApiKey,
+    allowedFirebaseUids: config.auth.allowedUids
+  }, oauthStore, firebaseAuth);
   const mcpHandler = createMcpHandler(() => buildServer());
   const httpServer = createServer((req, res) => {
     if (!hostAllowed(req.headers.host, config.http.allowedHosts)) {
@@ -134,6 +160,28 @@ async function startHttp(): Promise<void> {
       return;
     }
     const requestUrl = new URL(req.url ?? "/", "http://localhost");
+    if (oauth.isPath(requestUrl.pathname)) {
+      const controller = makeAbortController(req, res);
+      void (async () => {
+        try {
+          const request = await toWebRequest(req, controller.signal);
+          const response = await oauth.handle(request);
+          await writeWebResponse(response, res);
+        } catch (error) {
+          if (error instanceof HttpRequestError) {
+            reject(res, error.status, error.code);
+            return;
+          }
+          if (!controller.signal.aborted) {
+            console.error("[japan-cinema-browser-mcp] OAuth HTTP error", {
+              errorName: error instanceof Error ? error.name : "UnknownError"
+            });
+            reject(res, 500, "oauth_handler_error");
+          }
+        }
+      })();
+      return;
+    }
     if (requestUrl.pathname === "/health") {
       if (!validateProbeMethod(req, res)) return;
       privateHeaders(res);
@@ -144,9 +192,9 @@ async function startHttp(): Promise<void> {
     if (requestUrl.pathname === "/ready") {
       if (!validateProbeMethod(req, res)) return;
       void (async () => {
-        const principal = await authorize(auth, req, res);
-        if (!principal) return;
-        await runWithRequestPrincipal(principal, async () => {
+        const authorized = await authorize(oauth, req, res);
+        if (!authorized) return;
+        await runWithRequestPrincipal(authorized.principal, async () => {
           try {
             await probeBrowserReady();
             privateHeaders(res);
@@ -174,12 +222,12 @@ async function startHttp(): Promise<void> {
     }
     const controller = makeAbortController(req, res);
     void (async () => {
-      const principal = await authorize(auth, req, res);
-      if (!principal) return;
-      await runWithRequestPrincipal({ ...principal, operationScope: randomUUID() }, async () => {
+      const authorized = await authorize(oauth, req, res);
+      if (!authorized) return;
+      await runWithRequestPrincipal({ ...authorized.principal, operationScope: randomUUID() }, async () => {
         try {
           const request = await toWebRequest(req, controller.signal);
-          const response = await mcpHandler.fetch(request);
+          const response = await mcpHandler.fetch(request, { authInfo: authorized.authInfo });
           await writeWebResponse(response, res);
         } catch (error) {
           if (error instanceof HttpRequestError) {
@@ -210,9 +258,11 @@ async function startHttp(): Promise<void> {
   console.error(`[japan-cinema-browser-mcp] Streamable HTTP listening on http://${config.http.host}:${config.http.port}/mcp`);
   console.error(`[japan-cinema-browser-mcp] Remote mode: ${config.remote.enabled ? "enabled" : "disabled"}`);
   console.error(`[japan-cinema-browser-mcp] MCP usage control: ${config.usage ? "firestore" : "disabled"}`);
+  console.error("[japan-cinema-browser-mcp] Remote authentication: OAuth 2.1 + Firebase Auth");
 
   const shutdown = async () => {
     await mcpHandler.close().catch(() => undefined);
+    await oauth.close().catch(() => undefined);
     await shutdownRuntime().catch(() => undefined);
     httpServer.closeIdleConnections();
     await new Promise<void>((resolve) => httpServer.close(() => resolve()));

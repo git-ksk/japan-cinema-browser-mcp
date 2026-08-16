@@ -89,6 +89,11 @@ export class FirebaseAuthVerifier {
   async authorize(authorizationHeader: string | string[] | undefined): Promise<FirebaseAuthDecision> {
     const idToken = extractBearer(authorizationHeader);
     if (!idToken) return { allowed: false, status: 401, code: "invalid_token" };
+    return this.verifyIdToken(idToken);
+  }
+
+  async verifyIdToken(idToken: string): Promise<FirebaseAuthDecision> {
+    if (!idToken || /\s/.test(idToken)) return { allowed: false, status: 401, code: "invalid_token" };
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.config.lookupTimeoutMs);

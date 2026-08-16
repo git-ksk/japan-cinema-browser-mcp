@@ -132,8 +132,9 @@ MCPは標準ではstdioで動作し、ログはstderrに出します。
 
 Cloud Run modeでは次を強制します。
 
-- MCP Runtime Firebase Auth ID Tokenによるapplication-layer認証
-- Firebase Authで検証したUIDをlogical principalへbind
+- MCP OAuth 2.1 resource-server / authorization-server boundary
+- RFC 9728 Protected Resource Metadata、CIMD、PKCE S256、refresh-token rotation
+- Human authorization時だけFirebase Authをidentity providerとして使用し、検証したUIDをlogical principalへbind
 - single-user Cloud Runでは許可UIDを明示allowlist
 - exact Host / Origin boundary
 - headless dedicated browser profile

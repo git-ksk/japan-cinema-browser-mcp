@@ -152,15 +152,19 @@ generic navigation/click/fillからseat selectionやcheckoutへ進み、provider
 
 Phase 3 remote runtimeは汎用browser hostingではありません。以下をsecurity invariantとします。
 
-- non-loopback bindは明示opt-in + Firebase Auth設定 + single-user UID allowlistが必須
-- Firebase ID Token / refresh tokenをrepository・ログ・MCP resultへ出さない。Refresh tokenはclient-side secure storageへ置く
+- non-loopback bindは明示opt-in + MCP OAuth/Firebase Auth設定 + single-user UID allowlistが必須
+- `/mcp` / `/ready` はCinema発行のresource-bound OAuth access tokenだけを受け付け、Firebase ID Tokenをresource credentialとして直接受け付けない
+- Protected Resource MetadataとAuthorization Server metadataをstandard well-known endpointで公開し、CIMD client metadataは明示host allowlist + exact redirect URIで検証する
+- authorization codeはPKCE S256へbindしてone-shot、refresh tokenは使用時rotation、access/refresh/code/request secretはFirestoreへraw保存せずSHA-256 document identityだけを使う
+- Firebase passwordはauthorization pageのbrowserからFirebase Authenticationへ直接送信し、Cinema server / MCP / LLMへ渡さない
+- OAuth code/token、Firebase ID/refresh tokenをrepository・ログ・MCP resultへ出さない
 - Host allowlistをexact Cloud Run hostnameへ固定する
 - remote modeはheadless必須、external CDP禁止、purchase flag false必須
 - challenge / sign-in / consentはHuman Handoffへ昇格せずfail closed
 - operation timeout超過時はdedicated browser sessionを閉じる
 - Firebase UIDからderiveしたauthenticated logical principalへMCPUsageをbindし、Firestore transactionでreserve / liable / settleする
 - usage stateへraw credential、page text、Cookie、bearer、payment/auth dataを保存しない
-- `/health` はpassive livenessのみ、browser起動を伴う `/ready` と `/mcp` はbearer必須
+- `/health` はpassive livenessのみ。browser起動を伴う `/ready` と `/mcp` はscope `mcp:tools` を持つOAuth bearer必須
 - Chromium sandboxは既定で有効。`CINEMA_ALLOW_UNSANDBOXED_CHROMIUM` はverified incompatibility時だけの明示fallback
 
 ### Provider UI Drift

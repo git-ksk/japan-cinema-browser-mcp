@@ -341,10 +341,10 @@ Phase 1 read adaptersはこのtransaction flowへ入らず、上映回のpurchas
 
 ## Remote / Cloud Run / Multi-user
 
-標準runtimeは引き続きlocal stdioです。加えて、Phase 3ではsingle-user向けのbounded Cloud Run runtimeを実装しています。Streamable HTTP entryはstatic bearerからnon-secret logical principal bindingを作り、headless dedicated browser、exact Host/Origin boundary、bounded request body、browser operation timeout、Firestore-backed usage controlを組み合わせます。
+標準runtimeは引き続きlocal stdioです。加えて、Phase 3ではsingle-user向けのbounded Cloud Run runtimeを実装しています。Streamable HTTP entryはMCP OAuth 2.1で保護し、Protected Resource Metadata、CIMD、PKCE S256、resource-bound opaque access/refresh tokenを扱います。Human authorization時だけFirebase Authでowner UIDを検証し、そのUIDからnon-secret logical principal bindingを作ります。これをheadless dedicated browser、exact Host/Origin boundary、bounded request body、browser operation timeout、Firestore-backed usage controlと組み合わせます。
 
 Cloud Run runtimeではHuman Handoffとpurchase executionを意図的に無効化します。challenge、sign-in、consentが必要になった場合は回避せずfail closedし、必要ならlocal headed stdioへ戻します。
 
-**Multi-user hostingは依然として対象外です。** 将来multi-user化する場合はprincipalごとのbrowser/profile isolation、durable operation ownership、generation fencing、secure human takeover、credential lifecycle、ambiguous payment handlingを別設計として追加する必要があります。single-user bearer runtimeをそのままmulti-userへ拡張しません。
+**Multi-user hostingは依然として対象外です。** 将来multi-user化する場合はprincipalごとのbrowser/profile isolation、durable operation ownership、generation fencing、secure human takeover、credential lifecycle、ambiguous payment handlingを別設計として追加する必要があります。single-user OAuth runtimeをそのままmulti-userへ拡張しません。
 
 Cloud Run deployment contractは [`CLOUD_RUN.md`](./CLOUD_RUN.md) を参照してください。

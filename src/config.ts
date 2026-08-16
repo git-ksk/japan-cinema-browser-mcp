@@ -47,6 +47,19 @@ function envOrigins(name: string): string[] {
   }))];
 }
 
+function publicOrigin(name: string): string | undefined {
+  const raw = process.env[name]?.trim();
+  if (!raw) return undefined;
+  const url = new URL(raw);
+  if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) {
+    throw new Error(`${name} must be an HTTPS origin`);
+  }
+  if (url.pathname !== "/" && url.pathname !== "") {
+    throw new Error(`${name} must not include a path`);
+  }
+  return url.origin;
+}
+
 function isLoopback(host: string): boolean {
   const normalized = normalizeHostname(host);
   return normalized === "localhost" || normalized === "127.0.0.1" || normalized === "::1";
@@ -73,6 +86,16 @@ export interface AppConfig {
     webApiKey: string;
     allowedUids: string[];
     lookupTimeoutMs: number;
+  };
+  oauth?: {
+    publicBaseUrl: string;
+    firestoreProjectId: string;
+    allowedClientHosts: string[];
+    authorizationRequestTtlMs: number;
+    authorizationCodeTtlMs: number;
+    accessTokenTtlMs: number;
+    refreshTokenTtlMs: number;
+    clientMetadataTimeoutMs: number;
   };
   remote: {
     enabled: boolean;
@@ -114,6 +137,8 @@ export function loadConfig(): AppConfig {
     .map((value) => value.trim())
     .filter(Boolean))];
   const authConfigured = Boolean(firebaseProjectId && firebaseWebApiKey && allowedFirebaseUids.length > 0);
+  const publicBaseUrl = publicOrigin("MCP_PUBLIC_BASE_URL");
+  const oauthAllowedClientHosts = envHosts("MCP_OAUTH_ALLOWED_CLIENT_HOSTS", []);
   if (!isLoopback(host) && !allowNonLoopback) {
     throw new Error("Non-loopback MCP_HTTP_HOST requires MCP_ALLOW_NONLOOPBACK=true");
   }
@@ -124,6 +149,12 @@ export function loadConfig(): AppConfig {
     if (!firebaseProjectId) throw new Error("CINEMA_REMOTE_MODE=true requires MCP_FIREBASE_PROJECT_ID");
     if (!firebaseWebApiKey) throw new Error("CINEMA_REMOTE_MODE=true requires MCP_FIREBASE_WEB_API_KEY");
     if (allowedFirebaseUids.length === 0) throw new Error("CINEMA_REMOTE_MODE=true requires MCP_ALLOWED_FIREBASE_UIDS");
+    if (!publicBaseUrl) throw new Error("CINEMA_REMOTE_MODE=true requires MCP_PUBLIC_BASE_URL");
+    if (oauthAllowedClientHosts.length === 0) throw new Error("CINEMA_REMOTE_MODE=true requires MCP_OAUTH_ALLOWED_CLIENT_HOSTS");
+    const publicHost = new URL(publicBaseUrl).hostname;
+    if (!envHosts("MCP_ALLOWED_HOSTS", ["localhost", "127.0.0.1", "::1"]).includes(publicHost)) {
+      throw new Error("MCP_PUBLIC_BASE_URL hostname must be present in MCP_ALLOWED_HOSTS");
+    }
   }
 
   const usageRequired = envBool("MCP_USAGE_REQUIRED", false);
@@ -161,6 +192,18 @@ export function loadConfig(): AppConfig {
         webApiKey: firebaseWebApiKey!,
         allowedUids: allowedFirebaseUids,
         lookupTimeoutMs: envInt("MCP_FIREBASE_LOOKUP_TIMEOUT_MS", 5_000, 1_000, 15_000)
+      }
+    } : {}),
+    ...(authConfigured && publicBaseUrl && oauthAllowedClientHosts.length > 0 ? {
+      oauth: {
+        publicBaseUrl,
+        firestoreProjectId: firebaseProjectId!,
+        allowedClientHosts: oauthAllowedClientHosts,
+        authorizationRequestTtlMs: envInt("MCP_OAUTH_AUTHORIZATION_TTL_SECONDS", 600, 60, 1800) * 1_000,
+        authorizationCodeTtlMs: envInt("MCP_OAUTH_CODE_TTL_SECONDS", 120, 30, 600) * 1_000,
+        accessTokenTtlMs: envInt("MCP_OAUTH_ACCESS_TTL_SECONDS", 3600, 300, 86400) * 1_000,
+        refreshTokenTtlMs: envInt("MCP_OAUTH_REFRESH_TTL_DAYS", 30, 1, 90) * 86_400_000,
+        clientMetadataTimeoutMs: envInt("MCP_OAUTH_CLIENT_METADATA_TIMEOUT_MS", 5_000, 1_000, 15_000)
       }
     } : {}),
     remote: {
