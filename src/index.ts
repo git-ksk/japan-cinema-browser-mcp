@@ -248,7 +248,14 @@ async function startHttp(): Promise<void> {
 
   httpServer.maxHeadersCount = 64;
   httpServer.headersTimeout = 10_000;
-  httpServer.requestTimeout = Math.max(40_000, config.policy.operationTimeoutMs + 5_000);
+  // find_showtimes may isolate up to three provider reads sequentially. Keep the
+  // HTTP envelope larger than that bounded aggregate (plus cold Chromium and
+  // auth/usage overhead) so the transport cannot cancel a structured partial
+  // result before the tool boundary returns it.
+  httpServer.requestTimeout = Math.max(
+    40_000,
+    Math.min(150_000, config.policy.operationTimeoutMs * 3 + 45_000)
+  );
   httpServer.keepAliveTimeout = 5_000;
 
   await new Promise<void>((resolve, rejectPromise) => {

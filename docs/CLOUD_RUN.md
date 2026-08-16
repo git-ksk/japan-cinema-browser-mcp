@@ -131,12 +131,15 @@ memory: 1 GiB
 concurrency: 1
 min instances: 0
 max instances: 1
-request timeout: 60 seconds
-browser operation timeout: 30 seconds
+request timeout: 150 seconds
+browser operation timeout: 30 seconds per explicit provider target
+find_showtimes aggregate timeout: max 120 seconds
 daily metered browser operations: 100
 ```
 
 `1 GiB` is intentional: Chromium needs more working room than a typical API-only Node process. Do not reduce memory merely to make the nominal configuration smaller without measuring browser reliability.
+
+The longer HTTP request envelope does **not** make provider reads unbounded. `CINEMA_OPERATION_TIMEOUT_MS` remains the per-provider semantic budget. `find_showtimes` runs at most three explicit targets sequentially, isolates a timed-out target, and caps the aggregate browser-work envelope at 120 seconds. The HTTP timeout only leaves room for cold Chromium startup plus OAuth/usage-control settlement so a structured partial result can reach the MCP client instead of being cut off by transport cancellation.
 
 The daily usage budget is an application guardrail, not a billing hard cap. Cloud Run health/startup work, OAuth metadata/token traffic, image storage, build minutes, and authenticated unmetered control calls remain separate. Keep billing alerts enabled and inspect actual usage.
 

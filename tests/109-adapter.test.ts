@@ -1,10 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { BrowserRuntimeError } from "../src/browser/runtime.js";
+import { BrowserRuntimeError, CinemaBrowserRuntime } from "../src/browser/runtime.js";
 import {
+  Cinemas109ReadAdapter,
   normalize109ScheduleSnapshot,
   normalize109TheaterPageSnapshot,
   normalize109TheaterSnapshot,
+  normalize109TheaterQuery,
   review109ScheduleUrl,
   type Cinemas109Theater
 } from "../src/providers/109/adapter.js";
@@ -12,6 +14,7 @@ import {
 interface TheaterRowFixture {
   label: string;
   href: string;
+  region?: string;
 }
 
 function theaterRows(count = 21): TheaterRowFixture[] {
@@ -269,4 +272,33 @@ test("109 schedule snapshot fails closed on wrong theater/date, ambiguous groupi
     ),
     (error) => error instanceof BrowserRuntimeError && error.code === "UI_STATE_CHANGED"
   );
+});
+
+
+test("109 theater query normalizes width/spacing and only uses locality labels rendered by the public theater list", async () => {
+  assert.equal(normalize109TheaterQuery(" １０９ シネマズ　ゆめが丘 "), "ゆめが丘");
+
+  const rows = theaterRows();
+  rows[7] = { label: "港北", href: "https://109cinemas.net/kohoku/", region: "関東" };
+  rows[11] = { label: "ゆめが丘", href: "https://109cinemas.net/yumegaoka/", region: "関東" };
+  for (let index = 0; index < rows.length; index += 1) rows[index]!.region ??= "東海";
+
+  const runtime = {
+    status: async () => ({ connected: true, url: "https://109cinemas.net/", provider: "109", officialSurface: true }),
+    navigateReviewed: async (url: string) => url,
+    evaluateSemanticState: async () => ({
+      url: "https://109cinemas.net/",
+      value: { markerCount: 1, boundaryCount: 1, rows }
+    })
+  } as unknown as CinemaBrowserRuntime;
+  const adapter = new Cinemas109ReadAdapter(runtime);
+
+  const fullWidth = await adapter.listTheaters("１０９ シネマズ　ゆめが丘");
+  assert.deepEqual(fullWidth.theaters.map((theater) => theater.name), ["109シネマズゆめが丘"]);
+
+  const region = await adapter.listTheaters("関東");
+  assert.deepEqual(region.theaters.map((theater) => theater.name).sort(), ["109シネマズゆめが丘", "109シネマズ港北"].sort());
+
+  const unsupportedInference = await adapter.listTheaters("横浜");
+  assert.deepEqual(unsupportedInference.theaters, [], "do not invent city aliases absent from the reviewed public theater list");
 });

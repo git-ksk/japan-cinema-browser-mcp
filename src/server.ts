@@ -13,6 +13,7 @@ import * as z from "zod/v4";
 import { loadConfig } from "./config.js";
 import { ChromeProcess } from "./browser/chrome-process.js";
 import { BrowserRuntimeError, CinemaBrowserRuntime, type CinemaIntervention } from "./browser/runtime.js";
+import { runTimedBrowserOperation } from "./browser/operation-timeout.js";
 import {
   ExecutionHandoffError,
   claimHandoffOwner,
@@ -204,55 +205,49 @@ async function executeToolTask<T>(
   toolName: string,
   args: unknown,
   resumeStrategy: HandoffResumeStrategy,
-  task: () => Promise<T>
+  task: () => Promise<T>,
+  timeoutMs = config.policy.operationTimeoutMs
 ): Promise<CallToolResult | InputRequiredResult> {
   const owner = ownerFor(toolName, args, resumeStrategy);
   try {
     const result = await operationQueue.run(async () => {
-      let timeout: NodeJS.Timeout | undefined;
-      let timedOut = false;
-      const work = (async () => {
-        const interventionBefore = executionAdapter.control.getActiveIntervention()?.id;
-        try {
-          return await task();
-        } finally {
-          const interventionAfter = executionAdapter.control.getActiveIntervention();
-          if (interventionAfter && interventionAfter.id !== interventionBefore) {
-            const boundOwner = claimHandoffOwner(
-              handoffOwners,
-              interventionAfter.id,
-              interventionAfter.status,
-              owner
-            );
-            if (!boundOwner) {
-              executionAdapter.control.cancelHumanIntervention(interventionAfter.id);
-              throw new BrowserRuntimeError(
-                "UI_STATE_CHANGED",
-                "A newly-created Human intervention could not be bound to its originating invocation and was cancelled."
+      // Cold Chromium startup is bounded separately by ChromeProcess.start(). Do
+      // not spend the semantic operation budget while the dedicated CDP session
+      // itself is being created.
+      await runtime.prepare();
+      return runTimedBrowserOperation(
+        runtime,
+        {
+          timeoutMs,
+          message: `Cinema browser operation exceeded ${timeoutMs}ms and the dedicated browser session was reset.`,
+          details: { scope: "tool", toolName }
+        },
+        async () => {
+          const interventionBefore = executionAdapter.control.getActiveIntervention()?.id;
+          try {
+            return await task();
+          } finally {
+            const interventionAfter = executionAdapter.control.getActiveIntervention();
+            if (interventionAfter && interventionAfter.id !== interventionBefore) {
+              const boundOwner = claimHandoffOwner(
+                handoffOwners,
+                interventionAfter.id,
+                interventionAfter.status,
+                owner
               );
+              if (!boundOwner) {
+                executionAdapter.control.cancelHumanIntervention(interventionAfter.id);
+                throw new BrowserRuntimeError(
+                  "UI_STATE_CHANGED",
+                  "A newly-created Human intervention could not be bound to its originating invocation and was cancelled."
+                );
+              }
+              // Human browser activity invalidates every prepared transaction confirmation.
+              purchaseGate.clear();
             }
-            // Human browser activity invalidates every prepared transaction confirmation.
-            purchaseGate.clear();
           }
         }
-      })();
-      const deadline = new Promise<never>((_resolve, reject) => {
-        timeout = setTimeout(() => {
-          timedOut = true;
-          reject(new BrowserRuntimeError(
-            "OPERATION_TIMEOUT",
-            `Cinema browser operation exceeded ${config.policy.operationTimeoutMs}ms and the dedicated browser session was reset.`
-          ));
-        }, config.policy.operationTimeoutMs);
-      });
-      try {
-        return await Promise.race([work, deadline]);
-      } catch (error) {
-        if (timedOut) await runtime.close().catch(() => undefined);
-        throw error;
-      } finally {
-        if (timeout) clearTimeout(timeout);
-      }
+      );
     });
     return jsonResult(result);
   } catch (error) {
@@ -279,10 +274,11 @@ async function runToolWithHandoffUnmetered<T>(input: {
   resumeStrategy: HandoffResumeStrategy;
   ctx: ServerContext;
   task: () => Promise<T>;
+  timeoutMs?: number;
 }): Promise<CallToolResult | InputRequiredResult> {
   const state = input.ctx.mcpReq.requestState<HandoffRequestState>();
   if (!state) {
-    return executeToolTask(input.toolName, input.args, input.resumeStrategy, input.task);
+    return executeToolTask(input.toolName, input.args, input.resumeStrategy, input.task, input.timeoutMs);
   }
 
   if (!handoffStateMatchesInvocation(state, input.toolName, input.args, currentPrincipalBinding())) {
@@ -345,7 +341,7 @@ async function runToolWithHandoffUnmetered<T>(input: {
     return staleAfterInterventionResult();
   }
 
-  return executeToolTask(input.toolName, input.args, input.resumeStrategy, input.task);
+  return executeToolTask(input.toolName, input.args, input.resumeStrategy, input.task, input.timeoutMs);
 }
 
 async function runToolWithHandoff<T>(input: {
@@ -354,6 +350,7 @@ async function runToolWithHandoff<T>(input: {
   resumeStrategy: HandoffResumeStrategy;
   ctx: ServerContext;
   task: () => Promise<T>;
+  timeoutMs?: number;
 }): Promise<CallToolResult | InputRequiredResult> {
   if (!usageRuntime) return runToolWithHandoffUnmetered(input);
   const principal = currentRequestPrincipal();
@@ -381,6 +378,15 @@ function requireReadAdapter(provider: CinemaProviderId, capability: "theaters" |
   throw new ProviderPolicyError(
     "UNSUPPORTED_CAPABILITY",
     `Read adapter for '${capability}' is not available.`
+  );
+}
+
+const MAX_FIND_SHOWTIMES_TIMEOUT_MS = 120_000;
+
+function findShowtimesTimeoutMs(targetCount: number): number {
+  return Math.min(
+    MAX_FIND_SHOWTIMES_TIMEOUT_MS,
+    config.policy.operationTimeoutMs * targetCount + 5_000
   );
 }
 
@@ -598,6 +604,7 @@ export function buildServer(): McpServer {
       },
       resumeStrategy: CINEMA_HANDOFF_POLICY.navigation.resumeStrategy,
       ctx,
+      timeoutMs: findShowtimesTimeoutMs(targets.length),
       task: () => findShowtimes(
         {
           targets,
@@ -607,7 +614,23 @@ export function buildServer(): McpServer {
           ...(before ? { before } : {}),
           ...(format ? { format } : {})
         },
-        (provider) => requireReadAdapter(provider, "showtimes")
+        (provider) => requireReadAdapter(provider, "showtimes"),
+        new Date(),
+        {
+          runTarget: (target, providerTask) => runTimedBrowserOperation(
+            runtime,
+            {
+              timeoutMs: config.policy.operationTimeoutMs,
+              message: `Cinema provider '${target.provider}' read exceeded ${config.policy.operationTimeoutMs}ms and was isolated from sibling targets.`,
+              details: {
+                scope: "find_showtimes_target",
+                provider: target.provider,
+                theater: target.theater
+              }
+            },
+            providerTask
+          )
+        }
       )
     })
   );

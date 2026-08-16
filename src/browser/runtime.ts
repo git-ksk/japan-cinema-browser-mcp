@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import CDP from "chrome-remote-interface";
 import {
   ExecutionHandoffError,
@@ -207,6 +208,7 @@ function fieldExpression(query: string, value?: string): string {
 
 export class CinemaBrowserRuntime {
   private client?: CdpClient;
+  private readonly operationSignal = new AsyncLocalStorage<AbortSignal>();
   private port?: number;
   private targetId?: string;
   private readonly handoff = new ExecutionHandoffState<never, CinemaInterventionReason>();
@@ -215,6 +217,17 @@ export class CinemaBrowserRuntime {
     private readonly chrome: ChromeProcess,
     private readonly maxReadChars: number
   ) {}
+
+  runOperation<T>(signal: AbortSignal, task: () => Promise<T>): Promise<T> {
+    const parent = this.operationSignal.getStore();
+    const effective = parent ? AbortSignal.any([parent, signal]) : signal;
+    this.assertOperationActive(effective);
+    return this.operationSignal.run(effective, task);
+  }
+
+  async prepare(): Promise<void> {
+    await this.getClient();
+  }
 
   async status(): Promise<Record<string, unknown>> {
     this.handoff.assertAgentAuthority();
@@ -244,7 +257,8 @@ export class CinemaBrowserRuntime {
     const client = await this.getClient();
     const loaded = client.Page.loadEventFired();
     await client.Page.navigate({ url: url.href });
-    await Promise.race([loaded, sleep(8_000)]);
+    await Promise.race([loaded, sleep(5_000)]);
+    this.assertOperationActive();
     await this.assertNoIntervention(CINEMA_HANDOFF_POLICY.navigation.resumePolicy);
     const current = await this.assertGenericCurrentUrl(expectedProvider);
     this.handoff.advanceResourceEpoch();
@@ -256,7 +270,8 @@ export class CinemaBrowserRuntime {
     const client = await this.getClient();
     const loaded = client.Page.loadEventFired();
     await client.Page.navigate({ url: url.href });
-    await Promise.race([loaded, sleep(8_000)]);
+    await Promise.race([loaded, sleep(5_000)]);
+    this.assertOperationActive();
     await this.assertNoIntervention(CINEMA_HANDOFF_POLICY.navigation.resumePolicy);
     const current = await this.assertOfficialCurrentUrl(expectedProvider);
     this.handoff.advanceResourceEpoch();
@@ -272,6 +287,7 @@ export class CinemaBrowserRuntime {
       returnByValue: true,
       awaitPromise: true
     });
+    this.assertOperationActive();
     const value = result.result.value as { text?: unknown; truncated?: unknown } | undefined;
     return {
       url,
@@ -292,6 +308,7 @@ export class CinemaBrowserRuntime {
       returnByValue: true,
       awaitPromise: true
     });
+    this.assertOperationActive();
     const raw = Array.isArray(result.result.value) ? result.result.value : [];
     const candidates = raw
       .filter((item): item is { time: string; context: string } =>
@@ -309,6 +326,7 @@ export class CinemaBrowserRuntime {
       returnByValue: true,
       awaitPromise: true
     });
+    this.assertOperationActive();
     if (result.exceptionDetails) {
       throw new BrowserRuntimeError("UI_STATE_CHANGED", "Provider semantic reader failed against the current rendered public UI.");
     }
@@ -543,18 +561,29 @@ export class CinemaBrowserRuntime {
 
   private async getClient(): Promise<CdpClient> {
     this.handoff.assertAgentAuthority();
+    this.assertOperationActive();
     await this.ensureConnected();
+    this.assertOperationActive();
     if (!this.client) throw new BrowserRuntimeError("BROWSER_UNAVAILABLE", "Chrome DevTools client is unavailable");
     return this.client;
   }
 
   private async getVerificationClient(): Promise<CdpClient> {
+    this.assertOperationActive();
     await this.ensureConnected();
+    this.assertOperationActive();
     if (!this.client) throw new BrowserRuntimeError("BROWSER_UNAVAILABLE", "Chrome DevTools client is unavailable");
     return this.client;
   }
 
+  private assertOperationActive(signal = this.operationSignal.getStore()): void {
+    if (!signal?.aborted) return;
+    if (signal.reason instanceof BrowserRuntimeError) throw signal.reason;
+    throw new BrowserRuntimeError("OPERATION_TIMEOUT", "Cinema browser operation was aborted before completion.");
+  }
+
   private async ensureConnected(): Promise<void> {
+    this.assertOperationActive();
     if (this.client) {
       try {
         await this.client.Runtime.evaluate({ expression: "1", returnByValue: true });
@@ -568,7 +597,9 @@ export class CinemaBrowserRuntime {
 
     try {
       this.port = await this.chrome.start();
+      this.assertOperationActive();
       const targets = await CDP.List({ port: this.port });
+      this.assertOperationActive();
       const officialTargets = targets.filter((candidate) => candidate.type === "page" && Boolean(providerForUrl(candidate.url)));
       if (officialTargets.length > 1) {
         throw new BrowserRuntimeError(
@@ -580,6 +611,7 @@ export class CinemaBrowserRuntime {
       this.targetId = target.id;
       this.client = await CDP({ port: this.port, target: this.targetId });
       await Promise.all([this.client.Page.enable(), this.client.Runtime.enable(), this.client.DOM.enable()]);
+      this.assertOperationActive();
     } catch (error) {
       if (error instanceof BrowserRuntimeError) throw error;
       console.error("[japan-cinema-browser-mcp] Chrome/CDP connection failed", error);
