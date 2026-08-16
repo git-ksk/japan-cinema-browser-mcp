@@ -170,12 +170,12 @@ Exit criteria:
 
 Discovery結果:
 
-- ✅ TOHO: 公式FAQでは希望座席決定後に15分timeout、仮押さえ席は後に解放。selected=赤 / sold=黒のsemanticも公式手順に明記。v0.3.0 first providerに採用
-- ✅ 109: seat hold 10分を公式手順で確認。ただしseat clickと`次へ`のどちらでtimer開始かは不明
-- ✅ AEON: seat availabilityが随時更新され未完了予約で再度空席化することは確認できるが、hold開始点/timeoutは不明
+- ✅ TOHO: live `座席指定` surfaceまでseat clickなしで検証。entry時にvisible timer / selected seatなし。read-only safety gate通過、v0.3.0 first providerを維持
+- ✅ 109: live seat-map entry時点で10分session timer開始を確認。ただし`選択座席 0／8席`で、独立2 sessionの223席fingerprintも一致。entryだけではseat hold / availability mutationを起こさない強い証拠あり（#35）
+- 🟡 AEON: visible `予約購入`までは確認。click後のnew targetがisolated Chromeで`about:blank`のままのためlive seat map未到達。安全性ではなくpublic navigation/target handlingが未解決（#36）
 - ✅ special seatはavailabilityと分離してattributeとしてmodel化する方針
 - ✅ recommendationはconfirmed `available` のみをdefault対象とし、`unknown`を空席扱いしない
-- ⬜ TOHO live seat-map entry自体がnon-mutatingであることを実装前に再確認
+- ✅ TOHO live seat-map entryのread-only safety gateを実地確認（seat hold / material mutation / availability impactなし）
 - ⬜ TOHO `get_seat_availability`
 - ⬜ provider-neutral row / seat normalization + geometry
 - ⬜ adjacent seat grouping / preference scoring
@@ -191,7 +191,7 @@ v0.3.0 first scope:
 - center / rear / rear-middle / aisle preference scoring
 - seat state refresh / stale detection
 
-`seatMap=true` はTOHOのseat-map表示がhold/mutationを起こさないとlive public flowで確認できた場合のみ有効化します。確認できない場合はfail closedのままです。
+`seatMap=true` は、実地確認済みのTOHO read-only entryを#32でprovider-specific adapterとして実装し、seat clickなし・UI変化時fail closed・selected seatなしをtestで固定した後にのみ有効化します。
 
 `select_seats` / `seatSelection=true` はv0.3.0 first scopeに含めません。seat click / hold境界をprovider別に再レビューした場合だけ別Issueで検討します。
 

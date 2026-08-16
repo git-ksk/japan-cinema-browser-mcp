@@ -170,7 +170,7 @@ TOHOについてはまずread-only上映取得だけを有効化します。seat
 
 ## Phase 3 Seat Intelligence Discovery — 2026-08-17
 
-Phase 3 Discoveryでは、ららぽーと横浜の現行schedule surfaceまで既存read adapterで確認し、購入可能上映回がrendered public UIに表示されることを確認しました。上映回・座席controlはクリックしていません。
+Phase 3 Discoveryでは、ららぽーと横浜の現行schedule surfaceを確認した後、追加のbounded validationでvisible showtimeとvisible non-member continuationを通り、live `座席指定` surfaceまで到達しました。座席自体は一切クリックしていません。
 
 公式公開情報から確認できた境界:
 
@@ -181,7 +181,7 @@ Phase 3 Discoveryでは、ららぽーと横浜の現行schedule surfaceまで�
 - FAQでは「希望座席を決定してから15分以内」に購入完了しないとtimeout
 - 仮押さえしたseatは一定時間後に再解放
 
-このためTOHOをv0.3.0のfirst providerに選定します。ただし、公式説明は「seat-map表示だけでは一切mutationしない」とまでは明記していません。実装前にlive public flowでseat-map entry自体がnon-mutatingであることを確認できない場合、`seatMap=false`を維持します。
+このためTOHOをv0.3.0のfirst providerに選定します。追加validationではseat-map entry時にvisible countdownもselected-seat stateもなく、read-only entryの安全ゲートを通過しました。ここでの基準は「全server-side stateがゼロ」ではなく、seat hold / material reservation mutation / availability impactを起こさないことです。`seatMap`は#32のadapterとfail-closed testが完成するまでfalseを維持します。
 
 v0.3.0候補scope:
 

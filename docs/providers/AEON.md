@@ -153,7 +153,7 @@ Final purchase前:
 
 ## Phase 3 Seat Intelligence Discovery — 2026-08-17
 
-Phase 3 Discoveryでは、港北ニュータウンの現行schedule surfaceで上映回ごとの`予約購入` controlを確認しましたが、購入flowへは進入していません。
+Phase 3 Discoveryでは、港北ニュータウンの現行schedule surfaceでmovie cardをvisible `上映時間を見る`から展開し、上映回ごとのexact `予約購入` buttonまで確認しました。追加validationでbuttonをactivateしましたが、isolated headless/headed Chromeのどちらでもnew targetが`about:blank`のまま残り、live purchase seat-mapには到達していません。
 
 公式公開情報から確認できた点:
 
@@ -166,6 +166,6 @@ Phase 3 Discoveryでは、港北ニュータウンの現行schedule surfaceで�
 - D-BOX / Gold Class等はavailabilityではなくseat attributeとして扱う必要がある
 - reviewed static seat-mapでは車椅子spaceはe席リザーブ対象外と案内される
 
-一方、holdがどの操作で開始し何分継続するかは公式公開説明から確定できませんでした。したがってAEONはv0.3.0 first providerにせず、`seatMap=false / seatSelection=false`を維持します。
+一方、holdがどの操作で開始し何分継続するかは公式公開説明から確定できず、live seat-mapにもまだ到達できていません。現在の未解決点はseat-map表示が危険という証拠ではなく、public `予約購入` buttonからのbrowser target/navigation handlingです（#36）。hidden route推測やnetwork interceptionへ逃げず、`seatMap=false / seatSelection=false`を維持します。
 
 Discovery詳細: [`../PHASE3_SEAT_DISCOVERY.md`](../PHASE3_SEAT_DISCOVERY.md)
