@@ -50,3 +50,61 @@ test("reviewed navigation still fails closed immediately on an unreviewed top-le
   );
   assert.ok(Date.now() - started < 1_000);
 });
+
+
+test("reviewed click tolerates transient blank / sibling-provider URLs before the expected provider settles", async () => {
+  const runtime = runtimeWithNavigationUrls([
+    "https://www.aeoncinema.com/theater/",
+    "about:blank",
+    "https://109cinemas.net/",
+    "https://www.aeoncinema.com/cinema/kohoku/"
+  ]);
+  const mutable = runtime as unknown as {
+    resolveControl: () => Promise<{ label: string; targetUrl?: string }>;
+    clickExact: () => Promise<void>;
+  };
+  mutable.resolveControl = async () => ({ label: "港北ニュータウン" });
+  mutable.clickExact = async () => undefined;
+
+  const result = await runtime.clickReviewedControl("港北ニュータウン", "aeon");
+  assert.equal(result.url, "https://www.aeoncinema.com/cinema/kohoku/");
+});
+
+test("reviewed click still fails closed immediately when it lands on an unreviewed top-level URL", async () => {
+  const runtime = runtimeWithNavigationUrls([
+    "https://www.aeoncinema.com/theater/",
+    "https://example.com/checkout?token=secret"
+  ]);
+  const mutable = runtime as unknown as {
+    resolveControl: () => Promise<{ label: string; targetUrl?: string }>;
+    clickExact: () => Promise<void>;
+  };
+  mutable.resolveControl = async () => ({ label: "港北ニュータウン" });
+  mutable.clickExact = async () => undefined;
+  const warnings: unknown[][] = [];
+  const originalWarn = console.warn;
+  console.warn = (...args: unknown[]) => { warnings.push(args); };
+  const started = Date.now();
+
+  try {
+    await assert.rejects(
+      runtime.clickReviewedControl("港北ニュータウン", "aeon"),
+      (error: unknown) =>
+        error instanceof BrowserRuntimeError &&
+        error.code === "URL_NOT_ALLOWED" &&
+        error.details?.phase === "click_reviewed_control"
+    );
+  } finally {
+    console.warn = originalWarn;
+  }
+
+  assert.ok(Date.now() - started < 1_500);
+  assert.equal(warnings.length, 1);
+  assert.deepEqual(warnings[0]?.[1], {
+    phase: "click_reviewed_control",
+    expectedProvider: "aeon",
+    beforeUrl: "https://www.aeoncinema.com/theater/",
+    observedUrl: "https://example.com/checkout",
+    elapsedMs: (warnings[0]?.[1] as { elapsedMs: number }).elapsedMs
+  });
+});
