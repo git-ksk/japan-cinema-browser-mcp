@@ -91,3 +91,49 @@ Keep pull requests focused. The PR body should state:
 - any remaining uncertainty or provider-policy risk.
 
 A green CI result proves repository tests/builds passed; it does not prove provider terms permit every possible use, nor does it replace provider-specific live review.
+
+## Versioning, releases, and milestones
+
+This repository uses Semantic Versioning as the compatibility model, with an explicit project policy for the `0.x` initial-development period.
+
+### Public compatibility contract
+
+Version compatibility is evaluated against the repository's documented public surface, including:
+
+- MCP tool names and documented availability;
+- tool input schemas;
+- tool output schemas and documented field semantics;
+- documented error codes and error semantics;
+- documented provider capability states;
+- supported remote authentication/discovery interfaces;
+- documented operator-facing configuration and runtime requirements for supported deployment modes.
+
+Internal selectors, implementation structure, logging detail, tests, and non-contractual diagnostics are not public API by themselves. A change to an internal detail is still compatibility-relevant if it changes one of the documented behaviors above.
+
+### Version selection during `0.x`
+
+During initial development, this project deliberately applies stricter release rules than SemVer requires for `0.x`:
+
+- **patch (`0.x.Y`)** — backward-compatible bug fixes, security fixes, performance improvements, and reliability improvements that do not change the public compatibility contract;
+- **minor (`0.X.0`)** — new tools, capabilities, provider functionality, supported deployment behavior, or any breaking change to the public compatibility contract;
+- documentation, tests, CI, and internal refactors alone normally do not require a release.
+
+A security fix is not automatically a patch: if the safe fix requires a breaking public-contract change during `0.x`, it requires a minor bump. After `1.0.0`, normal SemVer rules apply: backward-compatible fixes are patch, backward-compatible features are minor, and breaking public-contract changes are major.
+
+The next version is chosen from the **entire cumulative diff from the previous release tag to the release candidate**, not from the type of the final PR. The highest required bump in that cumulative diff wins. For example, a feature followed by several bug fixes still produces a minor release.
+
+### Deployments and releases are separate
+
+A production deployment from `main` does not by itself create a package or GitHub release. `main` may be deployed for validation or operational fixes while `package.json`, tags, and the latest GitHub Release remain at the previous released version.
+
+Version bumps, release-note finalization, tags, and GitHub Releases are release activities and should be performed together through an explicit release change. Ordinary feature and bug-fix PRs must not opportunistically bump the package version.
+
+If an older supported release needs a security or critical fix while `main` already contains a higher-level change, use a dedicated release/backport branch rather than mis-versioning the cumulative `main` diff.
+
+### GitHub Milestones and Roadmap
+
+`docs/ROADMAP.md` describes long-term product phases and capability direction. GitHub Milestones, when used, represent a concrete **target release version** such as `v0.2.0`.
+
+Prefer one active next-release milestone when there is enough release scope to benefit from grouping. Issues intended for that release should be assigned to it; unrelated future work stays in the Roadmap/backlog. A Roadmap phase does not automatically imply a release version, and a release milestone does not replace the Roadmap.
+
+GitHub Projects are optional workflow visualization and are not required for the repository's Issue → PR → required checks → squash merge process.

@@ -270,7 +270,8 @@ providerごとに購入を解禁する前に必須:
 - ✅ MIT LICENSE / lockfile / deterministic `npm ci`
 - ✅ Public repository化
 - ✅ secret scanning / push protection / Dependabot / CodeQL / protected `main`
-- 🟡 npm publication packaging / release versioning / changelog policy — package release時に確定
+- ✅ release versioning / milestone policy — `CONTRIBUTING.md` で確定
+- 🟡 npm publication packaging / changelog mechanics — package release時に確定
 
 **最初のPublic releaseに購入機能は必須ではありません。**
 
