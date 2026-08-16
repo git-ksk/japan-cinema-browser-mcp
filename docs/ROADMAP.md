@@ -175,11 +175,11 @@ Discovery結果:
 - 🟡 AEON: visible `予約購入`までは確認。click後のnew targetがisolated Chromeで`about:blank`のままのためlive seat map未到達。安全性ではなくpublic navigation/target handlingが未解決（#36）
 - ✅ special seatはavailabilityと分離してattributeとしてmodel化する方針
 - ✅ recommendationはconfirmed `available` のみをdefault対象とし、`unknown`を空席扱いしない
+- ✅ provider-neutral seat contract + deterministic adjacent / center / rear / rear-middle / aisle scoring core（#31）
 - ✅ TOHO live seat-map entryのread-only safety gateを実地確認（seat hold / material mutation / availability impactなし）
 - ⬜ TOHO `get_seat_availability`
-- ⬜ provider-neutral row / seat normalization + geometry
-- ⬜ adjacent seat grouping / preference scoring
-- ⬜ seat state refresh / stale detection
+- ⬜ TOHO row / seat normalization + geometry extraction
+- ⬜ `recommend_seats` tool wiring + seat state refresh / stale detection
 
 v0.3.0 first scope:
 

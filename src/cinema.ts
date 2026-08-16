@@ -102,3 +102,62 @@ export interface CinemaReadAdapter<
   listTheaters(query?: string): Promise<TheaterListResult<P, TTheater>>;
   getShowtimes(input: ShowtimeQuery): Promise<ShowtimeResult<P, TTheater, TShowtime>>;
 }
+
+/**
+ * Live seat availability is independent from seat type. A premium, wheelchair,
+ * pair, or other special seat can still be available or unavailable.
+ */
+export type CinemaSeatState = "available" | "unavailable" | "selected" | "unknown";
+
+/** Only populate a reason when the rendered provider UI actually distinguishes it. */
+export type CinemaSeatUnavailableReason = "sold" | "blocked" | "not_for_sale" | "unknown";
+
+export type CinemaSeatAttribute =
+  | "wheelchair"
+  | "companion"
+  | "premium"
+  | "executive"
+  | "pair"
+  | "d-box"
+  | "gold-class"
+  | `provider:${string}`;
+
+/** A boundary is meaningful only when it was observed from the rendered layout. */
+export type CinemaSeatBoundary = "aisle" | "gap";
+
+export interface CinemaSeat {
+  /** Stable identity as exposed by the current provider UI, for example `H-012`. */
+  id: string;
+  row?: string;
+  number?: string;
+  state: CinemaSeatState;
+  unavailableReason?: CinemaSeatUnavailableReason;
+  attributes: CinemaSeatAttribute[];
+  /** Zero-based normalized row order supplied by the provider adapter when observable. */
+  rowIndex?: number;
+  /** Zero-based layout slot supplied by the provider adapter. Gaps should consume slots. */
+  columnIndex?: number;
+  /** Optional rendered-layout coordinates; any consistent provider-local coordinate scale is valid. */
+  x?: number;
+  y?: number;
+  leftBoundary?: CinemaSeatBoundary;
+  rightBoundary?: CinemaSeatBoundary;
+  /** Provider-declared pair/group identity. Recommendation must not split an observed group by default. */
+  groupId?: string;
+}
+
+export interface CinemaSeatMap<P extends CinemaProviderId = CinemaProviderId> {
+  provider: P;
+  theaterId: string;
+  theater?: string;
+  screen?: string;
+  /** Stable identity tying this map to exactly one rendered showtime context. */
+  showtimeIdentity: string;
+  seats: CinemaSeat[];
+  /** Screen/front edge in the rendered coordinate system, when observable. */
+  screenEdge?: "top" | "bottom" | "left" | "right";
+  /** ISO timestamp for this observation. */
+  observedAt: string;
+  /** Reviewed public seat-map URL from which these facts were observed. */
+  sourceUrl: string;
+}
