@@ -22,15 +22,15 @@ The investigation remained inside the existing safety boundary:
 - no intentional hold creation
 - `seatMap`, `seatSelection`, `checkoutPreparation`, and `purchaseSubmission` remained disabled for every provider
 
-Representative current schedule surfaces were read through the existing provider adapters for TOHO Cinemas Lalaport Yokohama, AEON Cinema Kohoku New Town, and 109 Cinemas Kohoku. The purchase/seat controls themselves were not activated.
+Representative current schedule surfaces were read through the existing provider adapters for TOHO Cinemas Lalaport Yokohama, AEON Cinema Kohoku New Town, and 109 Cinemas Kohoku. During the initial comparison, the purchase/seat controls themselves were not activated. A bounded follow-up validation then entered seat-map surfaces without clicking any seat, as recorded below.
 
 ## Provider comparison
 
 | Provider | Seat-map entry | Hold / mutation boundary | Read-only seat semantics | Geometry | Auth / challenge | Discovery result |
 |---|---|---|---|---|---|---|
-| TOHO | Official flow: choose a sellable showtime, then choose a seat. Live seat map was not entered automatically. | Official FAQ says the 15-minute purchase timeout begins after the desired seat is decided and temporarily held seats are later released. Exact seat-click vs later confirmation boundary is not stated. Seat-map display itself is not explicitly guaranteed mutation-free. | Official guide documents selected seats as red and sold seats as black. Wheelchair spaces can be selected in vit. | Facility page exposes screen capacity and wheelchair-space counts. Live row/seat DOM geometry still requires a separately reviewed non-mutating seat-map entry. | Membership is optional. No challenge was observed on the reviewed schedule surface; deeper purchase flow was not entered. | **Preferred first provider**, gated on proving seat-map entry itself is non-mutating. |
-| AEON | Official flow: press `予約購入` for a showtime, then select seats. Live purchase seat map was not entered automatically. | Exact hold start/time is **unknown**. Official guidance says availability updates continuously and seats can become available again when another reservation is not completed. | Selected seats are documented as orange. Public facility pages identify wheelchair spaces and special seat types such as D-BOX / Gold Class. Wheelchair spaces at the reviewed static seat-map surface are not bookable through e席リザーブ. | Public facility UI exposes `座席図を見る`; the reviewed static seat-map page is primarily visual and does not provide live availability. Semantic live geometry remains unverified. | Purchase without membership is supported. No challenge was observed on the schedule/static facility surfaces; deeper purchase flow was not entered. | Defer until the hold boundary is clearer. |
-| 109 | Official flow: choose a showtime, select seats, then continue. The guide also exposes a detailed-seat-map view. Live purchase seat map was not entered automatically. | Official guide states a seat hold lasts 10 minutes, in the flow after seat selection. Exact seat-click vs `次へ` start point is not stated. | Public facility UI distinguishes standard, Executive, Pair, and wheelchair seats. Dynamic availability-state semantics still need a reviewed live seat-map read. | Public facility UI exposes seat maps by theater and seat-type counts. The purchase guide warns the detailed layout may differ from actual placement. Semantic live geometry remains unverified. | Non-members can continue without joining. No challenge was observed on reviewed schedule/facility surfaces; deeper purchase flow was not entered. | Second candidate after TOHO; dynamic state semantics are less explicit. |
+| TOHO | Follow-up validation entered the live `座席指定` surface through the visible sellable showtime and visible non-member continuation. No seat was clicked. | No countdown was visible at entry, no selected-seat state was observed, and the official FAQ still places the documented 15-minute timeout after desired-seat decision. | Live legend exposes available, selected, and purchased/not-for-sale semantics. | Live seat-map surface is now reachable for semantic DOM review; extraction details belong to implementation #32. | Membership is optional; the reviewed path used the visible non-member continuation and no auth field. | **First provider gate passed** for read-only seat-map implementation. |
+| AEON | The visible movie card can be expanded and exposes exact `予約購入` buttons. Activating one created a new browser target that remained `about:blank` in the isolated probes, so the live purchase seat map was not reached. | Exact hold start/time remains **unknown** because the seat-map surface was not reached. No hold/timer/selected state was observed on the unchanged schedule surface. | Selected seats are documented as orange. Public facility pages identify wheelchair spaces and special seat types such as D-BOX / Gold Class. | Public facility UI exposes static `座席図を見る`; semantic live geometry remains unverified. | Purchase without membership is supported. No challenge was observed. | **Pending public navigation/target handling**, not deferred because of evidence of unsafe seat-map display. |
+| 109 | Follow-up validation entered the live seat-map surface by following one exact visible public showtime href; no route/query was synthesized and no seat was clicked. | Entry immediately starts a visible 10-minute purchase/session timer, but the page reports `選択座席 0／8席`. Two independent sessions showed identical per-seat state with 0 selected seats, strongly indicating entry alone does not hold seats or change availability. | Live DOM exposes row/seat identities plus available vs unavailable state; selected count remained zero. | Rendered rows expose stable seat identities suitable for semantic normalization. | Non-members can continue without joining. No challenge was observed. | **Read-only candidate after TOHO**; timed-session creation is acceptable only while seat selection remains zero. |
 
 ## Hold-boundary conclusion
 
@@ -40,19 +40,19 @@ Discovery does **not** authorize a seat click for any provider.
 
 The strongest current evidence is TOHO's official FAQ: the purchase timeout begins after the user has decided the desired seat, and a temporarily held seat is released later. This places the documented hold boundary at or after seat decision rather than at ordinary schedule browsing.
 
-This is enough to make TOHO the best first candidate, but not enough to assert that entering every current seat-map surface has zero server-side mutation. The TOHO implementation issue therefore has a mandatory pre-enable gate: if read-only seat-map entry cannot be established as non-mutating from the live public flow, `seatMap` stays disabled.
+The bounded follow-up validation passed the implementation safety gate: the visible public non-member path reached `座席指定` with no visible countdown and no selected seat. The implementation criterion is **no seat hold, material reservation mutation, or availability impact caused by read-only entry**, not literal absence of all server-side session state. `seatMap` still stays disabled until #32 implements and tests the read-only adapter.
 
 ### AEON
 
 The official instructions clearly separate showtime selection, seat selection, ticket type, payment, and final purchase. They also state that seat availability is continuously updated and an uncompleted reservation can result in seats becoming available again. They do not specify when a temporary hold starts or how long it lasts.
 
-Treat the hold boundary as unknown. `seatMap` remains disabled.
+Treat the hold boundary as unknown because the live purchase seat map has not yet been reached through the safe reviewed browser path. The current blocker is public navigation/target handling, not evidence that displaying the map is unsafe. `seatMap` remains disabled; see #36.
 
 ### 109
 
-The official purchase guide states that the seat hold is 10 minutes and warns that a selected seat may become unavailable. This appears after the seat-selection step in the documented flow, but the exact transition that starts the timer is not stated.
+Live validation clarified the boundary: the 10-minute timer is already visible immediately after seat-map entry, while the page explicitly reports `選択座席 0／8席`. A second independent browser session for the same showtime exposed the same 223 seat identities and the same 11 unavailable seats, with zero selected seats and a zero-difference per-seat state fingerprint.
 
-Treat any seat selection as mutating. A future read-only entry review must not select a seat.
+This is strong evidence that 109 creates a timed purchase/session context on entry but does **not** create a seat hold or availability mutation until a seat is selected. Treat any seat activation as mutating. A future read-only adapter may enter the map while preserving zero selected seats; see #35.
 
 ## Domain model direction
 
@@ -139,7 +139,7 @@ Planned scope:
 
 - provider-neutral seat intelligence model
 - TOHO-only `get_seat_availability`
-- TOHO-only `seatMap=true` **only after** non-mutating seat-map entry is separately verified
+- TOHO-only `seatMap=true` after #32 implements the now-verified read-only entry and fail-closed extraction
 - `recommend_seats`
 - row / seat normalization
 - adjacent seat grouping
@@ -162,6 +162,8 @@ Explicitly excluded from v0.3.0 first scope:
 - #31 — provider-neutral seat intelligence model and recommendation core
 - #32 — TOHO read-only seat availability adapter, including the non-mutating-entry gate
 - #33 — seat freshness detection and `recommend_seats`
+- #35 — future 109 read-only seat availability with explicit timed-session semantics
+- #36 — AEON public seat-map entry / browser-target handling without hidden-route discovery
 
 A `select_seats` issue should only be created after a separate provider-specific mutation/hold review. Discovery did not pass that boundary.
 
