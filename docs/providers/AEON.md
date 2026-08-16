@@ -150,3 +150,22 @@ Final purchase前:
 ## 方針
 
 イオンシネマ固有の制約がTOHO/109と異なる場合、共通化を優先して制約を弱めません。provider固有capabilityとして扱います。
+
+## Phase 3 Seat Intelligence Discovery — 2026-08-17
+
+Phase 3 Discoveryでは、港北ニュータウンの現行schedule surfaceで上映回ごとの`予約購入` controlを確認しましたが、購入flowへは進入していません。
+
+公式公開情報から確認できた点:
+
+- `予約購入`後にseat selection stepがある
+- 会員にならず購入するflowがある
+- selected seatはオレンジ色に変化する
+- seat availabilityは随時更新される
+- 他ユーザーの予約が完了しなかった場合、seatが再度availableになる場合がある
+- 港北ニュータウンの施設UIはscreen別の`座席図を見る`とseat-type/countを公開
+- D-BOX / Gold Class等はavailabilityではなくseat attributeとして扱う必要がある
+- reviewed static seat-mapでは車椅子spaceはe席リザーブ対象外と案内される
+
+一方、holdがどの操作で開始し何分継続するかは公式公開説明から確定できませんでした。したがってAEONはv0.3.0 first providerにせず、`seatMap=false / seatSelection=false`を維持します。
+
+Discovery詳細: [`../PHASE3_SEAT_DISCOVERY.md`](../PHASE3_SEAT_DISCOVERY.md)

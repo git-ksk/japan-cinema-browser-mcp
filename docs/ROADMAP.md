@@ -164,30 +164,50 @@ Exit criteria:
 
 目的: 無駄な仮押さえを作らず、表示中のseat mapを理解する。
 
-状態: ⬜ 予定
+状態: 🟡 Discovery complete / v0.3.0 implementation planned
 
-providerごとに:
+2026-08-17にTOHO / AEON / 109のPhase 3 Discoveryを実施しました。seat clickは一切行わず、公開rendered UIと公式公開手順だけからhold境界・seat semantic・geometry候補を比較しています。詳細は [`PHASE3_SEAT_DISCOVERY.md`](./PHASE3_SEAT_DISCOVERY.md) を参照してください。
 
-- ⬜ いつseat holdが発生するか確認
-- ⬜ available / unavailable / special seat等のsemantic確認
-- ⬜ row / seat label正規化
-- ⬜ aisle/gap geometry解析
-- ⬜ adjacent seat grouping
-- ⬜ seat preference scoring
-- ⬜ center / rear / rear-middle / aisle等の指定対応
-- ⬜ 不要なseat clickをしない設計
+Discovery結果:
+
+- ✅ TOHO: 公式FAQでは希望座席決定後に15分timeout、仮押さえ席は後に解放。selected=赤 / sold=黒のsemanticも公式手順に明記。v0.3.0 first providerに採用
+- ✅ 109: seat hold 10分を公式手順で確認。ただしseat clickと`次へ`のどちらでtimer開始かは不明
+- ✅ AEON: seat availabilityが随時更新され未完了予約で再度空席化することは確認できるが、hold開始点/timeoutは不明
+- ✅ special seatはavailabilityと分離してattributeとしてmodel化する方針
+- ✅ recommendationはconfirmed `available` のみをdefault対象とし、`unknown`を空席扱いしない
+- ⬜ TOHO live seat-map entry自体がnon-mutatingであることを実装前に再確認
+- ⬜ TOHO `get_seat_availability`
+- ⬜ provider-neutral row / seat normalization + geometry
+- ⬜ adjacent seat grouping / preference scoring
+- ⬜ seat state refresh / stale detection
+
+v0.3.0 first scope:
+
+- first provider: TOHO Cinemas only
+- `get_seat_availability`
+- `recommend_seats`
+- row / seat normalization
+- adjacent seat grouping
+- center / rear / rear-middle / aisle preference scoring
+- seat state refresh / stale detection
+
+`seatMap=true` はTOHOのseat-map表示がhold/mutationを起こさないとlive public flowで確認できた場合のみ有効化します。確認できない場合はfail closedのままです。
+
+`select_seats` / `seatSelection=true` はv0.3.0 first scopeに含めません。seat click / hold境界をprovider別に再レビューした場合だけ別Issueで検討します。
 
 目標tools:
 
 - `get_seat_availability`
 - `recommend_seats`
-- `select_seats`（providerレビュー後）
+- `select_seats`（将来のprovider別mutation review後のみ）
 
 Exit criteria:
 
 - seat recommendationだけなら不要な仮押さえを発生させない
-- user-intendedな1組だけを選択する
+- recommendation read/refreshがseat selectionを伴わない
 - seat state変更を検出する
+- unknown / stale / changed UIを空席として扱わずfail closedする
+- 将来seat selectionを有効化する場合、user-intendedな1組だけを選択する
 
 ## Phase 4 — Checkout Preparation / Human Handoff
 
