@@ -276,7 +276,9 @@ export class CinemaBrowserRuntime {
     await Promise.race([loaded, sleep(5_000)]);
     this.assertOperationActive();
     await this.assertNoIntervention(CINEMA_HANDOFF_POLICY.navigation.resumePolicy);
-    const current = await this.waitForExpectedOfficialUrl(client, expectedProvider);
+    const current = await this.waitForExpectedOfficialUrl(client, expectedProvider, {
+      phase: "navigate_reviewed"
+    });
     this.handoff.advanceResourceEpoch();
     return current;
   }
@@ -352,7 +354,7 @@ export class CinemaBrowserRuntime {
   }
 
   async clickReviewedControl(query: string, expectedProvider: CinemaProviderId): Promise<Record<string, unknown>> {
-    await this.assertOfficialCurrentUrl(expectedProvider);
+    const before = await this.assertOfficialCurrentUrl(expectedProvider);
     await this.assertNoIntervention(CINEMA_HANDOFF_POLICY.semantic_mutation.resumePolicy);
     const resolved = await this.resolveControl(query);
     if (isFinalPurchaseLabel(resolved.label)) {
@@ -364,7 +366,10 @@ export class CinemaBrowserRuntime {
     await this.clickExact(resolved.label);
     await sleep(350);
     await this.assertNoIntervention(CINEMA_HANDOFF_POLICY.semantic_mutation.resumePolicy);
-    const after = await this.assertOfficialCurrentUrl(expectedProvider);
+    const after = await this.waitForExpectedOfficialUrl(await this.getClient(), expectedProvider, {
+      phase: "click_reviewed_control",
+      beforeUrl: before
+    });
     this.handoff.advanceResourceEpoch();
     return { clicked: resolved.label, url: after };
   }
@@ -526,9 +531,11 @@ export class CinemaBrowserRuntime {
 
   private async waitForExpectedOfficialUrl(
     client: CdpClient,
-    expectedProvider: CinemaProviderId
+    expectedProvider: CinemaProviderId,
+    context: { phase: "navigate_reviewed" | "click_reviewed_control"; beforeUrl?: string }
   ): Promise<string> {
-    const deadline = Date.now() + REVIEWED_NAVIGATION_RETRY_MS;
+    const startedAt = Date.now();
+    const deadline = startedAt + REVIEWED_NAVIGATION_RETRY_MS;
     let lastUrl = "";
     let lastError: unknown;
     while (true) {
@@ -544,11 +551,29 @@ export class CinemaBrowserRuntime {
       }
       await sleep(Math.min(REVIEWED_NAVIGATION_POLL_MS, Math.max(0, deadline - Date.now())));
     }
+    const elapsedMs = Date.now() - startedAt;
+    console.warn("[japan-cinema-browser-mcp] reviewed navigation did not settle", {
+      phase: context.phase,
+      expectedProvider,
+      beforeUrl: context.beforeUrl ? this.sanitizeDiagnosticUrl(context.beforeUrl) : undefined,
+      observedUrl: this.sanitizeDiagnosticUrl(lastUrl),
+      elapsedMs
+    });
     throw new BrowserRuntimeError(
       "URL_NOT_ALLOWED",
       lastError instanceof Error ? lastError.message : "Current URL is not allowed",
-      { url: lastUrl }
+      { url: lastUrl, phase: context.phase, elapsedMs }
     );
+  }
+
+  private sanitizeDiagnosticUrl(value: string): string {
+    if (value === "about:blank") return value;
+    try {
+      const url = new URL(value);
+      return `${url.protocol}//${url.host}${url.pathname}`;
+    } catch {
+      return "unparseable";
+    }
   }
 
   private async assertOfficialCurrentUrl(expectedProvider?: CinemaProviderId): Promise<string> {
