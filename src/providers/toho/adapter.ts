@@ -5,6 +5,8 @@ import { assertOfficialUrl } from "../../providers.js";
 const TOHO_THEATER_LIST_URL = "https://www.tohotheater.jp/theater/find.html";
 const TOHO_SCHEDULE_PATH = /^\/net\/schedule\/(\d{3})\/TNPI2000J01\.do$/;
 const MIN_THEATER_SCHEDULE_LINKS = 20;
+const TOHO_SALE_STATE_SETTLE_ATTEMPTS = 16;
+const TOHO_SALE_STATE_SETTLE_POLL_MS = 180;
 
 export interface TohoTheater extends CinemaTheater<"toho"> {
   aliases: string[];
@@ -408,6 +410,19 @@ function assertScheduleIdentity(snapshot: ScheduleSnapshot, theater: TohoTheater
   }
 }
 
+function allShowtimesLookLikeSalePlaceholder(snapshot: ScheduleSnapshot): boolean {
+  if (!Array.isArray(snapshot.showtimes) || snapshot.showtimes.length === 0) return false;
+  const rows = snapshot.showtimes.slice(0, 160) as ShowtimeSnapshotRow[];
+  let recognized = 0;
+  for (const raw of rows) {
+    if (typeof raw?.label !== "string" || typeof raw.context !== "string") return false;
+    if (timeParts(normalizeText(raw.label)).length === 0) return false;
+    recognized += 1;
+    if (!/販売期間外/.test(normalizeText(raw.context))) return false;
+  }
+  return recognized > 0;
+}
+
 function normalizeScheduleRows(snapshot: ScheduleSnapshot, theater: TohoTheater, date: string, sourceUrl: string): TohoShowtime[] {
   assertScheduleIdentity(snapshot, theater, sourceUrl);
   if (!Array.isArray(snapshot.showtimes)) {
@@ -555,6 +570,7 @@ export class TohoReadAdapter implements CinemaReadAdapter<"toho", TohoTheater, T
     }
 
     const requestedDate = input.date;
+    let switchedRequestedDate = false;
     if (requestedDate) {
       const matches = dates.filter((candidate) => candidate.date === requestedDate);
       if (matches.length === 0) {
@@ -595,6 +611,7 @@ export class TohoReadAdapter implements CinemaReadAdapter<"toho", TohoTheater, T
         if (!selected) {
           throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO did not expose the requested date as the selected UI state after clicking it.", { date: requestedDate });
         }
+        switchedRequestedDate = true;
       }
     }
 
@@ -603,6 +620,26 @@ export class TohoReadAdapter implements CinemaReadAdapter<"toho", TohoTheater, T
     if (!date || selectedDates.length !== 1 || selectedDates[0] !== date) {
       throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO selected date is missing or ambiguous.", { selectedDates, requestedDate });
     }
+
+    if (switchedRequestedDate && allShowtimesLookLikeSalePlaceholder(semantic.value)) {
+      for (let attempt = 0; attempt < TOHO_SALE_STATE_SETTLE_ATTEMPTS; attempt += 1) {
+        await sleep(TOHO_SALE_STATE_SETTLE_POLL_MS);
+        const next = await this.runtime.evaluateSemanticState<ScheduleSnapshot>("toho", SCHEDULE_EXPRESSION);
+        assertScheduleIdentity(next.value, theater, next.url);
+        const nextDates = normalizeDateCandidates(next.value);
+        const nextSelectedDates = [...new Set(nextDates.filter((candidate) => candidate.selected).map((candidate) => candidate.date))];
+        if (nextSelectedDates.length !== 1 || nextSelectedDates[0] !== date) {
+          throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO selected date changed while waiting for the rendered sale state to settle.", {
+            expectedDate: date,
+            selectedDates: nextSelectedDates
+          });
+        }
+        semantic = next;
+        dates = nextDates;
+        if (!allShowtimesLookLikeSalePlaceholder(semantic.value)) break;
+      }
+    }
+
     let showtimes = normalizeScheduleRows(semantic.value, theater, date, semantic.url);
     if (input.movie?.trim()) {
       const needle = normalizeText(input.movie).toLocaleLowerCase("ja-JP");
