@@ -130,6 +130,12 @@ Version bumps, release-note finalization, tags, and GitHub Releases are release 
 
 If an older supported release needs a security or critical fix while `main` already contains a higher-level change, use a dedicated release/backport branch rather than mis-versioning the cumulative `main` diff.
 
+### Release notes and publication
+
+GitHub Releases are the canonical release-note history for this repository. A separate `CHANGELOG.md` is not required while the project remains small enough for GitHub Releases to provide a clear chronological record; introduce one only when maintaining a second changelog adds concrete value.
+
+Each release note should summarize user-visible capabilities, compatibility or safety-relevant changes, and the current transaction-capability boundary. Source releases do **not** imply npm publication. npm publication remains a separate explicit decision and must not be performed merely because a Git tag or GitHub Release is created.
+
 ### GitHub Milestones and Roadmap
 
 `docs/ROADMAP.md` describes long-term product phases and capability direction. GitHub Milestones, when used, represent a concrete **target release version** such as `v0.2.0`.

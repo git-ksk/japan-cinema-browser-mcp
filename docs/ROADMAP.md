@@ -271,7 +271,8 @@ providerごとに購入を解禁する前に必須:
 - ✅ Public repository化
 - ✅ secret scanning / push protection / Dependabot / CodeQL / protected `main`
 - ✅ release versioning / milestone policy — `CONTRIBUTING.md` で確定
-- 🟡 npm publication packaging / changelog mechanics — package release時に確定
+- ✅ release-note mechanics — GitHub Releasesをcanonical historyとし、現時点では独立CHANGELOGを持たない
+- 🟡 npm publication packaging / policy — 明示的なnpm publish判断まで保留
 
 **最初のPublic releaseに購入機能は必須ではありません。**
 
