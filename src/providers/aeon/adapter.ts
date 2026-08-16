@@ -6,7 +6,7 @@ const AEON_THEATER_LIST_URL = "https://www.aeoncinema.com/theater/";
 const AEON_SCHEDULE_PATH = /^\/theaters\/([a-z0-9_-]+)\/?$/;
 const MIN_REVIEWED_THEATER_COUNT = 50;
 const THEATER_READY_ATTEMPTS = 20;
-const SCHEDULE_READY_ATTEMPTS = 30;
+const SCHEDULE_READY_ATTEMPTS = 45;
 const READY_POLL_MS = 180;
 
 export interface AeonTheater extends CinemaTheater<"aeon"> {
@@ -15,6 +15,7 @@ export interface AeonTheater extends CinemaTheater<"aeon"> {
 
 export interface AeonTheaterCandidate extends AeonTheater {
   selectionLabel: string;
+  searchLabels: string[];
 }
 
 export interface AeonShowtime extends CinemaShowtime<"aeon"> {}
@@ -23,6 +24,7 @@ interface TheaterSnapshotRow {
   label?: unknown;
   href?: unknown;
   route?: unknown;
+  area?: unknown;
 }
 
 interface TheaterSnapshot {
@@ -44,6 +46,7 @@ interface ScheduleSnapshot {
   showtimes?: unknown;
   ambiguousTimeGroups?: unknown;
   emptySchedule?: unknown;
+  scheduleCardCount?: unknown;
 }
 
 const THEATER_LIST_EXPRESSION = `(() => {
@@ -63,7 +66,9 @@ const THEATER_LIST_EXPRESSION = `(() => {
     if (url.hostname !== 'www.aeoncinema.com' || !/^\\/cinema\\/[a-z0-9_-]+\\/?$/.test(url.pathname)) continue;
     const label = normalize(anchor.getAttribute('aria-label') || anchor.textContent);
     if (!label || label.length > 140) continue;
-    rows.push({ label, href: url.href, route: '' });
+    const area = anchor.closest('.c-area__area');
+    const areaLabel = normalize(area?.querySelector('.c-area__name')?.textContent);
+    rows.push({ label, href: url.href, route: '', area: areaLabel });
     if (rows.length >= 160) break;
   }
   return { headingCount, rows };
@@ -141,6 +146,34 @@ const SCHEDULE_EXPRESSION = `(() => {
     if (showtimes.length >= 180) break;
   }
 
+  // Current reviewed AEON public UI renders each movie under
+  // .p-schedule__information and each public showtime under
+  // .p-schedule__ticket. Prefer that explicit rendered structure when the
+  // generic semantic walker briefly sees no leaf ranges during hydration.
+  const scheduleCards = Array.from(document.querySelectorAll('.p-schedule__information')).filter(visible);
+  if (showtimes.length === 0 && scheduleCards.length > 0) {
+    for (const card of scheduleCards) {
+      const header = card.querySelector('.p-schedule__header');
+      const movie = normalize(header?.textContent).replace(/\s*上映時間[:：].*$/, '').trim();
+      if (!movie || movie.length > 180) continue;
+      for (const ticket of Array.from(card.querySelectorAll('.p-schedule__ticket')).filter(visible)) {
+        const label = normalize(ticket.querySelector('.p-schedule__time')?.textContent || ticket.textContent);
+        const match = label.match(timeRange);
+        if (!match?.[1] || !match[2]) continue;
+        const key = movie + '|' + match[1] + '|' + match[2];
+        if (seen.has(key)) continue;
+        seen.add(key);
+        showtimes.push({
+          movie,
+          label: match[1] + '~' + match[2],
+          context: normalize(ticket.innerText || ticket.textContent).slice(0, 260)
+        });
+        if (showtimes.length >= 180) break;
+      }
+      if (showtimes.length >= 180) break;
+    }
+  }
+
   const bodyText = normalize((document.querySelector('main') || document.body)?.innerText || '').slice(0, 12000);
   return {
     title: document.title,
@@ -149,6 +182,7 @@ const SCHEDULE_EXPRESSION = `(() => {
     dateLabels,
     showtimes,
     ambiguousTimeGroups,
+    scheduleCardCount: scheduleCards.length,
     emptySchedule: /(?:上映スケジュールはありません|上映予定はありません|上映回はありません)/.test(bodyText)
   };
 })()`;
@@ -157,8 +191,18 @@ function normalizeText(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
 
-function normalizeTheaterQuery(value: string): string {
-  return normalizeText(value).replace(/^イオンシネマ\s*/i, "").toLocaleLowerCase("ja-JP");
+export function normalizeAeonTheaterQuery(value: string): string {
+  return normalizeText(value)
+    .normalize("NFKC")
+    .replace(/\s+/g, "")
+    .replace(/^イオンシネマ(?:ズ)?/i, "")
+    .toLocaleLowerCase("ja-JP");
+}
+
+function matchesAeonTheater(candidate: AeonTheaterCandidate, query: string): boolean {
+  const needle = normalizeAeonTheaterQuery(query);
+  if (!needle) return false;
+  return candidate.searchLabels.some((label) => normalizeAeonTheaterQuery(label).includes(needle));
 }
 
 function stripFacilitySuffix(label: string): string {
@@ -209,7 +253,7 @@ function scheduleRouteFromValue(value: unknown): string | undefined {
 }
 
 function publicTheater(candidate: AeonTheaterCandidate): AeonTheater {
-  const { selectionLabel: _selectionLabel, ...theater } = candidate;
+  const { selectionLabel: _selectionLabel, searchLabels: _searchLabels, ...theater } = candidate;
   return theater;
 }
 
@@ -234,7 +278,7 @@ export function normalizeAeonTheaterSnapshot(snapshot: TheaterSnapshot, sourceUr
     if (/^(?:全て|現在地から探す|変更|閉じる|今すぐ予約|北海道|東北|関東|北越|中部|近畿|中国・四国|九州)$/.test(baseName)) continue;
     const scheduleUrl = scheduleRouteFromValue(raw.href) ?? scheduleRouteFromValue(raw.route);
     const id = scheduleUrl ? new URL(scheduleUrl).pathname.match(AEON_SCHEDULE_PATH)?.[1] ?? baseName : baseName;
-    const key = normalizeTheaterQuery(baseName);
+    const key = normalizeAeonTheaterQuery(baseName);
     if (!key) continue;
     const existing = byName.get(key);
     if (existing && existing.selectionLabel !== selectionLabel) {
@@ -243,13 +287,15 @@ export function normalizeAeonTheaterSnapshot(snapshot: TheaterSnapshot, sourceUr
         candidates: [existing.selectionLabel, selectionLabel]
       });
     }
+    const area = typeof raw.area === "string" ? normalizeText(raw.area) : "";
     byName.set(key, {
       provider: "aeon",
       id,
       name: `イオンシネマ ${baseName}`,
       sourceUrl,
       ...(scheduleUrl ? { scheduleUrl } : {}),
-      selectionLabel
+      selectionLabel,
+      searchLabels: [baseName, selectionLabel, ...(area ? [area] : [])]
     });
   }
   const theaters = [...byName.values()].sort((a, b) => a.name.localeCompare(b.name, "ja"));
@@ -309,12 +355,12 @@ function timeRange(label: string): [string, string] | undefined {
 }
 
 function scheduleIdentityMatches(snapshot: ScheduleSnapshot, theater: AeonTheaterCandidate): boolean {
-  const expected = normalizeTheaterQuery(theater.name);
+  const expected = normalizeAeonTheaterQuery(theater.name);
   const title = typeof snapshot.title === "string" ? normalizeText(snapshot.title) : "";
   const titleMatch = title.match(/^上映スケジュール[｜|]\s*(.+?)[｜|]\s*イオンシネマ/);
-  if (titleMatch?.[1] && normalizeTheaterQuery(titleMatch[1]) === expected) return true;
+  if (titleMatch?.[1] && normalizeAeonTheaterQuery(titleMatch[1]) === expected) return true;
   const names = Array.isArray(snapshot.theaterNames)
-    ? snapshot.theaterNames.filter((value): value is string => typeof value === "string").map(normalizeTheaterQuery)
+    ? snapshot.theaterNames.filter((value): value is string => typeof value === "string").map(normalizeAeonTheaterQuery)
     : [];
   return names.includes(expected);
 }
@@ -503,8 +549,7 @@ export class AeonReadAdapter implements CinemaReadAdapter<"aeon", AeonTheater, A
     }
     let theaters = normalizeAeonTheaterSnapshot(semantic.value, semantic.url);
     if (query?.trim()) {
-      const needle = normalizeTheaterQuery(query);
-      theaters = theaters.filter((theater) => normalizeTheaterQuery(theater.name).includes(needle));
+      theaters = theaters.filter((theater) => matchesAeonTheater(theater, query));
     }
     return { sourceUrl: semantic.url, theaters };
   }
@@ -518,14 +563,15 @@ export class AeonReadAdapter implements CinemaReadAdapter<"aeon", AeonTheater, A
     }
     throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON schedule did not reach a recognizable rendered semantic state.", {
       scheduleHeadingCount: semantic?.value.scheduleHeadingCount,
-      showtimeCount: Array.isArray(semantic?.value.showtimes) ? semantic.value.showtimes.length : undefined
+      showtimeCount: Array.isArray(semantic?.value.showtimes) ? semantic.value.showtimes.length : undefined,
+      scheduleCardCount: semantic?.value.scheduleCardCount
     });
   }
 
   private async resolveTheater(query: string): Promise<AeonTheaterCandidate> {
     const result = await this.readTheaterCandidates(query);
-    const needle = normalizeTheaterQuery(query);
-    const exact = result.theaters.filter((theater) => normalizeTheaterQuery(theater.name) === needle);
+    const needle = normalizeAeonTheaterQuery(query);
+    const exact = result.theaters.filter((theater) => normalizeAeonTheaterQuery(theater.name) === needle);
     const candidates = exact.length > 0 ? exact : result.theaters;
     if (candidates.length !== 1) {
       throw new BrowserRuntimeError("UI_ELEMENT_NOT_FOUND", "AEON theater name did not resolve to one unique public theater control.", {

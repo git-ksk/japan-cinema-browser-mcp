@@ -94,7 +94,7 @@
 - 一度Chromeが起動すれば操作レイテンシを抑えられる
 - 通常のユーザー操作との距離が近い
 
-Hosted/Remote/Multi-user版は当面の対象外です。将来検討する場合は、identity・browser isolation・abuse prevention・complianceを別設計として見直します。
+標準は引き続きLocal-firstです。Phase 3ではsingle-user・headless・purchase-disabled・usage-boundedなCloud Run deploymentだけを例外的にサポートします。Hosted multi-user版は対象外であり、identity・principalごとのbrowser isolation・abuse prevention・secure Human takeover・complianceを別設計として見直すまで有効化しません。
 
 ## 共通ドメインモデル
 

@@ -17,6 +17,7 @@ export interface ChromeProcessOptions {
   profileDir: string;
   externalCdpPort?: number;
   headless: boolean;
+  allowUnsandboxedChromium: boolean;
 }
 
 export function parseDevToolsActivePort(value: string): ActiveDevToolsEndpoint | undefined {
@@ -98,6 +99,7 @@ function buildChromeArgs(options: ChromeProcessOptions): string[] {
     "about:blank"
   ];
   if (options.headless) args.unshift("--headless=new");
+  if (options.allowUnsandboxedChromium) args.unshift("--no-sandbox");
   return args;
 }
 
@@ -143,6 +145,9 @@ export class ChromeProcess {
     }
 
     const executable = findChromeExecutable(this.options.executable);
+    if (this.options.allowUnsandboxedChromium) {
+      console.warn("[japan-cinema-browser-mcp] Chromium sandbox explicitly disabled for this isolated runtime");
+    }
     this.child = spawn(executable, buildChromeArgs(this.options), { stdio: "ignore" });
     let startupError: Error | undefined;
     this.child.once("error", (error) => {

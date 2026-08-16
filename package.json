@@ -22,9 +22,12 @@
     "prepack": "npm run check && npm run build"
   },
   "dependencies": {
+    "@google-cloud/firestore": "^8.7.0",
     "@modelcontextprotocol/server": "2.0.0",
     "chrome-remote-interface": "0.34.0",
     "mcp-execution-handoff": "https://github.com/git-ksk/mcp-execution-handoff/archive/c87fe17b4a9a24bda7aa42e1f40e75a491e72698.tar.gz",
+    "mcp-usage-control": "file:vendor/mcp-usage-control-0.4.0.tgz",
+    "mcp-usage-control-firestore": "file:vendor/mcp-usage-control-firestore-0.4.0.tgz",
     "zod": "4.4.3"
   },
   "devDependencies": {

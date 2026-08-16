@@ -16,11 +16,16 @@ export interface Cinemas109Theater extends CinemaTheater<"109"> {
   url: string;
 }
 
+interface Cinemas109TheaterCandidate extends Cinemas109Theater {
+  searchLabels: string[];
+}
+
 export interface Cinemas109Showtime extends CinemaShowtime<"109"> {}
 
 interface TheaterSnapshotRow {
   label?: unknown;
   href?: unknown;
+  region?: unknown;
 }
 
 interface TheaterSnapshot {
@@ -91,7 +96,14 @@ const THEATER_LIST_EXPRESSION = `(() => {
       let url;
       try { url = new URL(anchor.href, location.href); } catch { continue; }
       if (!/^\\/[a-z0-9-]+\\/$/.test(url.pathname)) continue;
-      rows.push({ label, href: url.href });
+      const group = anchor.closest('dd');
+      let region = '';
+      if (group) {
+        let sibling = group.previousElementSibling;
+        while (sibling && sibling.tagName !== 'DT') sibling = sibling.previousElementSibling;
+        region = normalize(sibling?.textContent);
+      }
+      rows.push({ label, href: url.href, region });
       if (rows.length >= 40) break;
     }
   }
@@ -232,10 +244,23 @@ function normalizeText(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
 
-function normalizeTheaterQuery(value: string): string {
+export function normalize109TheaterQuery(value: string): string {
   return normalizeText(value)
-    .replace(/^(?:109|１０９)シネマズ\s*/i, "")
+    .normalize("NFKC")
+    .replace(/\s+/g, "")
+    .replace(/^109シネマ(?:ズ)?/i, "")
     .toLocaleLowerCase("ja-JP");
+}
+
+function matches109Theater(candidate: Cinemas109TheaterCandidate, query: string): boolean {
+  const needle = normalize109TheaterQuery(query);
+  if (!needle) return false;
+  return candidate.searchLabels.some((label) => normalize109TheaterQuery(label).includes(needle));
+}
+
+function public109Theater(candidate: Cinemas109TheaterCandidate): Cinemas109Theater {
+  const { searchLabels: _searchLabels, ...theater } = candidate;
+  return theater;
 }
 
 function canonicalTheaterName(label: string): string {
@@ -313,7 +338,7 @@ export function review109ScheduleUrl(value: string, expectedTheaterId?: string):
   return { url: url.href, theaterId: match[1], date };
 }
 
-export function normalize109TheaterSnapshot(snapshot: TheaterSnapshot, sourceUrl: string): Cinemas109Theater[] {
+export function normalize109TheaterSnapshot(snapshot: TheaterSnapshot, sourceUrl: string): Cinemas109TheaterCandidate[] {
   let source: URL;
   try {
     source = assertOfficialUrl(sourceUrl, "109");
@@ -333,7 +358,7 @@ export function normalize109TheaterSnapshot(snapshot: TheaterSnapshot, sourceUrl
     throw new BrowserRuntimeError("UI_STATE_CHANGED", "109 Cinemas theater list no longer exposes the reviewed public theater block.");
   }
 
-  const byId = new Map<string, Cinemas109Theater>();
+  const byId = new Map<string, Cinemas109TheaterCandidate>();
   for (const raw of snapshot.rows.slice(0, 40) as TheaterSnapshotRow[]) {
     if (typeof raw?.label !== "string") continue;
     const name = canonicalTheaterName(raw.label);
@@ -345,15 +370,23 @@ export function normalize109TheaterSnapshot(snapshot: TheaterSnapshot, sourceUrl
       });
     }
     const id = new URL(theaterUrl).pathname.match(THEATER_ROUTE)?.[1];
-    if (!id || !normalizeTheaterQuery(name)) continue;
+    if (!id || !normalize109TheaterQuery(name)) continue;
     const existing = byId.get(id);
-    if (existing && normalizeTheaterQuery(existing.name) !== normalizeTheaterQuery(name)) {
+    if (existing && normalize109TheaterQuery(existing.name) !== normalize109TheaterQuery(name)) {
       throw new BrowserRuntimeError("UI_STATE_CHANGED", "109 Cinemas theater route resolves to multiple visible theater identities.", {
         id,
         names: [existing.name, name]
       });
     }
-    byId.set(id, { provider: "109", id, name, url: theaterUrl, sourceUrl });
+    const region = typeof raw.region === "string" ? normalizeText(raw.region) : "";
+    byId.set(id, {
+      provider: "109",
+      id,
+      name,
+      url: theaterUrl,
+      sourceUrl,
+      searchLabels: [name, normalizeText(raw.label), ...(region ? [region] : [])]
+    });
   }
 
   const theaters = [...byId.values()].sort((a, b) => a.name.localeCompare(b.name, "ja"));
@@ -377,10 +410,10 @@ function uniqueStrings(value: unknown, limit: number): string[] {
 }
 
 function theaterIdentityMatches(snapshot: TheaterPageSnapshot, theater: Cinemas109Theater): boolean {
-  const expected = normalizeTheaterQuery(theater.name);
-  const observed = uniqueStrings(snapshot.theaterNames, 8).map(normalizeTheaterQuery);
+  const expected = normalize109TheaterQuery(theater.name);
+  const observed = uniqueStrings(snapshot.theaterNames, 8).map(normalize109TheaterQuery);
   if (observed.includes(expected)) return true;
-  const title = typeof snapshot.title === "string" ? normalizeTheaterQuery(snapshot.title) : "";
+  const title = typeof snapshot.title === "string" ? normalize109TheaterQuery(snapshot.title) : "";
   return title.includes(expected);
 }
 
@@ -506,7 +539,7 @@ function scheduleDateMatches(snapshot: ScheduleSnapshot, date: string): boolean 
 
 function scheduleTitleMatches(snapshot: ScheduleSnapshot, theater: Cinemas109Theater): boolean {
   if (typeof snapshot.title !== "string") return false;
-  return normalizeTheaterQuery(snapshot.title).includes(normalizeTheaterQuery(theater.name));
+  return normalize109TheaterQuery(snapshot.title).includes(normalize109TheaterQuery(theater.name));
 }
 
 export function normalize109ScheduleSnapshot(
@@ -647,12 +680,10 @@ export class Cinemas109ReadAdapter implements CinemaReadAdapter<"109", Cinemas10
 
   async listTheaters(query?: string): Promise<TheaterListResult<"109", Cinemas109Theater>> {
     const result = await this.readTheaters();
-    let theaters = result.theaters;
-    if (query?.trim()) {
-      const needle = normalizeTheaterQuery(query);
-      theaters = theaters.filter((theater) => normalizeTheaterQuery(theater.name).includes(needle));
-    }
-    return { provider: "109", sourceUrl: result.sourceUrl, theaters };
+    const candidates = query?.trim()
+      ? result.theaters.filter((theater) => matches109Theater(theater, query))
+      : result.theaters;
+    return { provider: "109", sourceUrl: result.sourceUrl, theaters: candidates.map(public109Theater) };
   }
 
   async getShowtimes(input: ShowtimeQuery): Promise<ShowtimeResult<"109", Cinemas109Theater, Cinemas109Showtime>> {
@@ -676,7 +707,7 @@ export class Cinemas109ReadAdapter implements CinemaReadAdapter<"109", Cinemas10
     if (!requested) {
       return {
         provider: "109",
-        theater,
+        theater: public109Theater(theater),
         date,
         dateAvailable: false,
         availableDates,
@@ -707,7 +738,7 @@ export class Cinemas109ReadAdapter implements CinemaReadAdapter<"109", Cinemas10
     }
     return {
       provider: "109",
-      theater,
+      theater: public109Theater(theater),
       date,
       dateAvailable: true,
       availableDates,
@@ -716,7 +747,7 @@ export class Cinemas109ReadAdapter implements CinemaReadAdapter<"109", Cinemas10
     };
   }
 
-  private async readTheaters(): Promise<{ sourceUrl: string; theaters: Cinemas109Theater[] }> {
+  private async readTheaters(): Promise<{ sourceUrl: string; theaters: Cinemas109TheaterCandidate[] }> {
     const status = await this.runtime.status();
     const currentUrl = typeof status.url === "string" ? status.url : "";
     if (!isTheaterListUrl(currentUrl)) {
@@ -736,13 +767,13 @@ export class Cinemas109ReadAdapter implements CinemaReadAdapter<"109", Cinemas10
     return { sourceUrl: semantic.url, theaters: normalize109TheaterSnapshot(semantic.value, semantic.url) };
   }
 
-  private async resolveTheater(query: string): Promise<Cinemas109Theater> {
+  private async resolveTheater(query: string): Promise<Cinemas109TheaterCandidate> {
     const result = await this.readTheaters();
-    const needle = normalizeTheaterQuery(query);
-    const exact = result.theaters.filter((theater) => normalizeTheaterQuery(theater.name) === needle);
+    const needle = normalize109TheaterQuery(query);
+    const exact = result.theaters.filter((theater) => normalize109TheaterQuery(theater.name) === needle);
     const candidates = exact.length > 0
       ? exact
-      : result.theaters.filter((theater) => normalizeTheaterQuery(theater.name).includes(needle));
+      : result.theaters.filter((theater) => matches109Theater(theater, query));
     if (candidates.length !== 1) {
       throw new BrowserRuntimeError("UI_ELEMENT_NOT_FOUND", "109 Cinemas theater name did not resolve to one unique public theater link.", {
         query,

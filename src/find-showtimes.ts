@@ -46,6 +46,14 @@ export interface FindShowtimesResult {
 }
 
 export type CinemaReadAdapterResolver = (provider: CinemaProviderId) => CinemaReadAdapter;
+export type FindShowtimesTargetRunner = <T>(
+  target: FindShowtimesTarget,
+  task: () => Promise<T>
+) => Promise<T>;
+
+export interface FindShowtimesOptions {
+  runTarget?: FindShowtimesTargetRunner;
+}
 
 const ISO_DATE = /^20\d{2}-\d{2}-\d{2}$/;
 const CLOCK_TIME = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
@@ -134,7 +142,8 @@ function filterShowtimes(showtimes: CinemaShowtime[], input: FindShowtimesQuery)
 export async function findShowtimes(
   input: FindShowtimesQuery,
   adapterFor: CinemaReadAdapterResolver,
-  now = new Date()
+  now = new Date(),
+  options: FindShowtimesOptions = {}
 ): Promise<FindShowtimesResult> {
   if (input.targets.length < 1 || input.targets.length > 3) {
     throw new Error("find_showtimes requires between 1 and 3 explicit provider/theater targets");
@@ -155,11 +164,14 @@ export async function findShowtimes(
   for (let targetIndex = 0; targetIndex < input.targets.length; targetIndex += 1) {
     const target = input.targets[targetIndex]!;
     try {
-      const result = await adapterFor(target.provider).getShowtimes({
+      const read = () => adapterFor(target.provider).getShowtimes({
         theater: target.theater,
         date,
         ...(input.movie ? { movie: input.movie } : {})
       });
+      const result = options.runTarget
+        ? await options.runTarget(target, read)
+        : await read();
       const violation = validateResult(target, date, result);
       if (violation) {
         failures.push({
@@ -178,7 +190,10 @@ export async function findShowtimes(
       }
     } catch (error) {
       if (!(error instanceof BrowserRuntimeError) && !(error instanceof ProviderPolicyError)) {
-        console.error("[japan-cinema-browser-mcp] unexpected find_showtimes provider error", target.provider, error);
+        console.error("[japan-cinema-browser-mcp] unexpected find_showtimes provider error", {
+          provider: target.provider,
+          errorName: error instanceof Error ? error.name : "UnknownError"
+        });
       }
       failures.push(normalizedFailure(target, error));
     }
