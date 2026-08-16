@@ -8,6 +8,8 @@ const MIN_REVIEWED_THEATER_COUNT = 50;
 const THEATER_READY_ATTEMPTS = 20;
 const SCHEDULE_READY_ATTEMPTS = 45;
 const READY_POLL_MS = 180;
+const RENDERED_SCHEDULE_LINK_ATTEMPTS = 16;
+const RENDERED_SCHEDULE_LINK_POLL_MS = 500;
 
 export interface AeonTheater extends CinemaTheater<"aeon"> {
   scheduleUrl?: string;
@@ -72,6 +74,23 @@ const THEATER_LIST_EXPRESSION = `(() => {
     if (rows.length >= 160) break;
   }
   return { headingCount, rows };
+})()`;
+
+
+const RENDERED_SCHEDULE_LINK_EXPRESSION = `(() => {
+  const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+  const visible = (el) => {
+    const r = el.getBoundingClientRect();
+    const s = getComputedStyle(el);
+    return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
+  };
+  const matches = Array.from(document.querySelectorAll('a[href]'))
+    .filter((el) => normalize(el.getAttribute('aria-label') || el.textContent) === '上映スケジュールを確認する')
+    .filter(visible);
+  return {
+    matchCount: matches.length,
+    href: matches.length === 1 ? matches[0].href : null
+  };
 })()`;
 
 const SCHEDULE_EXPRESSION = `(() => {
@@ -614,15 +633,19 @@ export class AeonReadAdapter implements CinemaReadAdapter<"aeon", AeonTheater, A
   }
 
   private async openScheduleThroughPublicUi(theater: AeonTheaterCandidate): Promise<string> {
-    await this.timedPhase(
+    const theaterClick = await this.timedPhase(
       "click_theater_control",
       () => this.runtime.clickReviewedControl(theater.selectionLabel, "aeon")
     );
-    const direct = await this.timedPhase(
-      "wait_direct_schedule_url",
-      () => this.waitForScheduleUrl(6, READY_POLL_MS)
-    );
+    const clickedUrl = typeof theaterClick.url === "string" ? theaterClick.url : undefined;
+    const direct = clickedUrl ? scheduleUrlFromCurrent(clickedUrl) : undefined;
     if (direct) return direct;
+
+    const renderedScheduleUrl = await this.timedPhase(
+      "read_rendered_schedule_link",
+      () => this.readRenderedScheduleUrl()
+    );
+    if (renderedScheduleUrl) return renderedScheduleUrl;
 
     await this.timedPhase(
       "click_schedule_control",
@@ -638,6 +661,35 @@ export class AeonReadAdapter implements CinemaReadAdapter<"aeon", AeonTheater, A
       });
     }
     return scheduleUrl;
+  }
+
+  private async readRenderedScheduleUrl(): Promise<string | undefined> {
+    for (let attempt = 0; attempt < RENDERED_SCHEDULE_LINK_ATTEMPTS; attempt += 1) {
+      const semantic = await this.runtime.evaluateSemanticState<{ matchCount?: unknown; href?: unknown }>(
+        "aeon",
+        RENDERED_SCHEDULE_LINK_EXPRESSION
+      );
+      const matchCount = typeof semantic.value.matchCount === "number" ? semantic.value.matchCount : 0;
+      if (matchCount > 1) {
+        throw new BrowserRuntimeError(
+          "UI_STATE_CHANGED",
+          "AEON rendered schedule control is no longer unique on the public theater page.",
+          { matchCount }
+        );
+      }
+      if (typeof semantic.value.href === "string" && semantic.value.href) {
+        const scheduleUrl = scheduleRouteFromValue(semantic.value.href);
+        if (!scheduleUrl) {
+          throw new BrowserRuntimeError(
+            "UI_STATE_CHANGED",
+            "AEON rendered schedule control no longer points to the reviewed public schedule route."
+          );
+        }
+        return scheduleUrl;
+      }
+      await sleep(RENDERED_SCHEDULE_LINK_POLL_MS);
+    }
+    return undefined;
   }
 
   private async clickControlWhenAvailable(label: string, attempts: number): Promise<void> {
