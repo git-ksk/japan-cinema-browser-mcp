@@ -265,3 +265,68 @@ test("AEON theater query normalizes width/spacing and searches only rendered are
   const unsupportedInference = await adapter.listTheaters("横浜");
   assert.deepEqual(unsupportedInference.theaters, [], "do not infer city aliases not present in the public theater list");
 });
+
+test("AEON adopts the unique visible rendered schedule href before falling back to control clicking", async () => {
+  const rows = theaterRows();
+  rows[0] = {
+    label: "港北ニュータウン ULTILA D-BOX",
+    href: "https://www.aeoncinema.com/cinema/kohoku/",
+    area: "神奈川"
+  };
+  const states = [
+    {
+      url: "https://www.aeoncinema.com/theater/",
+      value: { headingCount: 1, rows }
+    },
+    {
+      url: "https://www.aeoncinema.com/cinema/kohoku/",
+      value: {
+        matchCount: 1,
+        href: "https://theater.aeoncinema.com/theaters/kohoku/"
+      }
+    },
+    {
+      url: "https://theater.aeoncinema.com/theaters/kohoku/?date=20260816",
+      value: {
+        title: "上映スケジュール｜港北ニュータウン｜イオンシネマ",
+        scheduleHeadingCount: 1,
+        theaterNames: ["イオンシネマ 港北ニュータウン"],
+        dateLabels: ["8/16（日）"],
+        ambiguousTimeGroups: 0,
+        showtimes: [{
+          movie: "字幕 スパイダーマン：ブランド・ニュー・デイ",
+          label: "19:25~22:05",
+          context: "字幕 スパイダーマン：ブランド・ニュー・デイ 19:25~22:05 スクリーン2"
+        }],
+        emptySchedule: false
+      }
+    }
+  ];
+  let stateIndex = 0;
+  const clicks: string[] = [];
+  const navigations: string[] = [];
+  const runtime = {
+    status: async () => ({ connected: true, url: "https://www.aeoncinema.com/theater/", provider: "aeon", officialSurface: true }),
+    navigateReviewed: async (url: string) => { navigations.push(url); return url; },
+    evaluateSemanticState: async () => {
+      const state = states[stateIndex++];
+      if (!state) throw new Error("fake semantic state exhausted");
+      return state;
+    },
+    clickReviewedControl: async (label: string) => {
+      clicks.push(label);
+      return { clicked: label, url: "https://www.aeoncinema.com/cinema/kohoku/" };
+    }
+  } as unknown as CinemaBrowserRuntime;
+
+  const result = await new AeonReadAdapter(runtime).getShowtimes({
+    theater: "港北ニュータウン",
+    date: "2026-08-16",
+    movie: "スパイダーマン"
+  });
+
+  assert.deepEqual(clicks, ["港北ニュータウン ULTILA D-BOX"]);
+  assert.deepEqual(navigations, ["https://theater.aeoncinema.com/theaters/kohoku/?date=20260816"]);
+  assert.equal(result.showtimes.length, 1);
+  assert.equal(result.showtimes[0]?.startTime, "19:25");
+});
