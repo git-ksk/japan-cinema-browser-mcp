@@ -33,7 +33,7 @@ import {
 import { createCinemaExecutionAdapter } from "./cinema-execution-adapter.js";
 import { OperationQueue } from "./operation-queue.js";
 import { CINEMA_HANDOFF_POLICY } from "./handoff-policy.js";
-import { SHOWTIME_FORMATS, type CinemaReadAdapter } from "./cinema.js";
+import { SHOWTIME_FORMATS, type CinemaReadAdapter, type CinemaSeatReadAdapter } from "./cinema.js";
 import { findShowtimes } from "./find-showtimes.js";
 import { resolveTheaterTargets } from "./resolve-theater-targets.js";
 import {
@@ -381,6 +381,15 @@ function requireReadAdapter(provider: CinemaProviderId, capability: "theaters" |
   );
 }
 
+function requireSeatAdapter(provider: CinemaProviderId): CinemaSeatReadAdapter {
+  assertProviderCapability(provider, "seatMap");
+  if (provider === "toho") return tohoReadAdapter;
+  throw new ProviderPolicyError(
+    "UNSUPPORTED_CAPABILITY",
+    `Read-only seat-map adapter for '${provider}' is not available.`
+  );
+}
+
 function findShowtimesTimeoutMs(targetCount: number): number {
   // Input is capped at three targets and operationTimeoutMs is capped by config,
   // so this remains bounded while still giving every target its full isolated
@@ -535,6 +544,36 @@ export function buildServer(): McpServer {
   );
 
   server.registerTool(
+    "get_seat_availability",
+    {
+      title: "Get cinema seat availability",
+      description: "Enter one exact reviewed public TOHO Cinemas showtime in read-only mode and return rendered seat identities, availability, and layout geometry. This never clicks a seat and does not support seat selection, checkout, payment, or purchase. Other providers remain disabled until separately reviewed.",
+      inputSchema: z.object({
+        provider: providerSchema,
+        theater: shortText,
+        date: isoDate,
+        movie: shortText,
+        startTime: clockTime,
+        screen: z.string().trim().min(1).max(40).optional()
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true }
+    },
+    async ({ provider, theater, date, movie, startTime, screen }, ctx) => runToolWithHandoff({
+      toolName: "get_seat_availability",
+      args: { provider, theater, date, movie, startTime, ...(screen ? { screen } : {}) },
+      resumeStrategy: CINEMA_HANDOFF_POLICY.navigation.resumeStrategy,
+      ctx,
+      task: () => requireSeatAdapter(provider).getSeatAvailability({
+        theater,
+        date,
+        movie,
+        startTime,
+        ...(screen ? { screen } : {})
+      })
+    })
+  );
+
+  server.registerTool(
     "resolve_theater_targets",
     {
       title: "Resolve external cinema place candidates",
@@ -637,7 +676,7 @@ export function buildServer(): McpServer {
     "click_cinema_control",
     {
       title: "Click cinema control",
-      description: "Click one uniquely matching visible control only when it stays within reviewed public read surfaces or is an explicitly reviewed read-only interaction. Seat, checkout, and purchase workflow controls are gated by provider capabilities and are currently disabled.",
+      description: "Click one uniquely matching visible control only when it stays within reviewed public read surfaces or is an explicitly reviewed read-only interaction. Seat selection, checkout, and purchase workflow controls are gated by provider capabilities and remain disabled. Read-only seat-map entry is available only through the dedicated reviewed provider tool.",
       inputSchema: z.object({ label: shortText }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false }
     },

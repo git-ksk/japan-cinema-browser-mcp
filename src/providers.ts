@@ -35,7 +35,8 @@ export const CINEMA_PROVIDERS: Record<CinemaProviderId, CinemaProviderDefinition
     capabilities: {
       theaters: true,
       showtimes: true,
-      ...NO_TRANSACTION_CAPABILITIES
+      ...NO_TRANSACTION_CAPABILITIES,
+      seatMap: true
     }
   },
   aeon: {
@@ -233,6 +234,14 @@ export function assertGenericControlAllowed(
   throw new ProviderPolicyError(
     "UNREVIEWED_INTERACTION",
     "Generic script-driven controls are limited to explicitly reviewed read-only interactions. Use a provider adapter for provider-specific reviewed UI flows."
+  );
+}
+
+export function assertReviewedIntermediateControlAllowed(providerId: CinemaProviderId, label: string): void {
+  if (providerId === "toho" && label.trim() === "ログインせずに購入する") return;
+  throw new ProviderPolicyError(
+    "UNREVIEWED_INTERACTION",
+    "This provider-specific intermediate control has not been reviewed for automated use."
   );
 }
 

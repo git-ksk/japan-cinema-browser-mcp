@@ -7,6 +7,7 @@ import {
   assertGenericFieldAllowed,
   assertGenericNavigationUrl,
   assertOfficialUrl,
+  assertReviewedIntermediateControlAllowed,
   assertProviderCapability,
   isFinalPurchaseLabel,
   isSensitiveFieldLabel,
@@ -36,11 +37,11 @@ test("lookalike, insecure, credentialed and non-default-port URLs are rejected",
   assert.throws(() => assertOfficialUrl("https://example.com/"));
 });
 
-test("TOHO, AEON and 109 expose read-only Phase 1 capabilities while transaction capabilities remain disabled", () => {
+test("TOHO exposes reviewed read-only seatMap while all providers keep seat selection and transaction capabilities disabled", () => {
   for (const provider of [CINEMA_PROVIDERS.toho, CINEMA_PROVIDERS.aeon, CINEMA_PROVIDERS["109"]]) {
     assert.equal(provider.capabilities.theaters, true, provider.id);
     assert.equal(provider.capabilities.showtimes, true, provider.id);
-    assert.equal(provider.capabilities.seatMap, false, provider.id);
+    assert.equal(provider.capabilities.seatMap, provider.id === "toho", provider.id);
     assert.equal(provider.capabilities.seatSelection, false, provider.id);
     assert.equal(provider.capabilities.checkoutPreparation, false, provider.id);
     assert.equal(provider.capabilities.purchaseSubmission, false, provider.id);
@@ -56,12 +57,16 @@ test("provider capability matrix is enforced as a runtime policy boundary", () =
     assert.doesNotThrow(() => assertProviderCapability(providerId, "showtimes"));
   }
 
-  for (const provider of Object.values(CINEMA_PROVIDERS)) {
+  assert.doesNotThrow(() => assertProviderCapability("toho", "seatMap"));
+  for (const providerId of ["aeon", "109"] as const) {
     assert.throws(
-      () => assertProviderCapability(provider.id, "seatMap"),
+      () => assertProviderCapability(providerId, "seatMap"),
       (error) => error instanceof ProviderPolicyError && error.code === "UNSUPPORTED_CAPABILITY",
-      provider.id
+      providerId
     );
+  }
+
+  for (const provider of Object.values(CINEMA_PROVIDERS)) {
     assert.throws(
       () => assertProviderCapability(provider.id, "seatSelection"),
       (error) => error instanceof ProviderPolicyError && error.code === "UNSUPPORTED_CAPABILITY",
@@ -179,6 +184,26 @@ test("generic controls allow reviewed read navigation but reject unknown script-
   assert.throws(
     () => assertGenericControlAllowed("109", "詳細", "https://109cinemas.net/api/internal"),
     (error) => error instanceof ProviderPolicyError && error.code === "URL_NOT_ALLOWED"
+  );
+});
+
+
+test("TOHO non-member continuation is allowed only through the exact provider-specific reviewed intermediate policy", () => {
+  assert.doesNotThrow(() => assertReviewedIntermediateControlAllowed("toho", "ログインせずに購入する"));
+  for (const [provider, label] of [
+    ["aeon", "ログインせずに購入する"],
+    ["109", "ログインせずに購入する"],
+    ["toho", "購入する"],
+    ["toho", "ログインせずに購入を続ける"]
+  ] as const) {
+    assert.throws(
+      () => assertReviewedIntermediateControlAllowed(provider, label),
+      (error) => error instanceof ProviderPolicyError && error.code === "UNREVIEWED_INTERACTION"
+    );
+  }
+  assert.throws(
+    () => assertGenericControlAllowed("toho", "ログインせずに購入する"),
+    (error) => error instanceof ProviderPolicyError && error.code === "UNSUPPORTED_CAPABILITY"
   );
 });
 

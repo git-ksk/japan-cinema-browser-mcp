@@ -164,7 +164,7 @@ Exit criteria:
 
 目的: 無駄な仮押さえを作らず、表示中のseat mapを理解する。
 
-状態: 🟡 Discovery complete / v0.3.0 implementation planned
+状態: 🟡 v0.3.0 implementation in progress — TOHO read-only seat map complete
 
 2026-08-17にTOHO / AEON / 109のPhase 3 Discoveryを実施しました。seat clickは一切行わず、公開rendered UIと公式公開手順だけからhold境界・seat semantic・geometry候補を比較しています。詳細は [`PHASE3_SEAT_DISCOVERY.md`](./PHASE3_SEAT_DISCOVERY.md) を参照してください。
 
@@ -177,8 +177,8 @@ Discovery結果:
 - ✅ recommendationはconfirmed `available` のみをdefault対象とし、`unknown`を空席扱いしない
 - ✅ provider-neutral seat contract + deterministic adjacent / center / rear / rear-middle / aisle scoring core（#31）
 - ✅ TOHO live seat-map entryのread-only safety gateを実地確認（seat hold / material mutation / availability impactなし）
-- ⬜ TOHO `get_seat_availability`
-- ⬜ TOHO row / seat normalization + geometry extraction
+- ✅ TOHO `get_seat_availability`（#32）
+- ✅ TOHO row / seat normalization + rendered gap geometry extraction（#32）
 - ⬜ `recommend_seats` tool wiring + seat state refresh / stale detection
 
 v0.3.0 first scope:
@@ -191,7 +191,7 @@ v0.3.0 first scope:
 - center / rear / rear-middle / aisle preference scoring
 - seat state refresh / stale detection
 
-`seatMap=true` は、実地確認済みのTOHO read-only entryを#32でprovider-specific adapterとして実装し、seat clickなし・UI変化時fail closed・selected seatなしをtestで固定した後にのみ有効化します。
+TOHOは#32でprovider-specific read-only adapter / fail-closed test / isolated live smokeまで完了したため `seatMap=true`。AEON / 109はfalseのままです。3社とも `seatSelection=false` を維持します。
 
 `select_seats` / `seatSelection=true` はv0.3.0 first scopeに含めません。seat click / hold境界をprovider別に再レビューした場合だけ別Issueで検討します。
 
@@ -227,7 +227,7 @@ Exit criteria:
 - ✅ Human intervention開始時のprepared purchase confirmation破棄
 - ⬜ provider-specific checkout summary正規化
 
-`seatMap` / `seatSelection` / `checkoutPreparation` / `purchaseSubmission` は引き続き全providerでfalseです。Human Handoff実装はtransaction capabilityの解禁を意味しません。
+TOHOのread-only `seatMap` だけがPhase 3でtrueになりました。`seatSelection` / `checkoutPreparation` / `purchaseSubmission` は引き続き全providerでfalseです。Human Handoff実装はtransaction capabilityの解禁を意味しません。
 
 目標tool:
 

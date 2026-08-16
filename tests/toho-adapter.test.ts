@@ -4,6 +4,7 @@ import { BrowserRuntimeError, CinemaBrowserRuntime } from "../src/browser/runtim
 import {
   TohoReadAdapter,
   normalizeTohoDateLabel,
+  normalizeTohoSeatSnapshot,
   normalizeTohoTheaterSnapshot
 } from "../src/providers/toho/adapter.js";
 
@@ -103,7 +104,7 @@ test("TOHO showtime normalization returns compact semantic facts and does not mi
           {
             label: "10:00 ～ 12:05",
             titleCandidates: ["映画A"],
-            context: "IMAXレーザー 字幕 スクリーン 7 残席わずか"
+            context: "IMAXレーザー 字幕 スクリーン７ 残席わずか"
           },
           {
             label: "13:00 販売開始 12:00",
@@ -299,4 +300,184 @@ test("TOHO verifies theater route and identity before returning an unavailable d
     () => adapter.getShowtimes({ theater: "テスト1", date: "2026-08-14" }),
     (error) => error instanceof BrowserRuntimeError && error.code === "UI_STATE_CHANGED"
   );
+});
+
+
+test("TOHO seat-map normalization derives read-only availability and preserves physical gaps without executing seat controls", () => {
+  const theater = {
+    provider: "toho" as const,
+    id: "036",
+    name: "TOHOシネマズ ららぽーと横浜",
+    aliases: ["TOHOシネマズ ららぽーと横浜"],
+    url: "https://hlo.tohotheater.jp/net/schedule/036/TNPI2000J01.do",
+    sourceUrl: THEATER_LIST_URL
+  };
+  const showtime = {
+    provider: "toho" as const,
+    theaterId: "036",
+    theater: theater.name,
+    date: "2026-08-17",
+    movie: "映画A",
+    startTime: "21:10",
+    endTime: "23:05",
+    formats: [],
+    screen: "3",
+    availability: "unknown" as const,
+    sourceUrl: theater.url
+  };
+  const rawSeats = Array.from({ length: 20 }, (_, index) => {
+    const number = String(index + 1);
+    return {
+      id: `C-${number}`,
+      row: "C",
+      number,
+      src: index === 18 ? "seat_0.gif" : index === 19 ? "seat_2.gif" : "seat_1.gif",
+      onclick: index >= 18 ? "" : `JavaScript:seatSelect('C','${number}', '1');`,
+      x: index < 10 ? index : index + 2,
+      y: 10
+    };
+  });
+  rawSeats.push(
+    { id: "HC-1", row: "HC", number: "1", src: "seat_4.gif", onclick: "JavaScript:seatSelect('HC','1', '1');", x: 10, y: 10 },
+    { id: "HC-2", row: "HC", number: "2", src: "seat_4.gif", onclick: "JavaScript:seatSelect('HC','2', '1');", x: 11, y: 10 }
+  );
+  const seatMap = normalizeTohoSeatSnapshot(
+    {
+      title: "座席指定 || TOHOシネマズ",
+      selectedSummary: "",
+      standardCapacity: 20,
+      wheelchairCapacity: 2,
+      gridX: Array.from({ length: 22 }, (_, index) => index),
+      seats: rawSeats
+    },
+    "https://hlo.tohotheater.jp/net/ticket/036/TNPI2010J01.do",
+    theater,
+    showtime,
+    "2026-08-17T00:30:00.000Z"
+  );
+
+  assert.equal(seatMap.seats.length, 22);
+  assert.equal(seatMap.screenEdge, undefined);
+  assert.equal(seatMap.showtimeIdentity, "toho|036|2026-08-17|映画A|21:10|23:05|3");
+  assert.equal(seatMap.seats.find((seat) => seat.id === "C-1")?.state, "available");
+  assert.deepEqual(seatMap.seats.find((seat) => seat.id === "C-19"), {
+    id: "C-19", row: "C", number: "19", state: "unavailable", unavailableReason: "unknown", attributes: [], rowIndex: 0, columnIndex: 20, x: 20, y: 0
+  });
+  assert.deepEqual(seatMap.seats.find((seat) => seat.id === "HC-1")?.attributes, ["wheelchair"]);
+  assert.equal(seatMap.seats.find((seat) => seat.id === "HC-1")?.state, "available");
+  assert.notEqual(seatMap.seats.find((seat) => seat.id === "C-10")?.columnIndex, seatMap.seats.find((seat) => seat.id === "C-11")?.columnIndex);
+});
+
+test("TOHO seat-map normalization fails closed on selected-seat state and wrong theater route", () => {
+  const theater = {
+    provider: "toho" as const,
+    id: "036",
+    name: "TOHOシネマズ ららぽーと横浜",
+    aliases: ["TOHOシネマズ ららぽーと横浜"],
+    url: "https://hlo.tohotheater.jp/net/schedule/036/TNPI2000J01.do",
+    sourceUrl: THEATER_LIST_URL
+  };
+  const showtime = {
+    provider: "toho" as const,
+    theaterId: "036", theater: theater.name, date: "2026-08-17", movie: "映画A", startTime: "21:10",
+    formats: [], screen: "3", availability: "unknown" as const, sourceUrl: theater.url
+  };
+  const seats = Array.from({ length: 20 }, (_, index) => ({
+    id: `C-${index + 1}`, row: "C", number: String(index + 1), src: "seat_1.gif",
+    onclick: `JavaScript:seatSelect('C','${index + 1}', '1');`, x: index, y: 0
+  }));
+  const snapshot = { title: "座席指定 || TOHOシネマズ", selectedSummary: "C-1", gridX: seats.map((seat) => seat.x), seats };
+  assert.throws(
+    () => normalizeTohoSeatSnapshot(snapshot, "https://hlo.tohotheater.jp/net/ticket/036/TNPI2010J01.do", theater, showtime),
+    (error) => error instanceof BrowserRuntimeError && error.code === "UI_STATE_CHANGED"
+  );
+  assert.throws(
+    () => normalizeTohoSeatSnapshot({ ...snapshot, selectedSummary: "" }, "https://hlo.tohotheater.jp/net/ticket/999/TNPI2010J01.do", theater, showtime),
+    (error) => error instanceof BrowserRuntimeError && error.code === "UI_STATE_CHANGED"
+  );
+});
+
+test("TOHO getSeatAvailability uses only the exact reviewed showtime and non-member continuation before read-only extraction", async () => {
+  const rows = theaterRows();
+  const scheduleUrl = rows[0]!.url;
+  const promotionUrl = "https://hlo.tohotheater.jp/net/ticket/001/TNPI2040J04.do";
+  const seatUrl = "https://hlo.tohotheater.jp/net/ticket/001/TNPI2010J01.do";
+  let currentUrl = THEATER_LIST_URL;
+  const clicks: Array<{ kind: string; label: string }> = [];
+  const seatRows = Array.from({ length: 20 }, (_, index) => ({
+    id: `C-${index + 1}`,
+    row: "C",
+    number: String(index + 1),
+    src: "seat_1.gif",
+    onclick: `JavaScript:seatSelect('C','${index + 1}', '1');`,
+    x: index,
+    y: 10
+  }));
+  const runtime = {
+    status: async () => ({ connected: true, url: currentUrl, provider: "toho", officialSurface: true }),
+    navigateReviewed: async (url: string) => { currentUrl = url; return url; },
+    evaluateSemanticState: async (_provider: string, expression: string) => {
+      if (currentUrl === THEATER_LIST_URL) return { url: currentUrl, value: { rows } };
+      if (currentUrl === scheduleUrl) {
+        if (expression.includes("ScheduleUtils") && expression.includes("const start =")) {
+          return { url: currentUrl, value: { matched: 1, labels: ["10:00～12:05 販売中 スクリーン１ (20席)"] } };
+        }
+        return {
+          url: currentUrl,
+          value: {
+            theaterNames: ["TOHOシネマズ テスト1"],
+            scheduleHeadingCount: 1,
+            dates: [{ label: "2026年8月17日", selected: true, clickable: false }],
+            showtimes: [{ label: "10:00 ～ 12:05", titleCandidates: ["映画A"], context: "販売中 スクリーン１ (20席)" }],
+            emptySchedule: false
+          }
+        };
+      }
+      if (currentUrl === promotionUrl) {
+        return { url: currentUrl, value: { title: "TOHO-ONE会員入会促進 || TOHOシネマズ", exactNonMemberControls: 1, sensitiveFields: 0 } };
+      }
+      if (currentUrl === seatUrl) {
+        return {
+          url: currentUrl,
+          value: {
+            title: "座席指定 || TOHOシネマズ",
+            selectedSummary: "",
+            standardCapacity: 20,
+            wheelchairCapacity: 0,
+            gridX: Array.from({ length: 20 }, (_, index) => index),
+            seats: seatRows
+          }
+        };
+      }
+      throw new Error(`unexpected fake URL: ${currentUrl}`);
+    },
+    clickReviewedControl: async (label: string) => {
+      clicks.push({ kind: "showtime", label });
+      currentUrl = promotionUrl;
+      return { clicked: label, url: currentUrl };
+    },
+    clickReviewedIntermediateControl: async (label: string) => {
+      clicks.push({ kind: "intermediate", label });
+      currentUrl = seatUrl;
+      return { clicked: label, url: currentUrl };
+    },
+    clickControl: async () => { throw new Error("generic or seat click must never be used"); }
+  } as unknown as CinemaBrowserRuntime;
+
+  const adapter = new TohoReadAdapter(runtime);
+  const result = await adapter.getSeatAvailability({
+    theater: "テスト1",
+    date: "2026-08-17",
+    movie: "映画A",
+    startTime: "10:00",
+    screen: "1"
+  });
+
+  assert.deepEqual(clicks, [
+    { kind: "showtime", label: "10:00～12:05 販売中 スクリーン１ (20席)" },
+    { kind: "intermediate", label: "ログインせずに購入する" }
+  ]);
+  assert.equal(result.seatMap.seats.length, 20);
+  assert.equal(result.seatMap.seats.every((seat) => seat.state === "available"), true);
+  assert.equal(result.seatMap.sourceUrl, seatUrl);
 });

@@ -161,3 +161,34 @@ export interface CinemaSeatMap<P extends CinemaProviderId = CinemaProviderId> {
   /** Reviewed public seat-map URL from which these facts were observed. */
   sourceUrl: string;
 }
+
+
+export interface SeatAvailabilityQuery {
+  theater: string;
+  /** Required because seat availability is time-sensitive and must bind to one public schedule date. */
+  date: string;
+  movie: string;
+  /** Provider-visible 24-hour start time, for example `21:10`. */
+  startTime: string;
+  /** Optional caller disambiguator; the adapter still requires one observed screen identity. */
+  screen?: string;
+}
+
+export interface SeatAvailabilityResult<
+  P extends CinemaProviderId = CinemaProviderId,
+  TTheater extends CinemaTheater<P> = CinemaTheater<P>,
+  TShowtime extends CinemaShowtime<P> = CinemaShowtime<P>
+> {
+  provider: P;
+  theater: TTheater;
+  showtime: TShowtime;
+  seatMap: CinemaSeatMap<P>;
+}
+
+export interface CinemaSeatReadAdapter<
+  P extends CinemaProviderId = CinemaProviderId,
+  TTheater extends CinemaTheater<P> = CinemaTheater<P>,
+  TShowtime extends CinemaShowtime<P> = CinemaShowtime<P>
+> {
+  getSeatAvailability(input: SeatAvailabilityQuery): Promise<SeatAvailabilityResult<P, TTheater, TShowtime>>;
+}

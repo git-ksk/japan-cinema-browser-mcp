@@ -13,6 +13,7 @@ import {
   CINEMA_PROVIDERS,
   ProviderPolicyError,
   assertGenericControlAllowed,
+  assertReviewedIntermediateControlAllowed,
   assertGenericFieldAllowed,
   assertGenericNavigationUrl,
   assertOfficialUrl,
@@ -372,6 +373,25 @@ export class CinemaBrowserRuntime {
     });
     this.handoff.advanceResourceEpoch();
     return { clicked: resolved.label, url: after };
+  }
+
+  async clickReviewedIntermediateControl(label: string, expectedProvider: CinemaProviderId): Promise<Record<string, unknown>> {
+    const before = await this.assertOfficialCurrentUrl(expectedProvider);
+    await this.assertNoIntervention(CINEMA_HANDOFF_POLICY.semantic_mutation.resumePolicy);
+    this.wrapProviderPolicy(() => assertReviewedIntermediateControlAllowed(expectedProvider, label));
+    const resolved = await this.resolveControl(label);
+    if (resolved.label !== label) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "The reviewed intermediate control no longer has the exact expected label.");
+    }
+    await this.clickExact(label);
+    await sleep(350);
+    await this.assertNoIntervention(CINEMA_HANDOFF_POLICY.semantic_mutation.resumePolicy);
+    const after = await this.waitForExpectedOfficialUrl(await this.getClient(), expectedProvider, {
+      phase: "click_reviewed_control",
+      beforeUrl: before
+    });
+    this.handoff.advanceResourceEpoch();
+    return { clicked: label, url: after };
   }
 
   async fillField(query: string, value: string): Promise<Record<string, unknown>> {
