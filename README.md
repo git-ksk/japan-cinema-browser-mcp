@@ -144,9 +144,9 @@ Cloud Run modeでは次を強制します。
 - purchase execution禁止
 - challenge / sign-in / consent時はHuman Handoffせずfail closed
 - browser operation timeout
-- Firestore-backed `mcp-usage-control` によるdurable daily budget
+- optionalな `mcp-usage-control` integration（このdeployment例ではFirestore-backed）によるdurable daily budget
 
-詳細は [`docs/CLOUD_RUN.md`](./docs/CLOUD_RUN.md) を参照してください。
+このrepositoryのCloud Run profileではOAuth protocol stateの共有永続storeとしてFirestoreを採用していますが、Firestore自体がMCP OAuthの要件という意味ではありません。`mcp-usage-control` もCinema MCPの必須機能ではなく、任意のusage-control integrationです。詳細は [`docs/CLOUD_RUN.md`](./docs/CLOUD_RUN.md) を参照してください。
 
 ## Chromeの使い方
 
