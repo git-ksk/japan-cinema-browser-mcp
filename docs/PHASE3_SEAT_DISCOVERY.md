@@ -29,7 +29,7 @@ Representative current schedule surfaces were read through the existing provider
 | Provider | Seat-map entry | Hold / mutation boundary | Read-only seat semantics | Geometry | Auth / challenge | Discovery result |
 |---|---|---|---|---|---|---|
 | TOHO | Follow-up validation entered the live `座席指定` surface through the visible sellable showtime and visible non-member continuation. No seat was clicked. | No countdown was visible at entry, no selected-seat state was observed, and the official FAQ still places the documented 15-minute timeout after desired-seat decision. | Live legend exposes available, selected, and purchased/not-for-sale semantics. | Live seat-map surface is now reachable for semantic DOM review; extraction details belong to implementation #32. | Membership is optional; the reviewed path used the visible non-member continuation and no auth field. | **First provider gate passed** for read-only seat-map implementation. |
-| AEON | The visible movie card can be expanded and exposes exact `予約購入` buttons. Activating one created a new browser target that remained `about:blank` in the isolated probes, so the live purchase seat map was not reached. | Exact hold start/time remains **unknown** because the seat-map surface was not reached. No hold/timer/selected state was observed on the unchanged schedule surface. | Selected seats are documented as orange. Public facility pages identify wheelchair spaces and special seat types such as D-BOX / Gold Class. | Public facility UI exposes static `座席図を見る`; semantic live geometry remains unverified. | Purchase without membership is supported. No challenge was observed. | **Pending public navigation/target handling**, not deferred because of evidence of unsafe seat-map display. |
+| AEON | Initial probe confusion around `about:blank` was resolved in #36: a pre-existing startup tab was unrelated, while the real blocker was the T360 Cookie overlay. Exact `全て拒否` → exact showtime `予約購入` → Watatheatre non-member → Smart Theater seat route reaches the live map without seat click. | #36 clean-profile validation showed entry with active/selected=0 and identical seat-state fingerprint in two sessions. Hold start/time remains undocumented, so any seat activation is still treated as mutating. | Live DOM exposes actual `seat-[ROW]-[NUMBER]` identities, `default` / `disabled`, premier/special and wheelchair classes. #43 normalizes only reviewed public classes and fails on `active`. | #43 reads rendered rect geometry; no screen orientation is inferred unless an explicit marker is geometrically proven. | Purchase without membership is supported; login fields are not automated. | **Read-only gate passed** in #36; runtime adapter implemented in #43 with provider-specific target adoption. |
 | 109 | Follow-up validation entered the live seat-map surface by following one exact visible public showtime href; no route/query was synthesized and no seat was clicked. | Entry immediately starts a visible 10-minute purchase/session timer, but the page reports `選択座席 0／8席`. Two independent sessions showed identical per-seat state with 0 selected seats, strongly indicating entry alone does not hold seats or change availability. | Live DOM exposes row/seat identities plus available vs unavailable state; selected count remained zero. | Rendered rows expose stable seat identities suitable for semantic normalization. | Non-members can continue without joining. No challenge was observed. | **Read-only candidate after TOHO**; timed-session creation is acceptable only while seat selection remains zero. |
 
 ## Hold-boundary conclusion
@@ -46,7 +46,7 @@ The bounded follow-up validation passed the implementation safety gate: the visi
 
 The official instructions clearly separate showtime selection, seat selection, ticket type, payment, and final purchase. They also state that seat availability is continuously updated and an uncompleted reservation can result in seats becoming available again. They do not specify when a temporary hold starts or how long it lasts.
 
-Treat the hold boundary as unknown because the live purchase seat map has not yet been reached through the safe reviewed browser path. The current blocker is public navigation/target handling, not evidence that displaying the map is unsafe. `seatMap` remains disabled; see #36.
+The exact hold start/time remains undocumented, but #36 demonstrated in two independent clean profiles that normal rendered entry to the Smart Theater seat page produces active/selected=0 and a stable seat-state fingerprint without a material availability impact. #43 therefore implements only read-only target adoption and seat extraction; any `active` seat, stale transaction state, wrong context, or unexpected route fails closed. `seatMap=true`, while `seatSelection=false` and AEON recommendation remains disabled because screen orientation is not proven.
 
 ### 109
 
@@ -135,12 +135,12 @@ A recommendation is advisory only. It must never select a seat as part of refres
 
 First provider: **TOHO Cinemas**.
 
-Implemented first-slice scope:
+Implemented v0.3.0 seat-read scope:
 
 - provider-neutral seat intelligence model
-- TOHO-only `get_seat_availability`
-- TOHO-only `seatMap=true` via #32 reviewed read-only entry and fail-closed extraction
-- `recommend_seats` with exactly two bounded read-only observations
+- TOHO / AEON / 109 `get_seat_availability`
+- TOHO #32 / 109 #35 / AEON #43 reviewed read-only `seatMap=true`
+- TOHO-only `recommend_seats` with exactly two bounded read-only observations
 - row / seat normalization + rendered gap boundaries
 - explicit SCREEN orientation proof from rendered public UI
 - adjacent seat grouping
@@ -156,7 +156,7 @@ Explicitly excluded from v0.3.0 first scope:
 - login automation
 - checkout preparation
 - payment / purchase
-- AEON or 109 live seat-map implementation
+- AEON / 109 `recommend_seats` until provider-specific screen orientation is explicitly proven
 
 ## Follow-up issues
 
@@ -164,7 +164,8 @@ Explicitly excluded from v0.3.0 first scope:
 - #32 — TOHO read-only seat availability adapter, including the non-mutating-entry gate
 - #33 — seat freshness detection and `recommend_seats`
 - #35 — 109 read-only seat availability with explicit timed-session semantics — implemented 2026-08-17
-- #36 — AEON public seat-map entry / browser-target handling without hidden-route discovery — completed 2026-08-17
+- #36 — AEON public seat-map entry / safety gate without hidden-route discovery — completed 2026-08-17
+- #43 — AEON reviewed target adoption + read-only seat availability adapter — implemented 2026-08-17
 
 A `select_seats` issue should only be created after a separate provider-specific mutation/hold review. Discovery did not pass that boundary.
 

@@ -8,6 +8,8 @@ Provider ID: `aeon`
 Phase 1 read adapterレビュー日: 2026-08-13  
 公式サイトポリシー再確認日: 2026-08-13
 
+Phase 3 read-only seat adapterレビュー日: 2026-08-17
+
 ## 現在のCapability
 
 | Capability | 状態 | 備考 |
@@ -16,7 +18,7 @@ Phase 1 read adapterレビュー日: 2026-08-13
 | Generic bounded read | 有効 | page内容は永続保存しない |
 | 劇場選択semantic | 有効 | 公式「劇場を探す」UIのみ |
 | 上映情報semantic | 有効 | rendered public schedule UIのみ |
-| Seat map read | 無効 | 未レビュー |
+| Seat map read | 有効 | #36 safety gate + #43 reviewed read-only adapter |
 | Seat selection | 無効 | 未レビュー |
 | Checkout preparation | 無効 | 未レビュー |
 | Final purchase | 無効 | `purchaseSubmission=false` をruntimeでも強制 |
@@ -170,6 +172,22 @@ Phase 3 Discoveryでは、港北ニュータウンの現行schedule surfaceでmo
 
 独立clean profile 2本で同一上映を検証し、いずれも168 seats / selected(active)=0 / default 137 / disabled 31 / special 18 / wheelchair 2、rendered seat-state fingerprint一致を確認しました。したがってread-only entry safety gateは通過です。hold開始点/timeoutの公開説明はなお明示されていませんが、seat-map表示だけでseat hold / material reservation mutation / availability impactが生じた証拠はありません。
 
-ただし#36はentry/target-handling Discoveryであり、runtimeにreview済みSmart Theater target adoptionとAEON seat DOM adapterはまだ実装していません。このため `seatMap=false / seatSelection=false` は維持し、read-only adapter実装は別Issueで扱います。
+#36はここまでの **entry discovery / safety gate** を担当し、runtime implementationとは分離しています。#43ではその証拠だけを前提に、AEON専用のreview済みtarget/action chainとread-only seat DOM adapterを実装しました。generic navigation allow-listへSmart Theaterを追加していません。
+
+#43のruntime boundary:
+
+- schedule上のexact theater/movie/date/start/screenへbindingし、その`.p-schedule__ticket` BUTTON内にvisible exact `予約購入` statusがある場合だけtrusted pointer inputを送る
+- T360 Cookie surfaceが見える場合はexact `全て拒否` だけを操作し、`全て許可`は自動操作しない
+- action前から存在するWatatheatre / Smart Theater targetはstaleとして拒否する
+- action直後に生成されたnew targetだけを候補とし、startup `about:blank`を採用しない
+- Watatheatreはreview済みhost/pathとexact `チケット購入のみ（会員登録しない）`だけを通り、login/password fieldへ触れない
+- Smart Theater URL/queryは生成せず、browser transitionで観測した `#/purchase/cinema/seat` だけを採用する
+- `transaction/confirm` / payment / unexpected route / selected(`active`) seat / requested context mismatchはfail closed
+- actual seatはclassに`seat-[ROW]-[NUMBER]`がある要素だけ。legendのgeneric `.seat`は除外
+- `default`→available、`disabled`→unavailable(reason unknown)、未知class combination→unknown。`special + seat-premier`、`hc`、`space`はpublic classに限定してattribute化
+- geometryはrendered rectから取得し、明確なvisual gapだけをgap boundaryへ変換する
+- explicit screen markerをgeometry込みで証明できない場合は`screenEdge`をunsetのままにし、AEON `recommend_seats`は有効化しない
+
+#43 live smokeはfresh temporary Chrome profile 2本で同一showtime（港北ニュータウン / 2026-08-17 / `[NEW]字幕 オークストリートの異変` / 15:30 / Screen 6）を確認し、両方で168 seats / available 151 / unavailable 17 / premium 18 / wheelchair 2 / active 0でした。seat click、`券種選択へ`、checkout、purchaseは実行していません。これをもって `seatMap=true` に昇格し、`seatSelection=false / checkoutPreparation=false / purchaseSubmission=false` は維持します。
 
 Discovery詳細: [`../PHASE3_SEAT_DISCOVERY.md`](../PHASE3_SEAT_DISCOVERY.md)

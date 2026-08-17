@@ -3,6 +3,10 @@ import assert from "node:assert/strict";
 import {
   CINEMA_PROVIDERS,
   ProviderPolicyError,
+  assertAeonReviewedAction,
+  assertAeonReviewedExternalUrl,
+  classifyAeonReviewedTransitionUrl,
+  isAeonExternalFlowHost,
   assertGenericControlAllowed,
   assertGenericFieldAllowed,
   assertGenericNavigationUrl,
@@ -37,11 +41,11 @@ test("lookalike, insecure, credentialed and non-default-port URLs are rejected",
   assert.throws(() => assertOfficialUrl("https://example.com/"));
 });
 
-test("TOHO and 109 expose reviewed read-only seatMap while all providers keep seat selection and transaction capabilities disabled", () => {
+test("TOHO, AEON and 109 expose reviewed read-only seatMap while all providers keep seat selection and transaction capabilities disabled", () => {
   for (const provider of [CINEMA_PROVIDERS.toho, CINEMA_PROVIDERS.aeon, CINEMA_PROVIDERS["109"]]) {
     assert.equal(provider.capabilities.theaters, true, provider.id);
     assert.equal(provider.capabilities.showtimes, true, provider.id);
-    assert.equal(provider.capabilities.seatMap, provider.id === "toho" || provider.id === "109", provider.id);
+    assert.equal(provider.capabilities.seatMap, true, provider.id);
     assert.equal(provider.capabilities.seatSelection, false, provider.id);
     assert.equal(provider.capabilities.checkoutPreparation, false, provider.id);
     assert.equal(provider.capabilities.purchaseSubmission, false, provider.id);
@@ -57,14 +61,8 @@ test("provider capability matrix is enforced as a runtime policy boundary", () =
     assert.doesNotThrow(() => assertProviderCapability(providerId, "showtimes"));
   }
 
-  assert.doesNotThrow(() => assertProviderCapability("toho", "seatMap"));
-  assert.doesNotThrow(() => assertProviderCapability("109", "seatMap"));
-  for (const providerId of ["aeon"] as const) {
-    assert.throws(
-      () => assertProviderCapability(providerId, "seatMap"),
-      (error) => error instanceof ProviderPolicyError && error.code === "UNSUPPORTED_CAPABILITY",
-      providerId
-    );
+  for (const providerId of ["toho", "aeon", "109"] as const) {
+    assert.doesNotThrow(() => assertProviderCapability(providerId, "seatMap"));
   }
 
   for (const provider of Object.values(CINEMA_PROVIDERS)) {
@@ -227,4 +225,66 @@ test("generic fields allow read filters but block seat, checkout and unreviewed 
       label
     );
   }
+});
+
+
+test("AEON reviewed external chain stays separate from generic navigation and accepts only exact reviewed routes", () => {
+  const watatheatre = "https://login.watatheatre.aeoncinema.com/auth?eventId=opaque-observed-value";
+  const transaction = "https://reserve.smart-theater.com/?projectId=opaque&eventId=opaque&initId=opaque#/purchase/transaction";
+  const seat = "https://reserve.smart-theater.com/?projectId=opaque&eventId=opaque&initId=opaque#/purchase/cinema/seat";
+
+  assert.equal(classifyAeonReviewedTransitionUrl(watatheatre), "watatheatre");
+  assert.equal(classifyAeonReviewedTransitionUrl(transaction), "smart_theater_transaction");
+  assert.equal(classifyAeonReviewedTransitionUrl(seat), "smart_theater_seat");
+  assert.doesNotThrow(() => assertAeonReviewedExternalUrl(watatheatre, "watatheatre"));
+  assert.doesNotThrow(() => assertAeonReviewedExternalUrl(seat, "smart_theater_seat"));
+  assert.equal(isAeonExternalFlowHost(watatheatre), true);
+  assert.equal(isAeonExternalFlowHost(seat), true);
+
+  for (const url of [watatheatre, transaction, seat]) {
+    assert.throws(
+      () => assertGenericNavigationUrl(url, "aeon"),
+      (error) => error instanceof ProviderPolicyError && error.code === "URL_NOT_ALLOWED",
+      url
+    );
+  }
+  for (const url of [
+    "https://reserve.smart-theater.com/#/purchase/transaction/confirm",
+    "https://reserve.smart-theater.com/#/purchase/payment",
+    "https://reserve.smart-theater.com.evil.example/#/purchase/cinema/seat",
+    "http://reserve.smart-theater.com/#/purchase/cinema/seat"
+  ]) {
+    assert.equal(classifyAeonReviewedTransitionUrl(url), undefined, url);
+  }
+});
+
+test("AEON reviewed actions are exact and cannot widen generic click policy", () => {
+  const schedule = "https://theater.aeoncinema.com/theaters/kohoku/?date=20260817";
+  const watatheatre = "https://login.watatheatre.aeoncinema.com/login2?eventId=opaque";
+  assert.doesNotThrow(() => assertAeonReviewedAction("cookie_reject", "全て拒否", schedule));
+  assert.doesNotThrow(() => assertAeonReviewedAction("seat_entry", "予約購入", schedule));
+  assert.doesNotThrow(() => assertAeonReviewedAction("guest_purchase", "チケット購入のみ（会員登録しない）", watatheatre));
+
+  for (const [action, label, url] of [
+    ["cookie_reject", "全て許可", schedule],
+    ["cookie_reject", "Cookie設定", schedule],
+    ["seat_entry", "券種選択へ", schedule],
+    ["guest_purchase", "ログイン", watatheatre],
+    ["guest_purchase", "チケット購入のみ（会員登録しない）", "https://reserve.smart-theater.com/#/purchase/cinema/seat"]
+  ] as const) {
+    assert.throws(
+      () => assertAeonReviewedAction(action, label, url),
+      (error) => error instanceof ProviderPolicyError && ["UNREVIEWED_INTERACTION", "URL_NOT_ALLOWED"].includes(error.code),
+      `${action}: ${label}`
+    );
+  }
+
+  assert.throws(
+    () => assertGenericControlAllowed("aeon", "予約購入"),
+    (error) => error instanceof ProviderPolicyError && error.code === "UNREVIEWED_INTERACTION"
+  );
+  assert.throws(
+    () => assertGenericControlAllowed("aeon", "券種選択へ"),
+    (error) => error instanceof ProviderPolicyError && error.code === "UNSUPPORTED_CAPABILITY"
+  );
 });

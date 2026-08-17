@@ -45,7 +45,7 @@ MCP toolの登録と引数検証を担当します。
 - bounded result返却
 - provider capabilityのruntime強制
 
-現在は `list_theaters` / `get_showtimes` をTOHO / AEON / 109で、`get_seat_availability` / `recommend_seats` をTOHOだけで有効化しています。無効capabilityへのgeneric fuzzy fallbackはしません。
+現在は `list_theaters` / `get_showtimes` / `get_seat_availability` をTOHO / AEON / 109で、`recommend_seats` をTOHOだけで有効化しています。無効capabilityへのgeneric fuzzy fallbackはしません。
 
 ### `src/providers.ts`
 
@@ -60,7 +60,7 @@ provider registryと横断ポリシーを保持します。
 - sensitive field判定
 - final purchase control判定
 
-TOHO / AEON / 109は `theaters=true / showtimes=true`。TOHOと109はreview済みread-only `seatMap=true`、AEONはfalseです。`seatSelection / checkoutPreparation / purchaseSubmission` は全providerでfalseで、`CINEMA_ENABLE_PURCHASE=true` でも最終submitは実行できません。
+TOHO / AEON / 109は `theaters=true / showtimes=true / seatMap=true`。`seatSelection / checkoutPreparation / purchaseSubmission` は全providerでfalseで、`CINEMA_ENABLE_PURCHASE=true` でも最終submitは実行できません。
 
 ### `src/providers/toho/adapter.ts`
 
@@ -83,7 +83,7 @@ Phase 1 showtime + Phase 3 seat intelligenceのTOHO read-only adapterです。
 
 ### `src/providers/aeon/adapter.ts`
 
-Phase 1のAEON read-only adapterです。
+Phase 1 showtime + Phase 3 seat availabilityのAEON read-only adapterです。
 
 - 公式 `https://www.aeoncinema.com/theater/` のvisible theater controlsをsemanticに抽出
 - facility labelを劇場名本体から分離
@@ -93,7 +93,12 @@ Phase 1のAEON read-only adapterです。
 - navigation後にhostname/path/date queryを再検証
 - rendered DOMから作品 / start-end time / format / 字幕・吹替 / screen / explicit availabilityを抽出
 - 1 DOM groupから複数time rangeが分離できない、またはmovie/time identityが曖昧ならfail closed
-- `予約購入` controlはread contextに含まれてもadapterからclickしない
+- Phase 1では`予約購入` controlをread contextとして扱い、Phase 3 `get_seat_availability`だけがexact showtime binding後のreview済みactionとしてtrusted pointer inputを使う
+- T360 Cookieはexact `全て拒否`だけ、Watatheatreはexact non-member controlだけを許可し、generic click/navigation policyは広げない
+- action直後に生成されたnew targetだけを採用し、pre-existing Watatheatre/Smart Theaterやstartup `about:blank`、stale confirm routeは拒否
+- Smart Theaterはobserved redirectだけを利用し、URL/queryを合成しない
+- actual `seat-[ROW]-[NUMBER]` classだけをseat identityとして採用し、`active`があればfail closed
+- unknown class combinationは`unknown`、screen markerを証明できなければ`screenEdge` unset。AEON recommendationは未登録
 
 ### `src/providers/109/adapter.ts`
 
@@ -197,7 +202,7 @@ MCP Tools
 Provider read routing
    │
    ├─ TOHO adapter      ← Phase 1 showtime + Phase 3 read-only seat intelligence
-   ├─ AEON adapter      ← Phase 1 read-only
+   ├─ AEON adapter      ← Phase 1 showtime + Phase 3 read-only seat availability
    └─ 109 adapter       ← Phase 1 read-only
    │
    ▼

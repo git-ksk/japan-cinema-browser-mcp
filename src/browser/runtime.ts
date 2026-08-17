@@ -12,6 +12,10 @@ import { CINEMA_HANDOFF_POLICY } from "../handoff-policy.js";
 import {
   CINEMA_PROVIDERS,
   ProviderPolicyError,
+  assertAeonReviewedAction,
+  assertAeonReviewedExternalUrl,
+  classifyAeonReviewedTransitionUrl,
+  isAeonExternalFlowHost,
   assertGenericControlAllowed,
   assertReviewedIntermediateControlAllowed,
   assertGenericFieldAllowed,
@@ -19,6 +23,7 @@ import {
   assertOfficialUrl,
   isFinalPurchaseLabel,
   providerForUrl,
+  type AeonReviewedExternalSurface,
   type CinemaProviderId
 } from "../providers.js";
 
@@ -339,6 +344,182 @@ export class CinemaBrowserRuntime {
     return { url, value: result.result.value as T };
   }
 
+  async evaluateAeonSeatScheduleState<T>(expression: string): Promise<{ url: string; value: T }> {
+    const client = await this.getClient();
+    const current = await this.currentUrlUnchecked(client);
+    const url = this.wrapProviderPolicy(() => assertGenericNavigationUrl(current, "aeon"));
+    if (url.hostname !== "theater.aeoncinema.com" || !/^\/theaters\/[a-z0-9_-]+\/?$/.test(url.pathname)) {
+      throw new BrowserRuntimeError("URL_NOT_ALLOWED", "AEON seat-entry semantic reads are limited to the reviewed rendered theater schedule route.");
+    }
+    const intervention = await this.detectInterventionSurface(client);
+    if (intervention === "access_challenge" || intervention === "sign_in") {
+      throw new BrowserRuntimeError(
+        "HUMAN_ACTION_REQUIRED",
+        "AEON seat-entry schedule encountered an authentication/challenge surface that this read-only adapter will not automate."
+      );
+    }
+    // Consent is intentionally not converted into generic handoff here: the AEON
+    // seat adapter can inspect only the reviewed T360 controls and may dispatch
+    // the privacy-preserving exact `全て拒否` action. No other consent action is allowed.
+    const result = await client.Runtime.evaluate({ expression, returnByValue: true, awaitPromise: true });
+    this.assertOperationActive();
+    if (result.exceptionDetails) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON seat-entry semantic reader failed against the rendered public schedule UI.");
+    }
+    return { url: url.href, value: result.result.value as T };
+  }
+
+  async assertNoAeonExternalFlowTargets(): Promise<void> {
+    await this.getClient();
+    if (!this.port) throw new BrowserRuntimeError("BROWSER_UNAVAILABLE", "Chrome DevTools port is unavailable.");
+    const targets = await this.listBrowserTargets();
+    const stale = targets
+      .filter((candidate) => candidate.type === "page" && isAeonExternalFlowHost(candidate.url))
+      .map((candidate) => this.sanitizeDiagnosticUrl(candidate.url));
+    if (stale.length > 0) {
+      throw new BrowserRuntimeError(
+        "UI_STATE_CHANGED",
+        "AEON read-only seat entry refuses to reuse an existing Watatheatre / Smart Theater target.",
+        { targets: stale.slice(0, 4) }
+      );
+    }
+  }
+
+  async clickAeonCookieReject(point: { x: number; y: number }): Promise<void> {
+    const client = await this.getClient();
+    const current = await this.currentUrlUnchecked(client);
+    this.wrapProviderPolicy(() => assertAeonReviewedAction("cookie_reject", "全て拒否", current));
+    await this.trustedClickExactPoint(client, point, "全て拒否");
+    await sleep(250);
+    this.assertOperationActive();
+    this.handoff.advanceResourceEpoch();
+  }
+
+  async clickAeonSeatEntryAndAdoptWatatheatre(point: { x: number; y: number }, expectedControlLabel: string): Promise<void> {
+    const client = await this.getClient();
+    const current = await this.currentUrlUnchecked(client);
+    this.wrapProviderPolicy(() => assertAeonReviewedAction("seat_entry", "予約購入", current));
+    await this.assertNoIntervention(CINEMA_HANDOFF_POLICY.semantic_mutation.resumePolicy);
+    await this.assertNoAeonExternalFlowTargets();
+    if (!this.port) throw new BrowserRuntimeError("BROWSER_UNAVAILABLE", "Chrome DevTools port is unavailable.");
+
+    const before = await this.listBrowserTargets();
+    const beforeIds = new Set(before.filter((candidate) => candidate.type === "page").map((candidate) => candidate.id));
+    if (!expectedControlLabel.trim().endsWith("予約購入")) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON reviewed showtime control label no longer ends in the exact reservation status.");
+    }
+    await this.trustedClickExactPoint(client, point, expectedControlLabel.trim());
+
+    const deadline = Date.now() + REVIEWED_NAVIGATION_RETRY_MS;
+    let lastObserved = "";
+    while (Date.now() < deadline) {
+      this.assertOperationActive();
+      const targets = await this.listBrowserTargets();
+      const created = targets.filter((candidate) => candidate.type === "page" && !beforeIds.has(candidate.id));
+      if (created.length > 1) {
+        throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON reservation action created multiple new browser targets; refusing ambiguous adoption.", { count: created.length });
+      }
+      const candidate = created[0];
+      if (candidate) {
+        lastObserved = candidate.url;
+        if (candidate.url === "about:blank" || candidate.url === "") {
+          await sleep(REVIEWED_NAVIGATION_POLL_MS);
+          continue;
+        }
+        if (classifyAeonReviewedTransitionUrl(candidate.url) !== "watatheatre") {
+          throw new BrowserRuntimeError(
+            "URL_NOT_ALLOWED",
+            "AEON reservation action created a new target outside the reviewed Watatheatre host/path boundary.",
+            { observedUrl: this.sanitizeDiagnosticUrl(candidate.url) }
+          );
+        }
+        await this.adoptBrowserTarget(candidate.id);
+        const adoptedClient = await this.getClient();
+        let adoptedUrl = "about:blank";
+        const settleDeadline = Date.now() + REVIEWED_NAVIGATION_RETRY_MS;
+        while (Date.now() < settleDeadline) {
+          this.assertOperationActive();
+          adoptedUrl = await this.currentUrlUnchecked(adoptedClient);
+          if (classifyAeonReviewedTransitionUrl(adoptedUrl) === "watatheatre") {
+            this.handoff.advanceResourceEpoch();
+            return;
+          }
+          if (adoptedUrl !== "about:blank" && adoptedUrl !== "") {
+            throw new BrowserRuntimeError(
+              "URL_NOT_ALLOWED",
+              "AEON adopted reservation target committed outside the reviewed Watatheatre boundary.",
+              { observedUrl: this.sanitizeDiagnosticUrl(adoptedUrl) }
+            );
+          }
+          await sleep(REVIEWED_NAVIGATION_POLL_MS);
+        }
+        throw new BrowserRuntimeError(
+          "UI_STATE_CHANGED",
+          "AEON adopted reservation target did not commit to Watatheatre within the bounded wait.",
+          { observedUrl: this.sanitizeDiagnosticUrl(adoptedUrl) }
+        );
+      }
+      await sleep(REVIEWED_NAVIGATION_POLL_MS);
+    }
+    throw new BrowserRuntimeError(
+      "UI_STATE_CHANGED",
+      "AEON reservation action did not create one reviewed Watatheatre target within the bounded wait.",
+      { observedUrl: this.sanitizeDiagnosticUrl(lastObserved || "about:blank") }
+    );
+  }
+
+  async evaluateAeonReviewedTargetState<T>(
+    surface: AeonReviewedExternalSurface,
+    expression: string
+  ): Promise<{ url: string; value: T }> {
+    const client = await this.getClient();
+    const current = await this.currentUrlUnchecked(client);
+    this.wrapProviderPolicy(() => assertAeonReviewedExternalUrl(current, surface));
+    await this.assertNoAeonExternalBlocker(client);
+    const result = await client.Runtime.evaluate({ expression, returnByValue: true, awaitPromise: true });
+    this.assertOperationActive();
+    if (result.exceptionDetails) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON reviewed external semantic reader failed against the rendered public UI.");
+    }
+    const parsed = new URL(current);
+    const sanitizedUrl = `${parsed.protocol}//${parsed.host}${parsed.pathname}${surface === "smart_theater_seat" ? parsed.hash : ""}`;
+    return { url: sanitizedUrl, value: result.result.value as T };
+  }
+
+  async clickAeonGuestPurchaseAndWaitForSeat(point: { x: number; y: number }): Promise<string> {
+    const client = await this.getClient();
+    const current = await this.currentUrlUnchecked(client);
+    this.wrapProviderPolicy(() => assertAeonReviewedAction("guest_purchase", "チケット購入のみ（会員登録しない）", current));
+    await this.assertNoAeonExternalBlocker(client);
+    await this.trustedClickExactPoint(client, point, "チケット購入のみ（会員登録しない）");
+
+    const deadline = Date.now() + REVIEWED_NAVIGATION_RETRY_MS;
+    let lastUrl = current;
+    while (Date.now() < deadline) {
+      this.assertOperationActive();
+      lastUrl = await this.currentUrlUnchecked(client);
+      const stage = classifyAeonReviewedTransitionUrl(lastUrl);
+      if (stage === "smart_theater_seat") {
+        const reviewed = this.wrapProviderPolicy(() => assertAeonReviewedExternalUrl(lastUrl, "smart_theater_seat"));
+        this.handoff.advanceResourceEpoch();
+        return `${reviewed.protocol}//${reviewed.host}${reviewed.pathname}${reviewed.hash}`;
+      }
+      if (stage !== "watatheatre" && stage !== "smart_theater_transaction") {
+        throw new BrowserRuntimeError(
+          "UI_STATE_CHANGED",
+          "AEON non-member continuation entered an unexpected or checkout-like route.",
+          { observedUrl: this.sanitizeDiagnosticUrl(lastUrl) }
+        );
+      }
+      await sleep(REVIEWED_NAVIGATION_POLL_MS);
+    }
+    throw new BrowserRuntimeError(
+      "UI_STATE_CHANGED",
+      "AEON non-member continuation did not settle on the reviewed Smart Theater seat route.",
+      { observedUrl: this.sanitizeDiagnosticUrl(lastUrl) }
+    );
+  }
+
   async clickControl(query: string): Promise<Record<string, unknown>> {
     const before = await this.assertGenericCurrentUrl();
     await this.assertNoIntervention(CINEMA_HANDOFF_POLICY.semantic_mutation.resumePolicy);
@@ -494,6 +675,71 @@ export class CinemaBrowserRuntime {
     this.port = undefined;
     if (client) await client.close().catch(() => undefined);
     await this.chrome.close();
+  }
+
+  private async listBrowserTargets(): Promise<Awaited<ReturnType<typeof CDP.List>>> {
+    if (!this.port) throw new BrowserRuntimeError("BROWSER_UNAVAILABLE", "Chrome DevTools port is unavailable.");
+    return CDP.List({ port: this.port });
+  }
+
+  private async adoptBrowserTarget(targetId: string): Promise<void> {
+    if (!this.port) throw new BrowserRuntimeError("BROWSER_UNAVAILABLE", "Chrome DevTools port is unavailable.");
+    const previous = this.client;
+    const next = await CDP({ port: this.port, target: targetId });
+    this.client = next;
+    this.targetId = targetId;
+    if (previous && previous !== next) await previous.close().catch(() => undefined);
+  }
+
+  private async assertNoAeonExternalBlocker(client: CdpClient): Promise<void> {
+    const surface = await this.detectInterventionSurface(client);
+    if (surface === "access_challenge" || surface === "consent") {
+      throw new BrowserRuntimeError(
+        "HUMAN_ACTION_REQUIRED",
+        "AEON reviewed external flow encountered a challenge/consent surface that this read-only adapter will not bypass automatically."
+      );
+    }
+    // A Watatheatre login form may be rendered next to the separately reviewed
+    // non-member continuation. We intentionally never fill or focus those fields.
+  }
+
+  private async trustedClickExactPoint(
+    client: CdpClient,
+    point: { x: number; y: number },
+    expectedLabel: string
+  ): Promise<void> {
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "Reviewed browser control coordinates are invalid.");
+    }
+    const x = Math.round(point.x * 100) / 100;
+    const y = Math.round(point.y * 100) / 100;
+    const expression = `(() => {
+      const x = ${x}; const y = ${y};
+      const normalize = (v) => String(v || '').replace(/\\s+/g, ' ').trim();
+      if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) return { ok: false, reason: 'outside_viewport' };
+      const hit = document.elementFromPoint(x, y);
+      const control = hit?.closest?.('button,a,[role="button"],[role="link"],input[type="submit"],input[type="button"]');
+      if (!control) return { ok: false, reason: 'no_control' };
+      const rect = control.getBoundingClientRect();
+      const style = getComputedStyle(control);
+      const label = normalize(control.getAttribute('aria-label') || control.value || control.textContent);
+      const disabled = Boolean(control.disabled || control.getAttribute('aria-disabled') === 'true');
+      const visible = rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && style.pointerEvents !== 'none';
+      const contains = x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+      return { ok: visible && contains && !disabled, label, reason: visible && contains && !disabled ? null : 'not_clickable' };
+    })()`;
+    const inspected = await client.Runtime.evaluate({ expression, returnByValue: true, awaitPromise: true });
+    const value = inspected.result.value as { ok?: boolean; label?: unknown; reason?: unknown } | undefined;
+    if (!value?.ok || value.label !== expectedLabel) {
+      throw new BrowserRuntimeError(
+        "UI_STATE_CHANGED",
+        "Reviewed browser control changed before trusted pointer dispatch.",
+        { expectedLabel, observedLabel: typeof value?.label === "string" ? value.label : undefined, reason: value?.reason }
+      );
+    }
+    await client.Input.dispatchMouseEvent({ type: "mouseMoved", x, y });
+    await client.Input.dispatchMouseEvent({ type: "mousePressed", x, y, button: "left", clickCount: 1 });
+    await client.Input.dispatchMouseEvent({ type: "mouseReleased", x, y, button: "left", clickCount: 1 });
   }
 
   private async resolveControl(query: string): Promise<{ label: string; targetUrl?: string }> {
@@ -679,7 +925,9 @@ export class CinemaBrowserRuntime {
       this.assertOperationActive();
       const targets = await CDP.List({ port: this.port });
       this.assertOperationActive();
-      const officialTargets = targets.filter((candidate) => candidate.type === "page" && Boolean(providerForUrl(candidate.url)));
+      const officialTargets = targets.filter((candidate) =>
+        candidate.type === "page" && Boolean(providerForUrl(candidate.url)) && !isAeonExternalFlowHost(candidate.url)
+      );
       if (officialTargets.length > 1) {
         throw new BrowserRuntimeError(
           "BROWSER_UNAVAILABLE",

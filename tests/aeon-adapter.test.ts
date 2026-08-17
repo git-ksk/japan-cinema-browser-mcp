@@ -1,10 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { BrowserRuntimeError, CinemaBrowserRuntime } from "../src/browser/runtime.js";
 import {
   AeonReadAdapter,
   buildAeonScheduleUrl,
   normalizeAeonScheduleSnapshot,
+  normalizeAeonSeatSnapshot,
   normalizeAeonTheaterQuery,
   normalizeAeonTheaterSnapshot
 } from "../src/providers/aeon/adapter.js";
@@ -329,4 +331,298 @@ test("AEON adopts the unique visible rendered schedule href before falling back 
   assert.deepEqual(navigations, ["https://theater.aeoncinema.com/theaters/kohoku/?date=20260816"]);
   assert.equal(result.showtimes.length, 1);
   assert.equal(result.showtimes[0]?.startTime, "19:25");
+});
+
+
+function aeonSeatTheater() {
+  return {
+    provider: "aeon" as const,
+    id: "kohoku",
+    name: "イオンシネマ 港北ニュータウン",
+    sourceUrl: "https://theater.aeoncinema.com/theaters/kohoku/?date=20260817"
+  };
+}
+
+function aeonSeatShowtime() {
+  return {
+    provider: "aeon" as const,
+    theaterId: "kohoku",
+    theater: "イオンシネマ 港北ニュータウン",
+    date: "2026-08-17",
+    movie: "[NEW]字幕 オークストリートの異変",
+    startTime: "10:40",
+    endTime: "13:00",
+    formats: [],
+    language: "subtitled" as const,
+    screen: "6",
+    availability: "unknown" as const,
+    sourceUrl: "https://theater.aeoncinema.com/theaters/kohoku/?date=20260817"
+  };
+}
+
+function aeonSeatRows() {
+  const rows: Array<{ classes: string[]; x: number; y: number; width: number; height: number }> = [];
+  for (let rowIndex = 0; rowIndex < 4; rowIndex += 1) {
+    const row = String.fromCharCode(65 + rowIndex);
+    for (let column = 1; column <= 6; column += 1) {
+      const x = 100 + (column - 1) * 24 + (column >= 4 ? 48 : 0);
+      const classes = ["seat", `seat-${row}-${column}`, "normal", column === 1 ? "disabled" : "default"];
+      rows.push({ classes, x, y: 100 + rowIndex * 26, width: 18, height: 18 });
+    }
+  }
+  rows[1]!.classes = ["seat", "seat-A-2", "special", "seat-premier", "default"];
+  rows[2]!.classes = ["seat", "seat-A-3", "hc", "space", "disabled"];
+  return rows;
+}
+
+function aeonSeatSnapshot(overrides: Record<string, unknown> = {}) {
+  return {
+    title: "e席リザーブ | イオンシネマ",
+    promptCount: 1,
+    nextControlCount: 1,
+    bodyText: "イオンシネマ 港北ニュータウン [NEW]字幕 オークストリートの異変 2026年8月17日 10:40 スクリーン6 座席を選んでください",
+    seats: aeonSeatRows(),
+    screenMarkers: [{ text: "SCREEN", x: 100, y: 40, width: 186, height: 12 }],
+    ...overrides
+  };
+}
+
+test("AEON seat normalization filters to provider seat identities, maps states/attributes, preserves rendered gaps and explicit screen geometry", () => {
+  const result = normalizeAeonSeatSnapshot(
+    aeonSeatSnapshot(),
+    "https://reserve.smart-theater.com/#/purchase/cinema/seat",
+    aeonSeatTheater(),
+    aeonSeatShowtime(),
+    "2026-08-17T00:40:00.000Z"
+  );
+
+  assert.equal(result.provider, "aeon");
+  assert.equal(result.seats.length, 24);
+  assert.equal(result.screenEdge, "top");
+  assert.equal(result.sourceUrl, "https://reserve.smart-theater.com/#/purchase/cinema/seat");
+  assert.equal(result.seats.find((seat) => seat.id === "A-1")?.state, "unavailable");
+  assert.equal(result.seats.find((seat) => seat.id === "A-1")?.unavailableReason, "unknown");
+  assert.equal(result.seats.find((seat) => seat.id === "A-2")?.state, "available");
+  assert.deepEqual(result.seats.find((seat) => seat.id === "A-2")?.attributes.sort(), ["premium", "provider:aeon:special"].sort());
+  assert.deepEqual(result.seats.find((seat) => seat.id === "A-3")?.attributes.sort(), ["provider:aeon:space", "wheelchair"].sort());
+  assert.equal(result.seats.find((seat) => seat.id === "A-3")?.state, "unavailable");
+  assert.equal(result.seats.find((seat) => seat.id === "A-3")?.rightBoundary, "gap");
+  assert.equal(result.seats.find((seat) => seat.id === "A-4")?.leftBoundary, "gap");
+  assert.ok((result.seats.find((seat) => seat.id === "A-4")?.columnIndex ?? 0) > (result.seats.find((seat) => seat.id === "A-3")?.columnIndex ?? 0) + 1);
+  assert.equal(result.showtimeIdentity, "aeon|kohoku|2026-08-17|[NEW]字幕 オークストリートの異変|10:40|13:00|6");
+});
+
+test("AEON seat normalization never infers screen direction without one explicit external screen marker", () => {
+  const noMarker = normalizeAeonSeatSnapshot(
+    aeonSeatSnapshot({ screenMarkers: [] }),
+    "https://reserve.smart-theater.com/#/purchase/cinema/seat",
+    aeonSeatTheater(),
+    aeonSeatShowtime()
+  );
+  assert.equal(noMarker.screenEdge, undefined);
+
+  const overlapping = normalizeAeonSeatSnapshot(
+    aeonSeatSnapshot({ screenMarkers: [{ text: "SCREEN", x: 130, y: 110, width: 100, height: 10 }] }),
+    "https://reserve.smart-theater.com/#/purchase/cinema/seat",
+    aeonSeatTheater(),
+    aeonSeatShowtime()
+  );
+  assert.equal(overlapping.screenEdge, undefined);
+});
+
+test("AEON seat normalization treats unreviewed/contradictory class combinations as unknown instead of guessing", () => {
+  const rows = aeonSeatRows();
+  rows[0]!.classes = ["seat", "seat-A-1", "normal", "default", "future-provider-state"];
+  rows[1]!.classes = ["seat", "seat-A-2", "normal", "default", "disabled"];
+  rows[2]!.classes = ["seat", "seat-A-3", "seat-premier", "default"];
+  const result = normalizeAeonSeatSnapshot(
+    aeonSeatSnapshot({ seats: rows }),
+    "https://reserve.smart-theater.com/#/purchase/cinema/seat",
+    aeonSeatTheater(),
+    aeonSeatShowtime()
+  );
+  for (const id of ["A-1", "A-2", "A-3"]) assert.equal(result.seats.find((seat) => seat.id === id)?.state, "unknown", id);
+  assert.ok(result.seats.find((seat) => seat.id === "A-1")?.attributes.includes("provider:aeon:unreviewed-class"));
+});
+
+test("AEON seat normalization fails closed on any actual active seat", () => {
+  const rows = aeonSeatRows();
+  rows[7]!.classes = [...rows[7]!.classes.filter((value) => value !== "default"), "active"];
+  assert.throws(
+    () => normalizeAeonSeatSnapshot(
+      aeonSeatSnapshot({ seats: rows }),
+      "https://reserve.smart-theater.com/#/purchase/cinema/seat",
+      aeonSeatTheater(),
+      aeonSeatShowtime()
+    ),
+    (error) => error instanceof BrowserRuntimeError && error.code === "UI_STATE_CHANGED" && /active\/selected/.test(error.message)
+  );
+});
+
+test("AEON seat normalization fails closed when theater/movie/date/time/screen cannot all be proven by rendered Smart Theater text", () => {
+  const correct = String(aeonSeatSnapshot().bodyText);
+  for (const bodyText of [
+    correct.replace("港北ニュータウン", "みなとみらい"),
+    correct.replace("オークストリートの異変", "別の作品"),
+    correct.replace("2026年8月17日", "2026年8月18日"),
+    correct.replace("10:40", "11:40"),
+    correct.replace("スクリーン6", "スクリーン5"),
+    correct.replace("スクリーン6", "スクリーン60")
+  ]) {
+    assert.throws(
+      () => normalizeAeonSeatSnapshot(
+        aeonSeatSnapshot({ bodyText }),
+        "https://reserve.smart-theater.com/#/purchase/cinema/seat",
+        aeonSeatTheater(),
+        aeonSeatShowtime()
+      ),
+      (error) => error instanceof BrowserRuntimeError && error.code === "UI_STATE_CHANGED",
+      bodyText
+    );
+  }
+});
+
+test("AEON seat normalization rejects wrong/checkout Smart Theater routes even when seat-looking data is present", () => {
+  for (const url of [
+    "https://reserve.smart-theater.com/#/purchase/transaction/confirm",
+    "https://reserve.smart-theater.com/#/purchase/payment",
+    "https://example.com/#/purchase/cinema/seat"
+  ]) {
+    assert.throws(
+      () => normalizeAeonSeatSnapshot(aeonSeatSnapshot(), url, aeonSeatTheater(), aeonSeatShowtime()),
+      (error) => error instanceof BrowserRuntimeError && error.code === "UI_STATE_CHANGED",
+      url
+    );
+  }
+});
+
+test("AEON getSeatAvailability uses only reject -> exact showtime entry -> non-member -> read-only seat snapshot and never touches login fields", async () => {
+  const rows = theaterRows();
+  rows[0] = {
+    label: "港北ニュータウン ULTILA D-BOX",
+    href: "https://theater.aeoncinema.com/theaters/kohoku/",
+    area: "神奈川"
+  };
+  const genericStates = [
+    { url: "https://www.aeoncinema.com/theater/", value: { headingCount: 1, rows } },
+    {
+      url: "https://theater.aeoncinema.com/theaters/kohoku/?date=20260817",
+      value: {
+        title: "上映スケジュール｜港北ニュータウン｜イオンシネマ",
+        scheduleHeadingCount: 1,
+        theaterNames: ["イオンシネマ 港北ニュータウン"],
+        dateLabels: ["8/17（月）"],
+        ambiguousTimeGroups: 0,
+        showtimes: [{
+          movie: "[NEW]字幕 オークストリートの異変",
+          label: "10:40~13:00",
+          context: "[NEW]字幕 オークストリートの異変 10:40~13:00 スクリーン6 予約購入"
+        }],
+        emptySchedule: false
+      }
+    }
+  ];
+  const scheduleStates = [
+    { rejectCount: 1, allowCount: 1, settingsCount: 1, rejectPoint: { x: 10, y: 20 } },
+    { rejectCount: 0, allowCount: 0, settingsCount: 0 },
+    { matchedRows: 1, controlCount: 1, controlLabel: "10:40~13:00スクリーン6予約購入", point: { x: 30, y: 40 }, context: "exact" }
+  ];
+  const actions: string[] = [];
+  let genericIndex = 0;
+  let scheduleIndex = 0;
+  let watatheatreReads = 0;
+  let seatReads = 0;
+  const runtime = {
+    status: async () => ({ connected: true, url: "https://www.aeoncinema.com/theater/", provider: "aeon", officialSurface: true }),
+    navigateReviewed: async (url: string) => url,
+    evaluateSemanticState: async () => {
+      const state = genericStates[genericIndex++];
+      if (!state) throw new Error("fake generic state exhausted");
+      return state;
+    },
+    evaluateAeonSeatScheduleState: async () => {
+      const value = scheduleStates[scheduleIndex++];
+      if (!value) throw new Error("fake AEON schedule state exhausted");
+      return { url: "https://theater.aeoncinema.com/theaters/kohoku/?date=20260817", value };
+    },
+    clickAeonCookieReject: async () => { actions.push("全て拒否"); },
+    clickAeonSeatEntryAndAdoptWatatheatre: async () => { actions.push("予約購入"); },
+    evaluateAeonReviewedTargetState: async (surface: string) => {
+      if (surface === "watatheatre") {
+        watatheatreReads += 1;
+        if (watatheatreReads === 1) return {
+          url: "https://login.watatheatre.aeoncinema.com/login2",
+          value: { title: "AEON", guestCount: 0, loginFieldCount: 2, passwordFieldCount: 1, challengeCount: 0 }
+        };
+        return {
+          url: "https://login.watatheatre.aeoncinema.com/login2",
+          value: { title: "AEON", guestCount: 1, guestPoint: { x: 50, y: 60 }, loginFieldCount: 2, passwordFieldCount: 1, challengeCount: 0 }
+        };
+      }
+      seatReads += 1;
+      if (seatReads === 1) return {
+        url: "https://reserve.smart-theater.com/#/purchase/cinema/seat",
+        value: aeonSeatSnapshot({ seats: [] })
+      };
+      return { url: "https://reserve.smart-theater.com/#/purchase/cinema/seat", value: aeonSeatSnapshot() };
+    },
+    clickAeonGuestPurchaseAndWaitForSeat: async () => { actions.push("チケット購入のみ（会員登録しない）"); return "https://reserve.smart-theater.com/#/purchase/cinema/seat"; },
+    fillField: async () => { throw new Error("login fields must never be filled"); },
+    clickReviewedControl: async () => { throw new Error("seat flow must not use generic reviewed JS click") }
+  } as unknown as CinemaBrowserRuntime;
+
+  const result = await new AeonReadAdapter(runtime).getSeatAvailability({
+    theater: "港北ニュータウン",
+    date: "2026-08-17",
+    movie: "オークストリートの異変",
+    startTime: "10:40",
+    screen: "6"
+  });
+
+  assert.deepEqual(actions, ["全て拒否", "予約購入", "チケット購入のみ（会員登録しない）"]);
+  assert.equal(watatheatreReads, 2, "bounded hydration waits for exact guest control");
+  assert.equal(seatReads, 2, "bounded hydration waits for actual seats");
+  assert.equal(result.seatMap.seats.length, 24);
+  assert.equal(result.seatMap.seats.some((seat) => seat.state === "selected"), false);
+});
+
+test("AEON getSeatAvailability never automates `全て許可` and fails closed if reject is unavailable", async () => {
+  const adapter = new AeonReadAdapter({} as CinemaBrowserRuntime);
+  const mutable = adapter as unknown as { getShowtimes: () => Promise<unknown> };
+  mutable.getShowtimes = async () => ({
+    provider: "aeon",
+    theater: aeonSeatTheater(),
+    date: "2026-08-17",
+    dateAvailable: true,
+    availableDates: ["2026-08-17"],
+    sourceUrl: "https://theater.aeoncinema.com/theaters/kohoku/?date=20260817",
+    showtimes: [aeonSeatShowtime()]
+  });
+  let clicked = false;
+  const runtime = {
+    evaluateAeonSeatScheduleState: async () => ({
+      url: "https://theater.aeoncinema.com/theaters/kohoku/?date=20260817",
+      value: { rejectCount: 0, allowCount: 1, settingsCount: 1 }
+    }),
+    clickAeonCookieReject: async () => { clicked = true; }
+  } as unknown as CinemaBrowserRuntime;
+  (adapter as unknown as { runtime: CinemaBrowserRuntime }).runtime = runtime;
+
+  await assert.rejects(
+    adapter.getSeatAvailability({ theater: "港北ニュータウン", date: "2026-08-17", movie: "オークストリートの異変", startTime: "10:40", screen: "6" }),
+    (error) => error instanceof BrowserRuntimeError && error.code === "UI_STATE_CHANGED"
+  );
+  assert.equal(clicked, false);
+});
+
+
+test("AEON seat DOM reader statically requires seat-[ROW]-[NUMBER] identity and contains no seat-selection click path", () => {
+  const source = readFileSync(new URL("../src/providers/aeon/adapter.ts", import.meta.url), "utf8");
+  assert.match(source, /querySelectorAll\('\.seat'\)/);
+  assert.match(source, /ids\.length !== 1\) continue/);
+  assert.match(source, /\^seat-\[A-Z\]\+/);
+  assert.doesNotMatch(source, /\.click\s*\(/, "AEON provider adapter must not DOM-click any seat or control directly");
+  assert.doesNotMatch(source, /select_seats/);
+  assert.doesNotMatch(source, /clickAeon[^\n]*\(.*券種選択へ/);
+  assert.doesNotMatch(source, /clickAeon[^\n]*\(.*全て許可/);
 });

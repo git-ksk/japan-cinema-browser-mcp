@@ -108,3 +108,176 @@ test("reviewed click still fails closed immediately when it lands on an unreview
     elapsedMs: (warnings[0]?.[1] as { elapsedMs: number }).elapsedMs
   });
 });
+
+test("AEON reviewed seat entry adopts only the target created by that action and ignores pre-existing startup about:blank", async () => {
+  const runtime = new CinemaBrowserRuntime({} as ChromeProcess, 1_000);
+  const scheduleUrl = "https://theater.aeoncinema.com/theaters/kohoku/?date=20260817";
+  const targetSequences = [
+    [
+      { id: "schedule", type: "page", url: scheduleUrl },
+      { id: "startup-blank", type: "page", url: "about:blank" }
+    ],
+    [
+      { id: "schedule", type: "page", url: scheduleUrl },
+      { id: "startup-blank", type: "page", url: "about:blank" }
+    ],
+    [
+      { id: "schedule", type: "page", url: scheduleUrl },
+      { id: "startup-blank", type: "page", url: "about:blank" },
+      { id: "new-reservation", type: "page", url: "about:blank" }
+    ],
+    [
+      { id: "schedule", type: "page", url: scheduleUrl },
+      { id: "startup-blank", type: "page", url: "about:blank" },
+      { id: "new-reservation", type: "page", url: "https://login.watatheatre.aeoncinema.com/auth?eventId=observed" }
+    ]
+  ];
+  let sequenceIndex = 0;
+  let adopted = "";
+  const fakeClient = {};
+  const mutable = runtime as unknown as {
+    port: number;
+    getClient: () => Promise<unknown>;
+    currentUrlUnchecked: () => Promise<string>;
+    assertNoIntervention: () => Promise<void>;
+    trustedClickExactPoint: () => Promise<void>;
+    listBrowserTargets: () => Promise<unknown[]>;
+    adoptBrowserTarget: (id: string) => Promise<void>;
+  };
+  mutable.port = 9222;
+  mutable.getClient = async () => fakeClient;
+  mutable.currentUrlUnchecked = async () => adopted ? "https://login.watatheatre.aeoncinema.com/auth?eventId=observed" : scheduleUrl;
+  mutable.assertNoIntervention = async () => undefined;
+  mutable.trustedClickExactPoint = async () => undefined;
+  mutable.listBrowserTargets = async () => targetSequences[Math.min(sequenceIndex++, targetSequences.length - 1)]!;
+  mutable.adoptBrowserTarget = async (id: string) => { adopted = id; };
+
+  await runtime.clickAeonSeatEntryAndAdoptWatatheatre({ x: 100, y: 200 }, "10:40~12:40スクリーン6予約購入");
+  assert.equal(adopted, "new-reservation");
+  assert.notEqual(adopted, "startup-blank");
+});
+
+test("AEON reviewed seat entry refuses wrong or ambiguous newly-created targets", async () => {
+  const scheduleUrl = "https://theater.aeoncinema.com/theaters/kohoku/?date=20260817";
+  for (const created of [
+    [{ id: "new", type: "page", url: "https://example.com/checkout" }],
+    [
+      { id: "new-a", type: "page", url: "https://login.watatheatre.aeoncinema.com/auth?eventId=a" },
+      { id: "new-b", type: "page", url: "https://login.watatheatre.aeoncinema.com/auth?eventId=b" }
+    ]
+  ]) {
+    const runtime = new CinemaBrowserRuntime({} as ChromeProcess, 1_000);
+    let calls = 0;
+    const mutable = runtime as unknown as {
+      port: number;
+      getClient: () => Promise<unknown>;
+      currentUrlUnchecked: () => Promise<string>;
+      assertNoIntervention: () => Promise<void>;
+      trustedClickExactPoint: () => Promise<void>;
+      listBrowserTargets: () => Promise<unknown[]>;
+    };
+    mutable.port = 9222;
+    mutable.getClient = async () => ({});
+    mutable.currentUrlUnchecked = async () => scheduleUrl;
+    mutable.assertNoIntervention = async () => undefined;
+    mutable.trustedClickExactPoint = async () => undefined;
+    mutable.listBrowserTargets = async () => {
+      calls += 1;
+      const base = [{ id: "schedule", type: "page", url: scheduleUrl }, { id: "startup", type: "page", url: "about:blank" }];
+      return calls <= 2 ? base : [...base, ...created];
+    };
+
+    await assert.rejects(
+      runtime.clickAeonSeatEntryAndAdoptWatatheatre({ x: 100, y: 200 }, "10:40~12:40スクリーン6予約購入"),
+      (error) => error instanceof BrowserRuntimeError && ["URL_NOT_ALLOWED", "UI_STATE_CHANGED"].includes(error.code)
+    );
+  }
+});
+
+test("AEON read-only seat entry refuses any pre-existing Watatheatre/Smart Theater target including stale confirm", async () => {
+  const runtime = new CinemaBrowserRuntime({} as ChromeProcess, 1_000);
+  const mutable = runtime as unknown as {
+    port: number;
+    getClient: () => Promise<unknown>;
+    listBrowserTargets: () => Promise<unknown[]>;
+  };
+  mutable.port = 9222;
+  mutable.getClient = async () => ({});
+  mutable.listBrowserTargets = async () => [
+    { id: "stale", type: "page", url: "https://reserve.smart-theater.com/#/purchase/transaction/confirm" }
+  ];
+
+  await assert.rejects(
+    runtime.assertNoAeonExternalFlowTargets(),
+    (error) => error instanceof BrowserRuntimeError && error.code === "UI_STATE_CHANGED" && /refuses to reuse/.test(error.message)
+  );
+});
+
+test("AEON non-member continuation allows only observed Watatheatre -> transaction -> exact seat route and strips opaque query from output", async () => {
+  const runtime = new CinemaBrowserRuntime({} as ChromeProcess, 1_000);
+  const urls = [
+    "https://login.watatheatre.aeoncinema.com/purchase/guest?eventId=observed",
+    "https://reserve.smart-theater.com/?projectId=p&eventId=e&initId=i#/purchase/transaction",
+    "https://reserve.smart-theater.com/?projectId=p&eventId=e&initId=i#/purchase/cinema/seat"
+  ];
+  let index = 0;
+  const mutable = runtime as unknown as {
+    getClient: () => Promise<unknown>;
+    currentUrlUnchecked: () => Promise<string>;
+    assertNoAeonExternalBlocker: () => Promise<void>;
+    trustedClickExactPoint: () => Promise<void>;
+  };
+  mutable.getClient = async () => ({});
+  mutable.currentUrlUnchecked = async () => urls[Math.min(index++, urls.length - 1)]!;
+  mutable.assertNoAeonExternalBlocker = async () => undefined;
+  mutable.trustedClickExactPoint = async () => undefined;
+
+  const result = await runtime.clickAeonGuestPurchaseAndWaitForSeat({ x: 100, y: 200 });
+  assert.equal(result, "https://reserve.smart-theater.com/#/purchase/cinema/seat");
+});
+
+test("AEON non-member continuation fails closed on transaction/confirm or payment routes", async () => {
+  for (const bad of [
+    "https://reserve.smart-theater.com/#/purchase/transaction/confirm",
+    "https://reserve.smart-theater.com/#/purchase/payment"
+  ]) {
+    const runtime = new CinemaBrowserRuntime({} as ChromeProcess, 1_000);
+    const urls = ["https://login.watatheatre.aeoncinema.com/purchase/guest?eventId=observed", bad];
+    let index = 0;
+    const mutable = runtime as unknown as {
+      getClient: () => Promise<unknown>;
+      currentUrlUnchecked: () => Promise<string>;
+      assertNoAeonExternalBlocker: () => Promise<void>;
+      trustedClickExactPoint: () => Promise<void>;
+    };
+    mutable.getClient = async () => ({});
+    mutable.currentUrlUnchecked = async () => urls[Math.min(index++, urls.length - 1)]!;
+    mutable.assertNoAeonExternalBlocker = async () => undefined;
+    mutable.trustedClickExactPoint = async () => undefined;
+
+    await assert.rejects(
+      runtime.clickAeonGuestPurchaseAndWaitForSeat({ x: 100, y: 200 }),
+      (error) => error instanceof BrowserRuntimeError && error.code === "UI_STATE_CHANGED",
+      bad
+    );
+  }
+});
+
+test("AEON trusted pointer primitive dispatches real CDP mouse input only after exact rendered hit-test validation", async () => {
+  const runtime = new CinemaBrowserRuntime({} as ChromeProcess, 1_000);
+  const events: Array<Record<string, unknown>> = [];
+  const client = {
+    Runtime: {
+      evaluate: async () => ({ result: { value: { ok: true, label: "全て拒否", reason: null } } })
+    },
+    Input: {
+      dispatchMouseEvent: async (event: Record<string, unknown>) => { events.push(event); }
+    }
+  };
+  const mutable = runtime as unknown as {
+    trustedClickExactPoint: (client: unknown, point: { x: number; y: number }, label: string) => Promise<void>;
+  };
+  await mutable.trustedClickExactPoint(client, { x: 120.5, y: 240.25 }, "全て拒否");
+  assert.deepEqual(events.map((event) => event.type), ["mouseMoved", "mousePressed", "mouseReleased"]);
+  assert.equal(events[1]?.button, "left");
+});

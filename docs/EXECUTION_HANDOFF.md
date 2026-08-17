@@ -52,7 +52,7 @@ consumerは常に厳しい方を採用し、Human completionだけを理由に `
 
 ## Transaction invariant
 
-現在、TOHOのみreview済みread-only `seatMap=true` です。AEON / 109は `seatMap=false`、3社共通で次のtransaction/mutation capabilityはfalseです。
+現在、TOHO / AEON / 109の3社でreview済みread-only `seatMap=true` です。3社共通で次のtransaction/mutation capabilityはfalseです。
 
 ```text
 seatSelection=false
@@ -60,7 +60,7 @@ checkoutPreparation=false
 purchaseSubmission=false
 ```
 
-Execution Handoffはこれらのcapabilityを変更しません。TOHOのseat-map entryもdedicated read-only adapterだけが扱い、seat clickは実行しません。
+Execution Handoffはこれらのcapabilityを変更しません。各providerのseat-map entryはprovider-specific read-only adapterだけが扱い、seat clickは実行しません。
 
 Human intervention開始時にprepared purchase confirmationを全破棄します。そのためlogin、consent、CAPTCHA/access challenge、その他manual stepをまたいで以前のconfirmationを再利用できません。
 
