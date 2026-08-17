@@ -238,7 +238,7 @@ Discovery: [`PHASE4_CHECKOUT_DISCOVERY.md`](./PHASE4_CHECKOUT_DISCOVERY.md) / #4
 Implementation split:
 
 - ✅ #49 — provider-neutral checkout contract/core。strict intent、2-read seat freshness、exact-seat validation、ticket normalization、rendered summary/material fingerprintまで実装。`prepare_checkout` tool自体は未登録でtransaction capabilityは全社false
-- 🟡 #50 — TOHO first vertical slice。individual seat clickはlocal/session selectionと実証、internal exact-seat primitiveは実装中。post-consent hold/release未証明のためcapability false維持
+- 🟡 #50 — TOHO first vertical slice。individual seat clickはlocal/session selectionと実証、internal exact-seat primitiveはmainへmerge済み。post-consent continuationは [`PHASE4_TOHO_CONTINUATION_DESIGN.md`](./PHASE4_TOHO_CONTINUATION_DESIGN.md) に従い、explicit Human Handoff → fresh semantic action rebindで実装する。post-consent hold/release未証明のためcapability false維持
 - ⬜ #51 — AEON hold/release review + provider adapter。TOHO parityを強制しない
 - ⬜ #52 — 109 explicit 10-minute hold review + provider adapter。TOHO parityを強制しない
 
