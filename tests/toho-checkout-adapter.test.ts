@@ -104,7 +104,18 @@ function intent(seatIds: string[]): CinemaCheckoutIntent {
   };
 }
 
-function runtimeForSnapshots(snapshots: TohoSeatSnapshot[], options: { boundaryCount?: number; sensitiveFields?: number } = {}) {
+function runtimeForSnapshots(
+  snapshots: TohoSeatSnapshot[],
+  options: {
+    boundaryCount?: number;
+    sensitiveFields?: number;
+    orientationBlocked?: boolean;
+    confirm?: "none" | "exact" | "drift";
+    layoutWidth?: number;
+    layoutHeight?: number;
+    layoutOrientationBlocked?: boolean;
+  } = {}
+) {
   const clicks: string[] = [];
   const expressions: string[] = [];
   const handoffs: Array<{ reason: "consent"; action: CinemaHandoffAction; message: string }> = [];
@@ -118,10 +129,27 @@ function runtimeForSnapshots(snapshots: TohoSeatSnapshot[], options: { boundaryC
         if (!value) throw new Error("unexpected seat-map read");
         return { url: seatUrl, value };
       }
-      if (expression.includes("exactConsentNextControls")) {
+      if (expression.includes("width: innerWidth") && expression.includes("height: innerHeight")) {
         return {
           url: seatUrl,
           value: {
+            width: options.layoutWidth ?? 1280,
+            height: options.layoutHeight ?? 900,
+            orientationBlocked: options.layoutOrientationBlocked ?? false
+          }
+        };
+      }
+      if (expression.includes("exactConsentNextControls")) {
+        const confirm = options.confirm === "none" || options.confirm === undefined
+          ? null
+          : options.confirm === "exact"
+            ? { id: "fooder_menu_conf_bt", tagName: "DIV", className: "seat-action-button", label: "確認する", interactive: true }
+            : { id: "other", tagName: "DIV", className: "changed", label: "確認する", interactive: true };
+        return {
+          url: seatUrl,
+          value: {
+            orientationBlocked: options.orientationBlocked ?? false,
+            confirm,
             exactConsentNextControls: options.boundaryCount ?? 1,
             sensitiveFields: options.sensitiveFields ?? 0,
             visibleLabels: ["利用規約に同意して次へ"]
@@ -176,7 +204,10 @@ function reader(first: CinemaSeatMap<"toho">, second: CinemaSeatMap<"toho">) {
 test("TOHO internal checkout adapter selects only the exact intended seat set and starts a reviewed never-replay consent handoff", async () => {
   const baselineFirst = map(rawSnapshot(), "2026-08-17T07:00:00.000Z");
   const baselineSecond = map(rawSnapshot(), "2026-08-17T07:00:02.000Z");
-  const { runtime, clicks, expressions, handoffs, continuations } = runtimeForSnapshots([rawSnapshot(), rawSnapshot(["A-2"])]);
+  const { runtime, clicks, expressions, handoffs, continuations } = runtimeForSnapshots(
+    [rawSnapshot(), rawSnapshot(["A-2"])],
+    { confirm: "none", boundaryCount: 1 }
+  );
   const adapter = new TohoCheckoutAdapter(runtime, reader(baselineFirst, baselineSecond));
 
   await assert.rejects(
@@ -199,6 +230,26 @@ test("TOHO internal checkout adapter selects only the exact intended seat set an
   const binding = continuations.peek();
   assert.deepEqual(binding?.selectedSeatIds, ["A-2"]);
   assert.equal(binding?.browserTargetId, "target-1");
+});
+
+test("TOHO checkout rejects the observed mobile-landscape viewport before any seat mutation", async () => {
+  const first = map(rawSnapshot(), "2026-08-17T07:00:00.000Z");
+  const second = map(rawSnapshot(), "2026-08-17T07:00:02.000Z");
+  const { runtime, clicks, handoffs, continuations } = runtimeForSnapshots([], {
+    layoutWidth: 756,
+    layoutHeight: 469
+  });
+  const adapter = new TohoCheckoutAdapter(runtime, reader(first, second));
+  await assert.rejects(
+    adapter.selectExactSeatsToConsentBoundary(intent(["A-2"])),
+    (error) =>
+      error instanceof BrowserRuntimeError &&
+      error.code === "UI_STATE_CHANGED" &&
+      error.details?.reason === "unsupported_checkout_viewport"
+  );
+  assert.deepEqual(clicks, []);
+  assert.equal(handoffs.length, 0);
+  assert.equal(continuations.peek(), undefined);
 });
 
 test("TOHO internal checkout adapter revalidates between intended seats and never clicks a substitute or retries", async () => {
@@ -231,6 +282,64 @@ test("TOHO internal checkout adapter fails before mutation when an exact intende
   assert.deepEqual(clicks, []);
 });
 
+test("TOHO checkout stops after exact seat selection when the rendered seat-confirmation step is present", async () => {
+  const first = map(rawSnapshot(), "2026-08-17T07:00:00.000Z");
+  const second = map(rawSnapshot(), "2026-08-17T07:00:02.000Z");
+  const { runtime, clicks, handoffs, continuations } = runtimeForSnapshots(
+    [rawSnapshot(), rawSnapshot(["A-2"])],
+    { confirm: "exact", boundaryCount: 0 }
+  );
+  const adapter = new TohoCheckoutAdapter(runtime, reader(first, second));
+
+  await assert.rejects(
+    adapter.selectExactSeatsToConsentBoundary(intent(["A-2"])),
+    (error) =>
+      error instanceof BrowserRuntimeError &&
+      error.code === "UNREVIEWED_INTERACTION" &&
+      error.details?.controlLabel === "確認する"
+  );
+  assert.deepEqual(clicks, ["A-2"]);
+  assert.equal(handoffs.length, 0);
+  assert.equal(continuations.peek(), undefined);
+});
+
+test("TOHO checkout fails closed on the rendered landscape-orientation blocker before any continuation binding", async () => {
+  const first = map(rawSnapshot(), "2026-08-17T07:00:00.000Z");
+  const second = map(rawSnapshot(), "2026-08-17T07:00:02.000Z");
+  const { runtime, clicks, handoffs, continuations } = runtimeForSnapshots(
+    [rawSnapshot(), rawSnapshot(["A-2"])],
+    { orientationBlocked: true, confirm: "exact", boundaryCount: 0 }
+  );
+  const adapter = new TohoCheckoutAdapter(runtime, reader(first, second));
+
+  await assert.rejects(
+    adapter.selectExactSeatsToConsentBoundary(intent(["A-2"])),
+    (error) =>
+      error instanceof BrowserRuntimeError &&
+      error.code === "UI_STATE_CHANGED" &&
+      error.details?.reason === "unsupported_landscape_layout"
+  );
+  assert.deepEqual(clicks, ["A-2"]);
+  assert.equal(handoffs.length, 0);
+  assert.equal(continuations.peek(), undefined);
+});
+
+test("TOHO checkout fails closed if the seat-confirmation identity drifts", async () => {
+  const first = map(rawSnapshot(), "2026-08-17T07:00:00.000Z");
+  const second = map(rawSnapshot(), "2026-08-17T07:00:02.000Z");
+  const { runtime, clicks, handoffs } = runtimeForSnapshots(
+    [rawSnapshot(), rawSnapshot(["A-2"])],
+    { confirm: "drift", boundaryCount: 0 }
+  );
+  const adapter = new TohoCheckoutAdapter(runtime, reader(first, second));
+  await assert.rejects(
+    adapter.selectExactSeatsToConsentBoundary(intent(["A-2"])),
+    (error) => error instanceof BrowserRuntimeError && error.code === "UI_STATE_CHANGED"
+  );
+  assert.deepEqual(clicks, ["A-2"]);
+  assert.equal(handoffs.length, 0);
+});
+
 test("TOHO first checkout slice refuses special/accessibility seats before any pointer mutation", async () => {
   const first = map(rawSnapshot(), "2026-08-17T07:00:00.000Z");
   const second = structuredClone(first);
@@ -251,7 +360,10 @@ test("TOHO first checkout slice refuses special/accessibility seats before any p
 test("TOHO internal checkout adapter never crosses an absent or sensitive Human consent boundary", async () => {
   const first = map(rawSnapshot(), "2026-08-17T07:00:00.000Z");
   const second = map(rawSnapshot(), "2026-08-17T07:00:02.000Z");
-  const { runtime, clicks } = runtimeForSnapshots([rawSnapshot(), rawSnapshot(["A-2"])], { boundaryCount: 0 });
+  const { runtime, clicks } = runtimeForSnapshots(
+    [rawSnapshot(), rawSnapshot(["A-2"])],
+    { confirm: "none", boundaryCount: 0 }
+  );
   const adapter = new TohoCheckoutAdapter(runtime, reader(first, second));
 
   await assert.rejects(adapter.selectExactSeatsToConsentBoundary(intent(["A-2"])));

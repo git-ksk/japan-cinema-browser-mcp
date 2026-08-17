@@ -69,6 +69,8 @@ Human completionはpurchase approvalではありません。将来final purchase
 
 Phase 4 TOHO checkout continuationでは、reviewed consent boundaryでexplicit interventionを作り、Human完了後も元のsemantic mutationをretryしません。A1/A2ではbounded `reviewed_checkout_boundary` action（provider/boundary/continuation digestのみ）とprocess-local one-shot bindingを実装済みです。bindingはexact browser target / provider / intent / showtime / selected seats / pre-Human fingerprintsへbindし、cancel、browser reset、TTL、owned context mismatchで破棄します。HumanがContinueだけ返してpre-consent controlが残っている場合はverificationでHumanへ戻します。fresh `prepare_checkout`がcurrent rendered stageをpositiveに再検証できるまでbindingはconsumeしません。詳細は [`PHASE4_TOHO_CONTINUATION_DESIGN.md`](./PHASE4_TOHO_CONTINUATION_DESIGN.md) を参照してください。
 
+2026-08-17のB1 preflightでは、TOHOのcurrent rendered flowにlegal consentより前の `確認する` seat-decision stepがあることを再確認しました。このcontrolはhold semantics未reviewのためexplicit Human Handoffの対象にもせず、provider adapterは`UNREVIEWED_INTERACTION`で停止します。A1/A2はpost-confirm provider state向けのplumbingとして保持します。
+
 ## Invocation ownership
 
 現在のstdio deploymentではlogical principal bindingとして `local-stdio` を使い、requestStateをさらにexact tool name、canonical args digest、intervention id、resource epoch、resume strategyへbindします。

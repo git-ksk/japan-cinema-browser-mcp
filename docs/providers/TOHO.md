@@ -204,8 +204,13 @@ TOHO-ONEへログインせず購入できるguest pathは既存review済みで�
 - rendered stateは `A-2 空席(選択可)` / `seat_1.gif` から `A-2 選択中` / `seat_3.gif` へ変化
 - 直後に別fresh profileで同じ上映を再読しても `A-2` は `available` のままで、pre-clickとseat-state fingerprintも一致
 - したがって**individual seat activation自体はcross-session/server-side seat holdを開始しない**。documented hold triggerはseat clickより後段
-- seat selection後の次のmaterial controlはrendered `利用規約に同意して次へ`。legal consentはHuman-onlyなので自動clickしない
-- post-consentのどの瞬間に15分holdが開始するか、およびそのrelease semanticsは未証明
+- 後続B1 preflightで、公式rendered instructionがseat selection後に `確認する` を要求することを再確認。live isolated sessionでもseat imageが `選択中` になっただけではselected-seat summaryがadvanceせず、`確認する` はinteractiveにならなかった
+- このためdirect seat-image activationを「seat決定」と同一視しない。FAQの15分起点である「希望座席を決定」と最も近いcandidate boundaryとして `確認する` を別Gate 0bでreviewする
+- `確認する` のhold semanticsが未証明の間はagent/Humanどちらにも自動continuationを促さずfail closedする
+- legal consent `利用規約に同意して次へ` はその後のHuman-only boundary。post-confirm/post-consent hold/release semanticsは未証明
+- B1/Gate 0bの追加isolated validationは同じshowtime / ordinary seat `A-2`だけをsetupに使用し、alternate seat probingは行っていない。default headless viewport `756x469`ではseat image selection後にrendered horizontal-orientation blockerが出て `確認する` は0x0/non-interactiveだった
+- temporary desktop launch `1280x900`（rendered inner viewport `1280x813`）でも、seat imageを`選択中`へしただけでは `#fooder_menu_conf_bt` / `確認する` は0x0/non-interactiveのままだった。したがってorientationだけを原因と断定せず、direct seat-image activationがproviderのcomplete seat-decision sequenceを満たしていない可能性を含めてGate 0bで扱う
+- これら追加validationで `確認する`、terms checkbox、`利用規約に同意して次へ` は一度もclickしていない
 
 同じGate 0で現行rendered UI driftも確認しました。車いす席は旧来想定の `HC-*` IDに限られず、Screen 4ではvisible `113席 + 2車いす席` とexactly two `seat_4.gif` (`A-10`, `A-11`) が対応し、別Screenでも同じ構造を確認しました。このためwheelchair attributeはprovider-visible `seat_4.gif` とvisible capacityを相互検証して付与します。またselected-seat signalは旧 `#seatList1` だけでは不十分で、現行UIの `seat_3.gif` + exact `<seatId> 選択中` も明示的に検出し、read-only adapterでは1席でもselectedならfail closedします。
 
@@ -216,7 +221,8 @@ TOHO-ONEへログインせず購入できるguest pathは既存review済みで�
 - alternate seat / retry / speculative selectionなし
 - 複数intentの場合も1席ごとにbaselineからexpected state fingerprintを再構成し、自分が選択したseat以外のstate変化があれば次のclick前に停止
 - special/accessibility seatはfirst sliceではmutation前に拒否
-- exact selected setを確認後、`利用規約に同意して次へ` をHuman-required boundaryとして返して終了
+- exact selected setを確認後も、rendered `確認する` が存在する現行flowでは`UNREVIEWED_INTERACTION`で停止。`確認する`を自動clickしない
+- `確認する` Gate 0bを通過したprovider stateだけが、後続 `利用規約に同意して次へ` Human Handoff候補になれる
 - consent / ticket / purchaser PII / payment / final purchaseは操作しない
 - Human Handoff後にseat mutationをautomatic replayしない
 

@@ -238,7 +238,7 @@ Discovery: [`PHASE4_CHECKOUT_DISCOVERY.md`](./PHASE4_CHECKOUT_DISCOVERY.md) / #4
 Implementation split:
 
 - ✅ #49 — provider-neutral checkout contract/core。strict intent、2-read seat freshness、exact-seat validation、ticket normalization、rendered summary/material fingerprintまで実装。`prepare_checkout` tool自体は未登録でtransaction capabilityは全社false
-- 🟡 #50 — TOHO first vertical slice。individual seat clickはlocal/session selectionと実証、internal exact-seat primitive + A1 explicit reviewed Human Handoff + A2 ephemeral one-shot continuation bindingは実装済み。Human完了後のoriginal seat mutation replayは禁止し、bindingはtarget/provider/intent/material factsへbindしてcancel/reset/TTL/context mismatchで破棄。次はB1 post-consent Gate 1。hold/release未証明のためcapability false維持
+- 🟡 #50 — TOHO first vertical slice。individual seat image activationはlocal/session selectionでcross-session holdを作らないことを実証。A1 explicit reviewed Human Handoff + A2 ephemeral one-shot continuation bindingは実装済み。ただしB1 preflightでrendered `確認する` seat-decision stepの見落としを発見したため、current adapterはそこを`UNREVIEWED_INTERACTION`として停止。次はGate 0bで`確認する`のhold semantics / exact interaction sequenceをreviewし、その後にB1 post-consent Gate 1。capability false維持
 - ⬜ #51 — AEON hold/release review + provider adapter。TOHO parityを強制しない
 - ⬜ #52 — 109 explicit 10-minute hold review + provider adapter。TOHO parityを強制しない
 
