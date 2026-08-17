@@ -222,6 +222,8 @@ TOHO-ONEへログインせず購入できるguest pathは既存review済みで�
 
 Gate 0は**部分的に通過**していますが、post-consent hold/release境界が未証明なので `seatSelection=false` / `checkoutPreparation=false` を維持します。internal adapterやmilestoneの存在をcapability approvalとして扱いません。
 
+Post-consent continuationは、同じinvocationを再開してseat mutationをreplayする方式ではなく、explicit reviewed Human Handoff後に**fresh semantic action**がcurrent rendered stageを再検証してintentへre-bindする方式とします。material bindingは短命・process-local・one-shotとし、PII/credential/payment dataを保持しません。provider Gate 1ではHuman consent直後のrendered stage / hold timer / fresh-session availabilityをread-onlyで観測し、holdが確認できた場合の最初のrelease proofはguessed cancel操作ではなく自然timeoutによる解放を優先します。詳細: [`../PHASE4_TOHO_CONTINUATION_DESIGN.md`](../PHASE4_TOHO_CONTINUATION_DESIGN.md)。
+
 ### Human-only boundary
 
 初期Phase 4では以下をHumanへ戻します:

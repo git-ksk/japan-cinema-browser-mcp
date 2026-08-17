@@ -16,6 +16,7 @@ upstreamが担当するのは再利用可能なcontrol-planeだけです。
 
 Japan Cinema側には次を残します。
 
+- provider-reviewed checkout boundaryから明示的にHuman Handoffを開始する判断（Phase 4ではgeneric detectorとは別のnarrow entry pointを使う）
 - 自然発生したaccess challenge/CAPTCHA、sign-in/authentication、consentの検出/classification
 - official provider URL / capability allowlist
 - current page / postcondition verification
@@ -65,6 +66,8 @@ Execution Handoffはこれらのcapabilityを変更しません。各providerの
 Human intervention開始時にprepared purchase confirmationを全破棄します。そのためlogin、consent、CAPTCHA/access challenge、その他manual stepをまたいで以前のconfirmationを再利用できません。
 
 Human completionはpurchase approvalではありません。将来final purchaseを有効化する場合も、provider capability、runtime purchase flag、current provider/page verification、fresh one-shot material confirmation、final-control verificationをすべて別に満たす必要があります。ambiguous submission outcomeはautomatic retryしません。
+
+Phase 4 TOHO checkout continuationでは、reviewed consent boundaryでexplicit interventionを作り、Human完了後も元のsemantic mutationをretryしません。fresh `prepare_checkout`がcurrent rendered stageをpositiveに再検証し、短命なmaterial bindingへ再bindした場合だけ次stageへ進む設計です。詳細は [`PHASE4_TOHO_CONTINUATION_DESIGN.md`](./PHASE4_TOHO_CONTINUATION_DESIGN.md) を参照してください。
 
 ## Invocation ownership
 
