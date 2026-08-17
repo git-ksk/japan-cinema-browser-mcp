@@ -47,7 +47,8 @@ export const CINEMA_PROVIDERS: Record<CinemaProviderId, CinemaProviderDefinition
     capabilities: {
       theaters: true,
       showtimes: true,
-      ...NO_TRANSACTION_CAPABILITIES
+      ...NO_TRANSACTION_CAPABILITIES,
+      seatMap: true
     }
   },
   "109": {
@@ -243,6 +244,95 @@ export function assertReviewedIntermediateControlAllowed(providerId: CinemaProvi
   throw new ProviderPolicyError(
     "UNREVIEWED_INTERACTION",
     "This provider-specific intermediate control has not been reviewed for automated use."
+  );
+}
+
+
+export type AeonReviewedExternalSurface = "watatheatre" | "smart_theater_seat";
+export type AeonReviewedAction = "cookie_reject" | "seat_entry" | "guest_purchase";
+
+const AEON_WATATHEATRE_HOST = "login.watatheatre.aeoncinema.com";
+const AEON_SMART_THEATER_HOST = "reserve.smart-theater.com";
+const AEON_WATATHEATRE_PATHS = new Set(["/auth", "/login2", "/purchase/guest"]);
+
+function secureExactHttpsUrl(value: string, hostname: string): URL {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new ProviderPolicyError("URL_NOT_ALLOWED", "Reviewed provider target URL is malformed.");
+  }
+  if (
+    url.protocol !== "https:" ||
+    url.hostname !== hostname ||
+    url.username ||
+    url.password ||
+    (url.port && url.port !== "443")
+  ) {
+    throw new ProviderPolicyError("URL_NOT_ALLOWED", "Reviewed provider target is outside the exact HTTPS host boundary.");
+  }
+  return url;
+}
+
+export function assertAeonReviewedExternalUrl(value: string, surface: AeonReviewedExternalSurface): URL {
+  if (surface === "watatheatre") {
+    const url = secureExactHttpsUrl(value, AEON_WATATHEATRE_HOST);
+    if (!AEON_WATATHEATRE_PATHS.has(url.pathname) || url.hash) {
+      throw new ProviderPolicyError("URL_NOT_ALLOWED", "AEON Watatheatre target is outside the reviewed non-member transition routes.");
+    }
+    return url;
+  }
+
+  const url = secureExactHttpsUrl(value, AEON_SMART_THEATER_HOST);
+  if (url.pathname !== "/" || url.hash !== "#/purchase/cinema/seat") {
+    throw new ProviderPolicyError("URL_NOT_ALLOWED", "AEON Smart Theater target is not the reviewed seat-map route.");
+  }
+  return url;
+}
+
+export function classifyAeonReviewedTransitionUrl(value: string):
+  | "watatheatre"
+  | "smart_theater_transaction"
+  | "smart_theater_seat"
+  | undefined {
+  let url: URL;
+  try { url = new URL(value); } catch { return undefined; }
+  if (url.protocol !== "https:" || url.username || url.password || (url.port && url.port !== "443")) return undefined;
+  if (url.hostname === AEON_WATATHEATRE_HOST && AEON_WATATHEATRE_PATHS.has(url.pathname) && !url.hash) {
+    return "watatheatre";
+  }
+  if (url.hostname !== AEON_SMART_THEATER_HOST || url.pathname !== "/") return undefined;
+  if (url.hash === "#/purchase/transaction") return "smart_theater_transaction";
+  if (url.hash === "#/purchase/cinema/seat") return "smart_theater_seat";
+  return undefined;
+}
+
+export function isAeonExternalFlowHost(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" &&
+      !url.username && !url.password && !(url.port && url.port !== "443") &&
+      (url.hostname === AEON_WATATHEATRE_HOST || url.hostname === AEON_SMART_THEATER_HOST);
+  } catch {
+    return false;
+  }
+}
+
+export function assertAeonReviewedAction(action: AeonReviewedAction, label: string, currentUrl: string): void {
+  const exact = label.trim();
+  if (action === "guest_purchase") {
+    assertAeonReviewedExternalUrl(currentUrl, "watatheatre");
+    if (exact === "チケット購入のみ（会員登録しない）") return;
+  } else {
+    const url = assertGenericNavigationUrl(currentUrl, "aeon");
+    if (url.hostname === "theater.aeoncinema.com" && /^\/theaters\/[a-z0-9_-]+\/?$/.test(url.pathname)) {
+      if (action === "cookie_reject" && exact === "全て拒否") return;
+      if (action === "seat_entry" && exact === "予約購入") return;
+    }
+  }
+  throw new ProviderPolicyError(
+    "UNREVIEWED_INTERACTION",
+    "This AEON provider-specific action is not the exact reviewed read-only transition control."
   );
 }
 

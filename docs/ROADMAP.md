@@ -172,7 +172,7 @@ Discovery結果:
 
 - ✅ TOHO: live `座席指定` surfaceまでseat clickなしで検証。entry時にvisible timer / selected seatなし。read-only safety gate通過、v0.3.0 first providerを維持
 - ✅ 109: live seat-map entry時点で10分session timer開始を確認し、#35でexact rendered href / checkbox semantic read adapterを実装。seatMap=true、seatSelection=false
-- ✅ AEON: #36でpublic entry解決。Cookie overlayを`全て拒否`でdismissし、exact `予約購入` → non-member → e席リザーブseat mapへ到達。clean 2 sessionで168-seat fingerprint一致 / selected=0。adapter実装前なのでseatMap=false
+- ✅ AEON: #36でpublic entry safety gateを確立し、#43でreview済みtarget adoption + read-only seat DOM adapterを実装。fresh 2 sessionで168 seats / available 151 / unavailable 17 / premium 18 / wheelchair 2 / active 0。seatMap=true、recommendationはscreen orientation未証明のため未対応
 - ✅ special seatはavailabilityと分離してattributeとしてmodel化する方針
 - ✅ recommendationはconfirmed `available` のみをdefault対象とし、`unknown`を空席扱いしない
 - ✅ provider-neutral seat contract + deterministic adjacent / center / rear / rear-middle / aisle scoring core（#31）
@@ -183,17 +183,16 @@ Discovery結果:
 - ✅ rendered SCREEN markerからfront/rear orientationを明示検証。推測できない場合はscoringをfail closed
 - ✅ special/accessibility seatはdefault recommendationから除外し、明示opt-in時だけ候補化
 
-v0.3.0 first scope:
+v0.3.0 implemented scope:
 
-- first provider: TOHO Cinemas only
-- `get_seat_availability`
-- `recommend_seats`
+- `get_seat_availability`: TOHO / AEON / 109
+- `recommend_seats`: TOHO only
 - row / seat normalization
 - adjacent seat grouping
 - center / rear / rear-middle / aisle preference scoring
 - seat state refresh / stale detection
 
-TOHOは#32、109は#35でprovider-specific read-only adapter / fail-closed test / isolated live smokeまで完了したため `seatMap=true`。AEONはfalseのままです。3社とも `seatSelection=false` を維持します。
+TOHOは#32、109は#35、AEONは#43でprovider-specific read-only adapter / fail-closed test / isolated live smokeまで完了したため、3社とも `seatMap=true`。`seatSelection=false` は全社で維持します。
 
 `select_seats` / `seatSelection=true` はv0.3.0 first scopeに含めません。seat click / hold境界をprovider別に再レビューした場合だけ別Issueで検討します。
 
@@ -229,7 +228,7 @@ Exit criteria:
 - ✅ Human intervention開始時のprepared purchase confirmation破棄
 - ⬜ provider-specific checkout summary正規化
 
-TOHOのread-only `seatMap` だけがPhase 3でtrueになりました。`seatSelection` / `checkoutPreparation` / `purchaseSubmission` は引き続き全providerでfalseです。Human Handoff実装はtransaction capabilityの解禁を意味しません。
+TOHO / AEON / 109のread-only `seatMap` がPhase 3でtrueになりました。`seatSelection` / `checkoutPreparation` / `purchaseSubmission` は引き続き全providerでfalseです。Human Handoff実装はtransaction capabilityの解禁を意味しません。
 
 目標tool:
 

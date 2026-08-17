@@ -6,6 +6,7 @@
 - 109 Phase 1 read adapterレビュー日: 2026-08-13
 - Public safety hardening / live smoke再確認日: 2026-08-15
 - TOHO Phase 3 read-only seat adapterレビュー日: 2026-08-17
+- AEON Phase 3 read-only seat adapterレビュー日: 2026-08-17
 
 この文書は実装上の対応範囲と確認状況を管理するためのものです。法的助言を目的としたものではありません。購入機能・seat/checkout capabilityを有効化する前、materialなautomation surface変更時、またはprovider規約/UI変更が疑われる場合は、各providerの現行利用規約・サイトポリシー・実際のUIを再確認します。Public repositoryであること自体はproviderの許諾や法的適合を意味しません。
 
@@ -14,7 +15,7 @@
 | Provider | 公式root | 現在の自動化範囲 | 購入 |
 |---|---|---|---|
 | TOHOシネマズ | `https://www.tohotheater.jp/` | reviewed public read surface / bounded read / 劇場・日付・作品・上映回 + read-only座席表semantic read | 購入無効。seat selection / checkout未レビュー |
-| イオンシネマ | `https://www.aeoncinema.com/` | reviewed public read surface / bounded read / 劇場・日付・作品・上映回semantic read | 無効。seat/checkout未レビュー |
+| イオンシネマ | `https://www.aeoncinema.com/` | reviewed public read surface / bounded read / 劇場・日付・作品・上映回 + read-only座席表semantic read | 購入無効。seat selection / checkout未レビュー |
 | 109シネマズ | `https://109cinemas.net/` | reviewed public read surface / bounded read / 劇場・日付・作品・上映回 + read-only座席表semantic read | 購入無効。seat selection / checkout未レビュー |
 
 ## 共通ルール
@@ -39,14 +40,14 @@
 | Generic bounded read | ✅ | ✅ | ✅ |
 | 劇場一覧/選択semantic | ✅ | ✅ | ✅ |
 | 上映情報semantic | ✅ | ✅ | ✅ |
-| 座席表read | ✅ | ⬜ | ✅ |
+| 座席表read | ✅ | ✅ | ✅ |
 | 座席選択 | ⬜ | ⬜ | ⬜ |
 | Checkout preparation | ⬜ | ⬜ | ⬜ |
 | Final purchase | ⬜ | ⬜ | ⬜ |
 
 `✅` はそのcapabilityについて実装済み、`⬜` は未着手を表します。
 
-TOHOと109でreview済みread-only `seatMap=true` です。109はseat-map entryで10分session timerが開始しますがselected=0を必須検証します。`seatSelection=false / checkoutPreparation=false / purchaseSubmission=false` は3社とも維持し、AEONの `seatMap` はfalseです。
+TOHO / AEON / 109の3社でreview済みread-only `seatMap=true` です。109はseat-map entryで10分session timerが開始しますがselected=0を必須検証します。AEONはactual seatに`active`が1件でもあればfail closedします。`seatSelection=false / checkoutPreparation=false / purchaseSubmission=false` は3社とも維持します。
 
 ## Phase 3 Seat Intelligence Discovery — 2026-08-17
 
@@ -54,10 +55,10 @@ TOHO / AEON / 109のseat-map / seat-hold境界を、seat clickなしで再レビ
 
 - TOHO: live `座席指定` までseat clickなしで検証し、entry時selected=0 / visible timerなし。#32でread-only adapterを実装し `seatMap=true` へ昇格
 - 109: live seat-map entryで10分session timer開始を確認する一方、`選択座席 0／8席`かつ独立session間のseat-state fingerprint一致を確認。#35でexact rendered public href + checkbox semantic adapterを実装し `seatMap=true`
-- AEON: #36でCookie overlayを原因特定。visible `全て拒否` → exact `予約購入` → `チケット購入のみ（会員登録しない）` からe席リザーブ座席画面へ到達。独立2 sessionで168-seat fingerprint一致 / selected=0を確認。adapter未実装のためseatMap=falseは維持
+- AEON: #36でpublic entry safety gateを確立し、#43でreview済みtarget adoption + actual seat DOM normalizationを実装。fresh profile 2本のlive smokeで同一showtimeが168 seats / available 151 / unavailable 17 / premium 18 / wheelchair 2 / active 0となることを確認し `seatMap=true`。screen orientationは明示markerを証明できないため推測せず、recommendationは未対応
 - すべてのvalidation / smokeでseat clickは実施していない
 
-`v0.3.0 — Seat Intelligence` のTOHO first vertical sliceはread-only `get_seat_availability` / `recommend_seats`、rendered gap/orientation、freshness検知まで実装済みです。`select_seats` は含めません。
+`v0.3.0 — Seat Intelligence` では3社のread-only `get_seat_availability` を実装し、`recommend_seats` はscreen orientationをreviewできているTOHOだけで有効です。`select_seats` は含めません。
 
 ## TOHO Phase 1 Read Adapter
 

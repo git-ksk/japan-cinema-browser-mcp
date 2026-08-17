@@ -387,6 +387,7 @@ function requireReadAdapter(provider: CinemaProviderId, capability: "theaters" |
 function requireSeatAdapter(provider: CinemaProviderId): CinemaSeatReadAdapter {
   assertProviderCapability(provider, "seatMap");
   if (provider === "toho") return tohoReadAdapter;
+  if (provider === "aeon") return aeonReadAdapter;
   if (provider === "109") return cinemas109ReadAdapter;
   throw new ProviderPolicyError(
     "UNSUPPORTED_CAPABILITY",

@@ -1,6 +1,19 @@
 import { BrowserRuntimeError, CinemaBrowserRuntime } from "../../browser/runtime.js";
-import type { CinemaReadAdapter, CinemaShowtime, CinemaTheater, ShowtimeFormat, ShowtimeQuery, ShowtimeResult, TheaterListResult } from "../../cinema.js";
-import { assertOfficialUrl } from "../../providers.js";
+import type {
+  CinemaReadAdapter,
+  CinemaSeat,
+  CinemaSeatMap,
+  CinemaSeatReadAdapter,
+  CinemaShowtime,
+  CinemaTheater,
+  SeatAvailabilityQuery,
+  SeatAvailabilityResult,
+  ShowtimeFormat,
+  ShowtimeQuery,
+  ShowtimeResult,
+  TheaterListResult
+} from "../../cinema.js";
+import { assertAeonReviewedExternalUrl, assertOfficialUrl } from "../../providers.js";
 
 const AEON_THEATER_LIST_URL = "https://www.aeoncinema.com/theater/";
 const AEON_SCHEDULE_PATH = /^\/theaters\/([a-z0-9_-]+)\/?$/;
@@ -10,6 +23,8 @@ const SCHEDULE_READY_ATTEMPTS = 45;
 const READY_POLL_MS = 180;
 const RENDERED_SCHEDULE_LINK_ATTEMPTS = 16;
 const RENDERED_SCHEDULE_LINK_POLL_MS = 500;
+const SEAT_READY_ATTEMPTS = 30;
+const WATATHEATRE_READY_ATTEMPTS = 30;
 
 export interface AeonTheater extends CinemaTheater<"aeon"> {
   scheduleUrl?: string;
@@ -49,6 +64,57 @@ interface ScheduleSnapshot {
   ambiguousTimeGroups?: unknown;
   emptySchedule?: unknown;
   scheduleCardCount?: unknown;
+}
+
+interface AeonPointSnapshot { x?: unknown; y?: unknown; }
+
+interface AeonCookieSnapshot {
+  rejectCount?: unknown;
+  allowCount?: unknown;
+  settingsCount?: unknown;
+  rejectPoint?: AeonPointSnapshot;
+}
+
+interface AeonSeatEntrySnapshot {
+  matchedRows?: unknown;
+  controlCount?: unknown;
+  controlLabel?: unknown;
+  point?: AeonPointSnapshot;
+  context?: unknown;
+}
+
+interface AeonWatatheatreSnapshot {
+  title?: unknown;
+  guestCount?: unknown;
+  guestPoint?: AeonPointSnapshot;
+  loginFieldCount?: unknown;
+  passwordFieldCount?: unknown;
+  challengeCount?: unknown;
+}
+
+interface AeonSeatSnapshotRow {
+  classes?: unknown;
+  x?: unknown;
+  y?: unknown;
+  width?: unknown;
+  height?: unknown;
+}
+
+interface AeonScreenMarkerSnapshot {
+  text?: unknown;
+  x?: unknown;
+  y?: unknown;
+  width?: unknown;
+  height?: unknown;
+}
+
+interface AeonSeatSnapshot {
+  title?: unknown;
+  promptCount?: unknown;
+  nextControlCount?: unknown;
+  bodyText?: unknown;
+  seats?: unknown;
+  screenMarkers?: unknown;
 }
 
 const THEATER_LIST_EXPRESSION = `(() => {
@@ -204,6 +270,138 @@ const SCHEDULE_EXPRESSION = `(() => {
     scheduleCardCount: scheduleCards.length,
     emptySchedule: /(?:上映スケジュールはありません|上映予定はありません|上映回はありません)/.test(bodyText)
   };
+})()`;
+
+
+const AEON_COOKIE_EXPRESSION = `(() => {
+  const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+  const visible = (el) => {
+    const r = el.getBoundingClientRect();
+    const s = getComputedStyle(el);
+    return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' && !el.disabled;
+  };
+  const controls = Array.from(document.querySelectorAll('button,a,[role="button"],input[type="button"],input[type="submit"]')).filter(visible);
+  const labeled = controls.map((el) => ({ el, label: normalize(el.getAttribute('aria-label') || el.value || el.textContent) }));
+  const reject = labeled.filter((item) => item.label === '全て拒否');
+  const allow = labeled.filter((item) => item.label === '全て許可');
+  const settings = labeled.filter((item) => item.label === 'Cookie設定');
+  const point = reject.length === 1 ? (() => { const r = reject[0].el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })() : null;
+  return { rejectCount: reject.length, allowCount: allow.length, settingsCount: settings.length, rejectPoint: point };
+})()`;
+
+function aeonSeatEntryExpression(showtime: AeonShowtime): string {
+  const expectedMovie = JSON.stringify(normalizeText(showtime.movie));
+  const expectedStart = JSON.stringify(showtime.startTime);
+  const expectedEnd = JSON.stringify(showtime.endTime ?? "");
+  const expectedScreen = JSON.stringify(showtime.screen ?? "");
+  return `(() => {
+    const expectedMovie = ${expectedMovie};
+    const expectedStart = ${expectedStart};
+    const expectedEnd = ${expectedEnd};
+    const expectedScreen = ${expectedScreen};
+    const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+    const visible = (el) => {
+      const r = el.getBoundingClientRect();
+      const s = getComputedStyle(el);
+      return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' && !el.disabled;
+    };
+    const controlLabel = (el) => normalize(el.getAttribute('aria-label') || el.value || el.textContent);
+    const cards = Array.from(document.querySelectorAll('.p-schedule__information')).filter(visible);
+    const matchedRows = [];
+    for (const card of cards) {
+      const movie = normalize(card.querySelector('.p-schedule__header')?.textContent).replace(/\\s*上映時間[:：].*$/, '').trim();
+      if (movie !== expectedMovie) continue;
+      for (const ticket of Array.from(card.querySelectorAll('.p-schedule__ticket')).filter(visible)) {
+        const context = normalize(ticket.innerText || ticket.textContent);
+        const range = context.match(/((?:[01]?\\d|2\\d)[:：][0-5]\\d)\\s*[~〜～ー-]\\s*((?:[01]?\\d|2\\d)[:：][0-5]\\d)/);
+        if (!range?.[1] || !range[2]) continue;
+        const start = range[1].replace('：', ':').padStart(5, '0');
+        const end = range[2].replace('：', ':').padStart(5, '0');
+        if (start !== expectedStart || (expectedEnd && end !== expectedEnd)) continue;
+        if (expectedScreen) {
+          const compact = context.replace(/\\s+/g, '');
+          const screenToken = compact.match(/(?:スクリーン|SCREEN)([0-9A-Za-z_-]+)/i)?.[1] || '';
+          if (screenToken.toUpperCase() !== expectedScreen.replace(/\\s+/g, '').toUpperCase()) continue;
+        }
+        const statuses = Array.from(ticket.querySelectorAll('.p-schedule__status'))
+          .filter(visible)
+          .filter((el) => normalize(el.textContent) === '予約購入');
+        const isTicketButton = ticket.matches('button,[role="button"]') && visible(ticket);
+        matchedRows.push({ context, ticket, statuses, isTicketButton });
+      }
+    }
+    const actionable = matchedRows.filter((row) => row.isTicketButton && row.statuses.length === 1);
+    const point = actionable.length === 1 ? (() => {
+      const status = actionable[0].statuses[0];
+      let r = status.getBoundingClientRect();
+      if (r.bottom <= 0 || r.top >= innerHeight || r.right <= 0 || r.left >= innerWidth) {
+        actionable[0].ticket.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
+        r = status.getBoundingClientRect();
+      }
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    })() : null;
+    return {
+      matchedRows: matchedRows.length,
+      controlCount: actionable.length,
+      controlLabel: actionable.length === 1 ? controlLabel(actionable[0].ticket) : null,
+      point,
+      context: matchedRows.length === 1 ? matchedRows[0].context.slice(0, 700) : null
+    };
+  })()`;
+}
+
+const AEON_WATATHEATRE_EXPRESSION = `(() => {
+  const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+  const visible = (el) => {
+    const r = el.getBoundingClientRect();
+    const s = getComputedStyle(el);
+    return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' && !el.disabled;
+  };
+  const controls = Array.from(document.querySelectorAll('button,a,[role="button"],[role="link"],input[type="button"],input[type="submit"]')).filter(visible);
+  const guests = controls.filter((el) => normalize(el.getAttribute('aria-label') || el.value || el.textContent) === 'チケット購入のみ（会員登録しない）');
+  const point = guests.length === 1 ? (() => { const r = guests[0].getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })() : null;
+  const fields = Array.from(document.querySelectorAll('input,textarea,select')).filter(visible);
+  const challenges = Array.from(document.querySelectorAll('iframe[src*="recaptcha"],iframe[src*="hcaptcha"],iframe[src*="challenge"],#captcha,input[name*="captcha" i]')).filter(visible);
+  return {
+    title: document.title,
+    guestCount: guests.length,
+    guestPoint: point,
+    loginFieldCount: fields.length,
+    passwordFieldCount: fields.filter((el) => el.matches('input[type="password"],input[autocomplete="current-password"],input[autocomplete="one-time-code"]')).length,
+    challengeCount: challenges.length
+  };
+})()`;
+
+const AEON_SEAT_MAP_EXPRESSION = `(() => {
+  const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+  const visible = (el) => {
+    const r = el.getBoundingClientRect();
+    const s = getComputedStyle(el);
+    return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
+  };
+  const actualSeats = [];
+  for (const el of Array.from(document.querySelectorAll('.seat')).filter(visible)) {
+    const classes = Array.from(el.classList);
+    const ids = classes.filter((value) => /^seat-[A-Z]+-\\d+$/.test(value));
+    if (ids.length !== 1) continue;
+    const r = el.getBoundingClientRect();
+    actualSeats.push({ classes, x: r.left, y: r.top, width: r.width, height: r.height });
+    if (actualSeats.length >= 1000) break;
+  }
+  const all = Array.from(document.querySelectorAll('body *')).filter(visible);
+  const promptCount = all.filter((el) => normalize(el.textContent) === '座席を選んでください').length;
+  const nextControlCount = Array.from(document.querySelectorAll('button,a,[role="button"],[role="link"]'))
+    .filter(visible)
+    .filter((el) => normalize(el.getAttribute('aria-label') || el.textContent) === '券種選択へ').length;
+  const screenMarkers = all
+    .filter((el) => !Array.from(el.children).some(visible))
+    .map((el) => ({ el, text: normalize(el.textContent) }))
+    .filter((item) => /^(?:SCREEN|スクリーン)$/i.test(item.text))
+    .slice(0, 8)
+    .map((item) => { const r = item.el.getBoundingClientRect(); return { text: item.text, x: r.left, y: r.top, width: r.width, height: r.height }; });
+  const root = document.querySelector('main') || document.body;
+  const bodyText = normalize(root?.innerText || '').slice(0, 16000);
+  return { title: document.title, promptCount, nextControlCount, bodyText, seats: actualSeats, screenMarkers };
 })()`;
 
 function normalizeText(value: string): string {
@@ -477,6 +675,252 @@ export function normalizeAeonScheduleSnapshot(
   });
 }
 
+
+function rawString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function finiteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function pointFrom(value: unknown): { x: number; y: number } | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const point = value as AeonPointSnapshot;
+  return finiteNumber(point.x) && finiteNumber(point.y) ? { x: point.x, y: point.y } : undefined;
+}
+
+function compactContextText(value: string): string {
+  return value.normalize("NFKC").replace(/\s+/g, "").toLocaleLowerCase("ja-JP");
+}
+
+function aeonMovieContextKey(value: string): string {
+  return compactContextText(value)
+    .replace(/^\[(?:new|ニュー)\]/i, "")
+    .replace(/^(?:字幕版?|吹替版?|字幕|吹替)/, "")
+    .replace(/^\[(?:new|ニュー)\]/i, "");
+}
+
+function aeonSeatContextMatches(bodyText: string, theater: AeonTheater, showtime: AeonShowtime): boolean {
+  const compact = compactContextText(bodyText);
+  const theaterKey = normalizeAeonTheaterQuery(theater.name);
+  const movieKey = aeonMovieContextKey(showtime.movie);
+  const [year, monthRaw, dayRaw] = showtime.date.split("-");
+  const month = String(Number(monthRaw));
+  const day = String(Number(dayRaw));
+  const dateForms = [
+    `${year}/${month}/${day}`,
+    `${year}年${month}月${day}日`,
+    `${month}/${day}`,
+    `${month}月${day}日`
+  ].map(compactContextText);
+  const screenKey = showtime.screen ? compactContextText(showtime.screen) : "";
+  const escapedScreen = screenKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const exactScreen = Boolean(screenKey) && new RegExp(`(?:スクリーン|screen)${escapedScreen}(?![0-9a-z_-])`, "i").test(compact);
+  return (
+    Boolean(theaterKey) && compact.includes(theaterKey) &&
+    Boolean(movieKey) && compact.includes(movieKey) &&
+    dateForms.some((candidate) => compact.includes(candidate)) &&
+    compact.includes(compactContextText(showtime.startTime)) &&
+    exactScreen
+  );
+}
+
+function median(values: number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1 ? sorted[middle]! : (sorted[middle - 1]! + sorted[middle]!) / 2;
+}
+
+function reviewedAeonScreenEdge(
+  markers: unknown,
+  seats: Array<{ left: number; top: number; right: number; bottom: number }>
+): CinemaSeatMap<"aeon">["screenEdge"] {
+  if (!Array.isArray(markers) || markers.length !== 1 || seats.length === 0) return undefined;
+  const marker = markers[0] as AeonScreenMarkerSnapshot;
+  if (!/^(?:SCREEN|スクリーン)$/i.test(rawString(marker.text))) return undefined;
+  if (![marker.x, marker.y, marker.width, marker.height].every(finiteNumber)) return undefined;
+  const x = marker.x as number;
+  const y = marker.y as number;
+  const width = marker.width as number;
+  const height = marker.height as number;
+  if (width <= 0 || height <= 0) return undefined;
+  const left = Math.min(...seats.map((seat) => seat.left));
+  const top = Math.min(...seats.map((seat) => seat.top));
+  const right = Math.max(...seats.map((seat) => seat.right));
+  const bottom = Math.max(...seats.map((seat) => seat.bottom));
+  const margin = 2;
+  if (y + height <= top - margin) return "top";
+  if (y >= bottom + margin) return "bottom";
+  if (x + width <= left - margin) return "left";
+  if (x >= right + margin) return "right";
+  return undefined;
+}
+
+export function normalizeAeonSeatSnapshot(
+  snapshot: AeonSeatSnapshot,
+  sourceUrl: string,
+  theater: AeonTheater,
+  showtime: AeonShowtime,
+  observedAt = new Date().toISOString()
+): CinemaSeatMap<"aeon"> {
+  let reviewed: URL;
+  try {
+    reviewed = assertAeonReviewedExternalUrl(sourceUrl, "smart_theater_seat");
+  } catch (error) {
+    throw new BrowserRuntimeError(
+      "UI_STATE_CHANGED",
+      error instanceof Error ? error.message : "AEON Smart Theater seat-map URL is outside the reviewed boundary."
+    );
+  }
+  if (normalizeText(rawString(snapshot.title)) !== "e席リザーブ | イオンシネマ") {
+    throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON seat-map title no longer matches the reviewed e席リザーブ surface.", { title: snapshot.title });
+  }
+  if (typeof snapshot.promptCount !== "number" || snapshot.promptCount < 1 || snapshot.promptCount > 4) {
+    throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON seat-map prompt is missing or implausibly duplicated.", { promptCount: snapshot.promptCount });
+  }
+  const bodyText = rawString(snapshot.bodyText);
+  if (!aeonSeatContextMatches(bodyText, theater, showtime)) {
+    throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON Smart Theater rendered context does not prove the requested theater/movie/date/time/screen.", {
+      theater: theater.name,
+      movie: showtime.movie,
+      date: showtime.date,
+      startTime: showtime.startTime,
+      screen: showtime.screen
+    });
+  }
+  if (!Array.isArray(snapshot.seats) || snapshot.seats.length < 20 || snapshot.seats.length > 1000) {
+    throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON actual seat identity list is missing or implausible.", {
+      count: Array.isArray(snapshot.seats) ? snapshot.seats.length : 0
+    });
+  }
+
+  const knownClasses = new Set(["seat", "default", "disabled", "active", "normal", "space", "special", "seat-premier", "hc"]);
+  type PendingSeat = {
+    seat: CinemaSeat;
+    left: number;
+    top: number;
+    right: number;
+    bottom: number;
+    width: number;
+    height: number;
+    centerX: number;
+    centerY: number;
+  };
+  const pending: PendingSeat[] = [];
+  const ids = new Set<string>();
+  for (const raw of snapshot.seats as AeonSeatSnapshotRow[]) {
+    if (!Array.isArray(raw?.classes) || raw.classes.some((item) => typeof item !== "string")) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON seat class list became unreadable.");
+    }
+    const classes = raw.classes as string[];
+    const idTokens = classes.filter((value) => /^seat-[A-Z]+-\d+$/.test(value));
+    if (idTokens.length !== 1) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON actual seat identity class became missing or ambiguous.");
+    }
+    const idMatch = idTokens[0]!.match(/^seat-([A-Z]+)-(\d+)$/);
+    if (!idMatch?.[1] || !idMatch[2]) throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON actual seat identity is malformed.");
+    const id = `${idMatch[1]}-${idMatch[2]}`;
+    if (ids.has(id)) throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON actual seat identity is duplicated.", { seatId: id });
+    ids.add(id);
+    if (![raw.x, raw.y, raw.width, raw.height].every(finiteNumber) || (raw.width as number) <= 0 || (raw.height as number) <= 0) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON actual seat geometry is missing or invalid.", { seatId: id });
+    }
+    if (classes.includes("active")) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON read-only seat map unexpectedly contains an active/selected seat.", { seatId: id });
+    }
+    const unknownClass = classes.some((value) => value !== idTokens[0] && !knownClasses.has(value));
+    const semanticConflict =
+      !classes.includes("seat") ||
+      (classes.includes("default") && classes.includes("disabled")) ||
+      (classes.includes("normal") && (classes.includes("special") || classes.includes("hc"))) ||
+      (classes.includes("seat-premier") && !classes.includes("special")) ||
+      (classes.includes("hc") && classes.includes("seat-premier"));
+    let state: CinemaSeat["state"] = "unknown";
+    if (!unknownClass && !semanticConflict) {
+      if (classes.includes("default") && !classes.includes("disabled")) state = "available";
+      else if (classes.includes("disabled") && !classes.includes("default")) state = "unavailable";
+    }
+    const attributes: CinemaSeat["attributes"] = [];
+    if (classes.includes("special")) attributes.push("provider:aeon:special");
+    if (classes.includes("special") && classes.includes("seat-premier")) attributes.push("premium");
+    if (classes.includes("hc")) attributes.push("wheelchair");
+    if (classes.includes("space")) attributes.push("provider:aeon:space");
+    if (unknownClass) attributes.push("provider:aeon:unreviewed-class");
+    const left = raw.x as number;
+    const top = raw.y as number;
+    const width = raw.width as number;
+    const height = raw.height as number;
+    pending.push({
+      seat: {
+        id,
+        row: idMatch[1],
+        number: idMatch[2],
+        state,
+        ...(state === "unavailable" ? { unavailableReason: "unknown" as const } : {}),
+        attributes,
+        x: left,
+        y: top
+      },
+      left,
+      top,
+      right: left + width,
+      bottom: top + height,
+      width,
+      height,
+      centerX: left + width / 2,
+      centerY: top + height / 2
+    });
+  }
+
+  const heightTolerance = Math.max(2, median(pending.map((item) => item.height)) * 0.45);
+  const visualRows: PendingSeat[][] = [];
+  for (const item of [...pending].sort((a, b) => a.centerY - b.centerY || a.centerX - b.centerX)) {
+    const row = visualRows.find((candidate) => Math.abs(median(candidate.map((seat) => seat.centerY)) - item.centerY) <= heightTolerance);
+    if (row) row.push(item);
+    else visualRows.push([item]);
+  }
+  visualRows.sort((a, b) => median(a.map((seat) => seat.centerY)) - median(b.map((seat) => seat.centerY)));
+  for (let rowIndex = 0; rowIndex < visualRows.length; rowIndex += 1) {
+    const row = visualRows[rowIndex]!.sort((a, b) => a.centerX - b.centerX);
+    const steps = row.slice(1).map((item, index) => item.centerX - row[index]!.centerX).filter((value) => value > 0);
+    const ordinaryStep = median(steps);
+    let columnIndex = 0;
+    for (let index = 0; index < row.length; index += 1) {
+      const current = row[index]!;
+      if (index > 0) {
+        const previous = row[index - 1]!;
+        const delta = current.centerX - previous.centerX;
+        const clearGap = ordinaryStep > 0 && delta > ordinaryStep * 1.55 && delta > median([previous.width, current.width]) * 1.8;
+        if (clearGap) {
+          columnIndex += Math.max(2, Math.round(delta / ordinaryStep));
+          previous.seat.rightBoundary = "gap";
+          current.seat.leftBoundary = "gap";
+        } else {
+          columnIndex += 1;
+        }
+      }
+      current.seat.rowIndex = rowIndex;
+      current.seat.columnIndex = columnIndex;
+    }
+  }
+
+  const seatRects = pending.map((item) => ({ left: item.left, top: item.top, right: item.right, bottom: item.bottom }));
+  const screenEdge = reviewedAeonScreenEdge(snapshot.screenMarkers, seatRects);
+  return {
+    provider: "aeon",
+    theaterId: theater.id,
+    theater: theater.name,
+    ...(showtime.screen ? { screen: showtime.screen } : {}),
+    showtimeIdentity: ["aeon", theater.id, showtime.date, showtime.movie, showtime.startTime, showtime.endTime ?? "", showtime.screen ?? ""].join("|"),
+    seats: pending.map((item) => item.seat),
+    ...(screenEdge ? { screenEdge } : {}),
+    observedAt,
+    sourceUrl: `${reviewed.protocol}//${reviewed.host}${reviewed.pathname}${reviewed.hash}`
+  };
+}
+
 function isTheaterListUrl(value: string): boolean {
   try {
     const url = assertOfficialUrl(value, "aeon");
@@ -502,7 +946,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export class AeonReadAdapter implements CinemaReadAdapter<"aeon", AeonTheater, AeonShowtime> {
+export class AeonReadAdapter implements CinemaReadAdapter<"aeon", AeonTheater, AeonShowtime>, CinemaSeatReadAdapter<"aeon", AeonTheater, AeonShowtime> {
   constructor(private readonly runtime: CinemaBrowserRuntime) {}
 
   private async timedPhase<T>(phase: string, task: () => Promise<T>): Promise<T> {
@@ -575,6 +1019,114 @@ export class AeonReadAdapter implements CinemaReadAdapter<"aeon", AeonTheater, A
       sourceUrl: semantic.url,
       showtimes
     };
+  }
+
+  async getSeatAvailability(input: SeatAvailabilityQuery): Promise<SeatAvailabilityResult<"aeon", AeonTheater, AeonShowtime>> {
+    if (!/^\d{2}:\d{2}$/.test(input.startTime)) {
+      throw new BrowserRuntimeError("UI_ELEMENT_NOT_FOUND", "AEON seat availability requires an exact 24-hour showtime startTime.");
+    }
+    const schedule = await this.getShowtimes({ theater: input.theater, date: input.date, movie: input.movie });
+    if (!schedule.dateAvailable) {
+      throw new BrowserRuntimeError("UI_ELEMENT_NOT_FOUND", "AEON requested seat-availability date is not exposed by the current public schedule.", { date: input.date });
+    }
+    let matches = schedule.showtimes.filter((showtime) => showtime.startTime === input.startTime);
+    if (input.screen?.trim()) matches = matches.filter((showtime) => showtime.screen === input.screen!.trim());
+    if (matches.length !== 1) {
+      throw new BrowserRuntimeError("UI_ELEMENT_NOT_FOUND", "AEON showtime did not resolve to one unique rendered schedule row for seat availability.", {
+        movie: input.movie,
+        startTime: input.startTime,
+        screen: input.screen,
+        candidates: matches.slice(0, 8).map((showtime) => ({ movie: showtime.movie, startTime: showtime.startTime, screen: showtime.screen }))
+      });
+    }
+    const showtime = matches[0]!;
+    if (!showtime.screen) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON seat availability requires an observed screen identity from the rendered schedule row.");
+    }
+    if (showtime.availability === "sold_out" || showtime.availability === "unavailable") {
+      throw new BrowserRuntimeError("UI_ELEMENT_NOT_FOUND", "AEON showtime is not currently represented as a sellable seat-map entry.", { availability: showtime.availability });
+    }
+
+    const cookie = await this.runtime.evaluateAeonSeatScheduleState<AeonCookieSnapshot>(AEON_COOKIE_EXPRESSION);
+    const rejectCount = typeof cookie.value.rejectCount === "number" ? cookie.value.rejectCount : 0;
+    const allowCount = typeof cookie.value.allowCount === "number" ? cookie.value.allowCount : 0;
+    const settingsCount = typeof cookie.value.settingsCount === "number" ? cookie.value.settingsCount : 0;
+    if (rejectCount > 1 || allowCount > 1 || settingsCount > 1) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON Cookie controls are ambiguous; refusing automated consent handling.", {
+        rejectCount, allowCount, settingsCount
+      });
+    }
+    if (rejectCount === 1) {
+      const rejectPoint = pointFrom(cookie.value.rejectPoint);
+      if (!rejectPoint) throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON exact `全て拒否` Cookie control has no usable rendered pointer geometry.");
+      await this.runtime.clickAeonCookieReject(rejectPoint);
+      let dismissed = false;
+      for (let attempt = 0; attempt < 12; attempt += 1) {
+        const next = await this.runtime.evaluateAeonSeatScheduleState<AeonCookieSnapshot>(AEON_COOKIE_EXPRESSION);
+        const nextReject = typeof next.value.rejectCount === "number" ? next.value.rejectCount : 0;
+        const nextAllow = typeof next.value.allowCount === "number" ? next.value.allowCount : 0;
+        const nextSettings = typeof next.value.settingsCount === "number" ? next.value.settingsCount : 0;
+        if (nextReject === 0 && nextAllow === 0 && nextSettings === 0) {
+          dismissed = true;
+          break;
+        }
+        if (nextReject > 1 || nextAllow > 1 || nextSettings > 1 || nextReject === 0) {
+          throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON Cookie surface changed to an unreviewed state after exact rejection.");
+        }
+        await sleep(READY_POLL_MS);
+      }
+      if (!dismissed) throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON Cookie overlay did not dismiss after the exact privacy-preserving rejection action.");
+    } else if (allowCount > 0 || settingsCount > 0) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON Cookie surface is visible without one exact `全て拒否` control; refusing consent automation.");
+    }
+
+    const entry = await this.runtime.evaluateAeonSeatScheduleState<AeonSeatEntrySnapshot>(aeonSeatEntryExpression(showtime));
+    if (entry.value.matchedRows !== 1 || entry.value.controlCount !== 1) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON requested showtime is no longer represented by one exact rendered `予約購入` control.", {
+        matchedRows: entry.value.matchedRows,
+        controlCount: entry.value.controlCount
+      });
+    }
+    const entryPoint = pointFrom(entry.value.point);
+    const entryControlLabel = rawString(entry.value.controlLabel);
+    if (!entryPoint || !entryControlLabel || !entryControlLabel.endsWith("予約購入")) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON exact reservation control has no usable rendered pointer geometry/label.");
+    }
+    await this.runtime.clickAeonSeatEntryAndAdoptWatatheatre(entryPoint, entryControlLabel);
+
+    let watatheatre: { url: string; value: AeonWatatheatreSnapshot } | undefined;
+    for (let attempt = 0; attempt < WATATHEATRE_READY_ATTEMPTS; attempt += 1) {
+      watatheatre = await this.runtime.evaluateAeonReviewedTargetState<AeonWatatheatreSnapshot>("watatheatre", AEON_WATATHEATRE_EXPRESSION);
+      if (watatheatre.value.challengeCount && watatheatre.value.challengeCount !== 0) {
+        throw new BrowserRuntimeError("HUMAN_ACTION_REQUIRED", "AEON Watatheatre exposed an access challenge; read-only automation will not bypass it.");
+      }
+      if (watatheatre.value.guestCount === 1 && pointFrom(watatheatre.value.guestPoint)) break;
+      if (typeof watatheatre.value.guestCount === "number" && watatheatre.value.guestCount > 1) {
+        throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON Watatheatre non-member continuation became ambiguous.", { count: watatheatre.value.guestCount });
+      }
+      await sleep(READY_POLL_MS);
+    }
+    const guestPoint = watatheatre ? pointFrom(watatheatre.value.guestPoint) : undefined;
+    if (!watatheatre || watatheatre.value.guestCount !== 1 || !guestPoint) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON Watatheatre did not expose one exact non-member continuation within the bounded wait.");
+    }
+    await this.runtime.clickAeonGuestPurchaseAndWaitForSeat(guestPoint);
+
+    let seatSemantic: { url: string; value: AeonSeatSnapshot } | undefined;
+    for (let attempt = 0; attempt < SEAT_READY_ATTEMPTS; attempt += 1) {
+      seatSemantic = await this.runtime.evaluateAeonReviewedTargetState<AeonSeatSnapshot>("smart_theater_seat", AEON_SEAT_MAP_EXPRESSION);
+      const count = Array.isArray(seatSemantic.value.seats) ? seatSemantic.value.seats.length : 0;
+      if (
+        normalizeText(rawString(seatSemantic.value.title)) === "e席リザーブ | イオンシネマ" &&
+        typeof seatSemantic.value.promptCount === "number" &&
+        seatSemantic.value.promptCount >= 1 && seatSemantic.value.promptCount <= 4 &&
+        count >= 20
+      ) break;
+      await sleep(READY_POLL_MS);
+    }
+    if (!seatSemantic) throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON Smart Theater seat surface did not hydrate.");
+    const seatMap = normalizeAeonSeatSnapshot(seatSemantic.value, seatSemantic.url, schedule.theater, showtime);
+    return { provider: "aeon", theater: schedule.theater, showtime, seatMap };
   }
 
   private async readTheaterCandidates(query?: string): Promise<{ sourceUrl: string; theaters: AeonTheaterCandidate[] }> {
