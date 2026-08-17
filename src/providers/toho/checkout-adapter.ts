@@ -24,6 +24,7 @@ import {
 } from "./adapter.js";
 
 const TOHO_CONSENT_NEXT_LABEL = "利用規約に同意して次へ";
+const TOHO_MIN_DESKTOP_MUTATION_WIDTH = 1024;
 
 interface TohoCheckoutRuntime {
   evaluateSemanticState<T>(expectedProvider: "toho", expression: string): Promise<{ url: string; value: T }>;
@@ -52,10 +53,18 @@ interface TohoSeatClickTarget {
   y?: unknown;
 }
 
-interface TohoConsentBoundarySnapshot {
+interface TohoPostSelectionBoundarySnapshot {
+  orientationBlocked?: unknown;
+  confirm?: unknown;
   exactConsentNextControls?: unknown;
   sensitiveFields?: unknown;
   visibleLabels?: unknown;
+}
+
+interface TohoCheckoutLayoutSnapshot {
+  width?: unknown;
+  height?: unknown;
+  orientationBlocked?: unknown;
 }
 
 
@@ -91,13 +100,40 @@ function exactSeatClickTargetExpression(seatId: string): string {
   })()`;
 }
 
-const TOHO_CONSENT_BOUNDARY_EXPRESSION = `(() => {
+const TOHO_CHECKOUT_LAYOUT_EXPRESSION = `(() => {
+  const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+  const body = normalize(document.body?.innerText || '');
+  return {
+    width: innerWidth,
+    height: innerHeight,
+    orientationBlocked: body.includes('このページはディスプレイを横にしたままご利用いただけません。')
+  };
+})()`;
+
+const TOHO_POST_SELECTION_BOUNDARY_EXPRESSION = `(() => {
   const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
   const visible = (el) => {
     const rect = el.getBoundingClientRect();
     const style = getComputedStyle(el);
     return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && style.pointerEvents !== 'none';
   };
+  const body = normalize(document.body?.innerText || '');
+  const confirmEl = document.getElementById('fooder_menu_conf_bt');
+  let confirm = null;
+  if (confirmEl) {
+    const rect = confirmEl.getBoundingClientRect();
+    const style = getComputedStyle(confirmEl);
+    confirm = {
+      id: String(confirmEl.id || ''),
+      tagName: String(confirmEl.tagName || ''),
+      className: String(confirmEl.className || ''),
+      label: normalize(confirmEl.getAttribute('aria-label') || confirmEl.textContent),
+      interactive: visible(confirmEl),
+      width: rect.width,
+      height: rect.height,
+      pointerEvents: String(style.pointerEvents || '')
+    };
+  }
   const controls = Array.from(document.querySelectorAll('button,a,input[type="button"],input[type="submit"]'))
     .filter(visible)
     .map((el) => normalize(el.getAttribute('aria-label') || el.value || el.textContent));
@@ -109,9 +145,11 @@ const TOHO_CONSENT_BOUNDARY_EXPRESSION = `(() => {
     return type === 'password' || autocomplete === 'one-time-code' || /otp|認証コード|verification|card|カード|cvv|cvc|security/.test(label);
   });
   return {
+    orientationBlocked: body.includes('このページはディスプレイを横にしたままご利用いただけません。'),
+    confirm,
     exactConsentNextControls: controls.filter((label) => label === '利用規約に同意して次へ').length,
     sensitiveFields: sensitiveFields.length,
-    visibleLabels: controls.filter((label) => /利用規約|次へ/.test(label)).slice(0, 8)
+    visibleLabels: controls.filter((label) => /確認する|利用規約|次へ/.test(label)).slice(0, 8)
   };
 })()`;
 
@@ -185,8 +223,9 @@ function assertOrdinaryIntendedSeats(map: CinemaSeatMap<"toho">, seatIds: readon
 
 /**
  * Internal TOHO Phase 4 adapter. It is intentionally not wired to the MCP tool registry
- * or provider capability matrix yet. It may select only exact ordinary seats and stops
- * at the rendered legal-consent boundary; it never clicks the consent/next control.
+ * or provider capability matrix yet. It may select only exact ordinary seats. If TOHO
+ * exposes the intermediate rendered `確認する` step, the adapter stops because that
+ * candidate hold boundary is not reviewed. It never clicks seat-confirmation or consent controls.
  */
 export class TohoCheckoutAdapter {
   private readonly seatReader: CinemaSeatReadAdapter<"toho", TohoTheater, TohoShowtime>;
@@ -210,6 +249,30 @@ export class TohoCheckoutAdapter {
     const plan = validateCheckoutSeatIntent(intent, first, second);
     const baseline = second.seatMap;
     assertOrdinaryIntendedSeats(baseline, plan.seatIds);
+
+    const layout = await this.runtime.evaluateSemanticState<TohoCheckoutLayoutSnapshot>(
+      "toho",
+      TOHO_CHECKOUT_LAYOUT_EXPRESSION
+    );
+    if (layout.url !== baseline.sourceUrl) {
+      throw new CheckoutCoreError("STALE_CONTEXT", "TOHO seat page changed before checkout layout validation.");
+    }
+    const width = typeof layout.value.width === "number" ? layout.value.width : NaN;
+    const height = typeof layout.value.height === "number" ? layout.value.height : NaN;
+    if (
+      layout.value.orientationBlocked === true ||
+      !Number.isFinite(width) ||
+      !Number.isFinite(height) ||
+      width <= 0 ||
+      height <= 0 ||
+      (width < TOHO_MIN_DESKTOP_MUTATION_WIDTH && width > height)
+    ) {
+      throw new BrowserRuntimeError(
+        "UI_STATE_CHANGED",
+        "TOHO checkout mutation requires a supported rendered viewport before any seat activation.",
+        { reason: "unsupported_checkout_viewport", width: Number.isFinite(width) ? width : undefined, height: Number.isFinite(height) ? height : undefined }
+      );
+    }
 
     const selected: string[] = [];
     let finalSelectedMap = baseline;
@@ -268,20 +331,49 @@ export class TohoCheckoutAdapter {
       finalSelectedMap = after;
     }
 
-    const boundary = await this.runtime.evaluateSemanticState<TohoConsentBoundarySnapshot>(
+    const boundary = await this.runtime.evaluateSemanticState<TohoPostSelectionBoundarySnapshot>(
       "toho",
-      TOHO_CONSENT_BOUNDARY_EXPRESSION
+      TOHO_POST_SELECTION_BOUNDARY_EXPRESSION
     );
     if (boundary.url !== baseline.sourceUrl) {
-      throw new CheckoutCoreError("STALE_CONTEXT", "TOHO left the reviewed seat page before the Human consent boundary.");
+      throw new CheckoutCoreError("STALE_CONTEXT", "TOHO left the reviewed seat page after exact seat selection.");
     }
-    if (boundary.value.sensitiveFields !== 0 || boundary.value.exactConsentNextControls !== 1) {
+    if (boundary.value.sensitiveFields !== 0) {
       throw new BrowserRuntimeError(
         "UI_STATE_CHANGED",
-        "TOHO did not expose exactly one reviewed legal-consent continuation after seat selection.",
+        "TOHO exposed a sensitive field before the reviewed checkout continuation boundary.",
+        { sensitiveFields: boundary.value.sensitiveFields }
+      );
+    }
+    if (boundary.value.orientationBlocked === true) {
+      throw new BrowserRuntimeError(
+        "UI_STATE_CHANGED",
+        "TOHO blocked the post-selection layout because the current browser orientation is unsupported.",
+        { reason: "unsupported_landscape_layout" }
+      );
+    }
+    if (boundary.value.confirm !== null && boundary.value.confirm !== undefined) {
+      const confirm = boundary.value.confirm as { id?: unknown; tagName?: unknown; className?: unknown; label?: unknown; interactive?: unknown };
+      if (
+        confirm.id !== "fooder_menu_conf_bt" ||
+        confirm.tagName !== "DIV" ||
+        confirm.className !== "seat-action-button" ||
+        confirm.label !== "確認する"
+      ) {
+        throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO seat-confirmation control no longer matches the reviewed public UI identity.");
+      }
+      throw new BrowserRuntimeError(
+        "UNREVIEWED_INTERACTION",
+        "TOHO requires a separate rendered seat-confirmation step before legal consent; its hold semantics are not yet approved for automation.",
+        { controlLabel: "確認する", interactive: confirm.interactive === true }
+      );
+    }
+    if (boundary.value.exactConsentNextControls !== 1) {
+      throw new BrowserRuntimeError(
+        "UI_STATE_CHANGED",
+        "TOHO did not expose one reviewed post-confirm legal-consent continuation.",
         {
           exactConsentNextControls: boundary.value.exactConsentNextControls,
-          sensitiveFields: boundary.value.sensitiveFields,
           visibleLabels: boundary.value.visibleLabels
         }
       );

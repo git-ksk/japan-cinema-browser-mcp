@@ -328,7 +328,7 @@ Ticket/final boundary:
 
 ## J. Implementation status / order
 
-A1/A2 implementation landed in the #50 continuation-plumbing slice without enabling any provider capability or registering `prepare_checkout`. B1 remains the next live gate.
+A1/A2 implementation landed in the #50 continuation-plumbing slice without enabling any provider capability or registering `prepare_checkout`. A later B1 preflight found an earlier missing provider stage: TOHO's rendered public flow has a `確認する` seat-decision boundary before legal consent. A1/A2 remain valid plumbing, but the current provider adapter must stop at `確認する` until Gate 0b proves its hold semantics.
 
 1. **A1 — explicit reviewed intervention plumbing** — implemented
    - typed `CinemaHandoffAction`
@@ -340,17 +340,21 @@ A1/A2 implementation landed in the #50 continuation-plumbing slice without enabl
    - one-shot consumption / invalidation
    - no seat replay
    - no capability change
-3. **B1 — TOHO post-consent Gate 1 live review** — next gate
+3. **Gate 0b — TOHO rendered `確認する` seat-decision review** — next provider gate
+   - establish the correct rendered interaction sequence without direct-seat shortcuts
+   - prove whether `確認する` starts the documented 15-minute hold
+   - prove selected/held identity and release semantics before allowing continuation
+4. **B1 — TOHO post-consent Gate 1 live review** — blocked on Gate 0b
    - one Human consent transition
    - read-only stage/hold/fresh-profile observation
    - natural-expiry release proof if a hold is observed
-4. **B2 — ticket stage adapter**
+5. **B2 — ticket stage adapter**
    - only after B1 establishes reviewed post-consent surface
    - exact ticket normalization/selection
-5. **B3 — purchaser/payment handoff and summary boundary**
+6. **B3 — purchaser/payment handoff and summary boundary**
    - provider-specific positive postconditions
    - final purchase remains unreachable
-6. capability decision only after tests + docs + bounded live evidence
+7. capability decision only after tests + docs + bounded live evidence
 
 ## Out of scope
 
