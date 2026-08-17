@@ -85,6 +85,7 @@ Discoveryではseat clickを行わず、公開rendered UI・公式公開情報�
 - official UIではselected seatを再clickしてdeselect可能
 - ただしserver-side hold trigger / timeout / release semanticsは未証明
 - #51で個別reviewするまでtransaction capabilityを上げない
+- 2026-08-17 current-UI revalidation: #59でscheduleを`.p-schedule__information` + exact `上映時間を見る` + visible `.p-schedule__ticket`へ狭く再bindingし、#60で`予約購入`のexact ticket BUTTON hit-testを強化。schedule readは復旧したがfresh profile 2本のseat-map安定性はcurrent transition/context driftで未再証明。seat clickなし、#51はGate 0前でopenのまま、全transaction capabilityはfalse維持
 
 ### 109
 

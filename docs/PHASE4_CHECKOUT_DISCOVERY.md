@@ -37,6 +37,10 @@ The official e-seat instructions show that a selected seat can be clicked again 
 
 Visible deselection is not proof that there is no server-side hold. Public evidence reviewed for Discovery does not establish the hold trigger, timeout, or release semantics. AEON therefore remains blocked at `seatSelection=false` until an individual provider review proves that boundary.
 
+Current-UI revalidation (2026-08-17): #59 replaced the drifted schedule grouping with the reviewed current `.p-schedule__information` structure. Cookie handling is exact `全て拒否` only, collapsed movies are opened only through exact visible `上映時間を見る`, and only visible `.p-schedule__ticket` rows bound to the header in the same movie card become showtime truth. Hidden ticket DOM is never returned. #60 separately hardened the reviewed `予約購入` pointer so the chosen point must hit the exact same ticket BUTTON rather than relying on a nested status-center coordinate. Both changes preserve fail-closed semantics and do not widen transaction capabilities.
+
+The requested post-fix two-fresh-profile seat-map proof is still outstanding. Independent fresh runs failed closed at current rendered boundaries including unresolved exact seat-entry row, reservation transition leaving only a new `about:blank` target within the bounded wait, and Smart Theater rendered context not proving the exact requested theater/movie/date/time/screen. No seat activation, alternate/retry interaction, ticket type, consent, PII, payment, or purchase action was performed. #51 therefore remains blocked before Gate 0; `seatSelection=false`, `checkoutPreparation=false`, and `purchaseSubmission=false` remain unchanged.
+
 ### 109
 
 109's official purchase instructions explicitly describe a 10-minute seat hold. Phase 3 separately observed that seat-map entry starts a 10-minute purchase-session timer while the rendered selected-seat count remains zero and fresh-session inventory does not change.

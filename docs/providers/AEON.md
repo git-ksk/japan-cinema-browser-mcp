@@ -191,3 +191,16 @@ Phase 3 Discoveryでは、港北ニュータウンの現行schedule surfaceでmo
 #43 live smokeはfresh temporary Chrome profile 2本で同一showtime（港北ニュータウン / 2026-08-17 / `[NEW]字幕 オークストリートの異変` / 15:30 / Screen 6）を確認し、両方で168 seats / available 151 / unavailable 17 / premium 18 / wheelchair 2 / active 0でした。seat click、`券種選択へ`、checkout、purchaseは実行していません。これをもって `seatMap=true` に昇格し、`seatSelection=false / checkoutPreparation=false / purchaseSubmission=false` は維持します。
 
 Discovery詳細: [`../PHASE3_SEAT_DISCOVERY.md`](../PHASE3_SEAT_DISCOVERY.md)
+
+
+## Phase 4 current-UI revalidation — 2026-08-17
+
+Phase 4 #51の開始時、現行schedule UIがPhase 3実装時のgeneric grouping前提からdriftし、`getShowtimes`はpartial/ambiguous resultを返さず`UI_STATE_CHANGED`でfail closedしました。read-only inspectionで、現行surfaceは作品ごとの`.p-schedule__information`、visible exact `上映時間を見る` trigger、展開後の`.p-schedule__ticket`で構成されることを確認しました。
+
+#59ではこのcurrent UIを狭くreviewし直し、T360 Cookie surfaceがある場合はexact `全て拒否`だけを操作し、各作品のexact visible `上映時間を見る`をpointer hit-test付きで1回だけ展開した後、**同じ作品card内のvisible `.p-schedule__ticket`だけ**をshowtime truthとして採用するよう修正しました。hidden ticketはnormalizeせず、trigger ambiguity / hit-test mismatch / partial expansion / unresolved time range / current-card structural ambiguityはすべてfail closedします。live schedule smokeではみなとみらい46 showtimes、港北ニュータウンの2026-08-17 readでは66 showtimesを取得しました。seat/checkout capabilityは変更していません。
+
+post-#59のfresh-profile seat-map再検証では、current `.p-schedule__ticket`がactionable BUTTONである一方、nested screen linkやT360 overlay/reflowにより旧status-center座標が別elementへ解決され得ることを確認しました。#60ではexact matched ticketをscrollし、bounded 5x5 gridのうち`elementFromPoint(...).closest(...)`が**同じticket BUTTONそのもの**へ戻る点だけを採用するようseat-entry hit-testを狭く強化しました。runtime側の最終`trustedClickExactPoint`再検証も維持しています。
+
+ただし、要求していたcurrent UIでのfresh temporary Chrome profile 2本によるseat-map一致証明は、このrevalidationでは再成立していません。独立fresh runで、(1) exact seat-entry rowを再解決できず停止、(2) reviewed reservation action後のnew targetがbounded wait内で`about:blank`のまま停止、(3) Smart Theater seat routeへ到達してもrendered theater/movie/date/time/screenのexact context bindingを証明できず停止、というfail-closed結果を観測しました。これらを迂回するretry loop、alternate interaction、guessed routeは追加していません。
+
+このPhase 4再検証ではseat activationを一度も行っていません。ticket type、credentials、purchaser PII、legal consent、payment、final purchaseにも触れていません。したがってPhase 3のhistorical read-only evidenceは保持しますが、**current UI上のGate 0前提としてfresh 2-profile seat-map stabilityを再証明できるまでは#51を進めない**方針です。`seatSelection=false` / `checkoutPreparation=false` / `purchaseSubmission=false`を維持し、`prepare_checkout`も公開しません。
