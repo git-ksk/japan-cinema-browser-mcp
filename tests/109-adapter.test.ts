@@ -352,7 +352,7 @@ test("109 seat-map normalization preserves rendered slot gaps and never treats s
   });
   const sourceUrl = "https://cinema.109cinemas.net/cgi-bin/pc/resv/resv_shw_ppt.cgi?ttc=52350&tsc=13&tssc=17&ymd=2026-08-17&cs=&stt=1115";
   const map = normalize109SeatSnapshot(
-    { title: "座席選択 | １０９シネマズ", timerVisible: true, selectedSummary: "選択座席 0／8席", seats },
+    { title: "座席選択 | １０９シネマズ", timerVisible: true, selectedSummary: "選択座席：0／8席", seats },
     sourceUrl,
     theater,
     showtime
@@ -367,7 +367,7 @@ test("109 seat-map normalization preserves rendered slot gaps and never treats s
   const selected = seats.map((seat, index) => index === 5 ? { ...seat, checked: true } : seat);
   assert.throws(
     () => normalize109SeatSnapshot(
-      { title: "座席選択 | １０９シネマズ", timerVisible: true, selectedSummary: "選択座席 1／8席", seats: selected },
+      { title: "座席選択 | １０９シネマズ", timerVisible: true, selectedSummary: "選択座席：1／8席", seats: selected },
       sourceUrl,
       theater,
       showtime
@@ -406,7 +406,7 @@ test("109 getSeatAvailability adopts one exact rendered showtime href and perfor
     navigateReviewed: async (url: string) => { navigations.push(url); currentUrl = url; return url; },
     evaluateSemanticState: async (_provider: string, expression: string) => {
       if (expression.includes("input.seat")) {
-        return { url: currentUrl, value: { title: "座席選択 | １０９シネマズ", timerVisible: true, selectedSummary: "選択座席 0／8席", seats } };
+        return { url: currentUrl, value: { title: "座席選択 | １０９シネマズ", timerVisible: true, selectedSummary: "選択座席：0／8席", seats } };
       }
       return { url: currentUrl, value: { matched: 1, hrefs: [entryUrl] } };
     }
