@@ -249,7 +249,7 @@ export function assertReviewedIntermediateControlAllowed(providerId: CinemaProvi
 
 
 export type AeonReviewedExternalSurface = "watatheatre" | "smart_theater_seat";
-export type AeonReviewedAction = "cookie_reject" | "seat_entry" | "guest_purchase";
+export type AeonReviewedAction = "cookie_reject" | "schedule_expand" | "seat_entry" | "guest_purchase";
 
 const AEON_WATATHEATRE_HOST = "login.watatheatre.aeoncinema.com";
 const AEON_SMART_THEATER_HOST = "reserve.smart-theater.com";
@@ -327,6 +327,7 @@ export function assertAeonReviewedAction(action: AeonReviewedAction, label: stri
     const url = assertGenericNavigationUrl(currentUrl, "aeon");
     if (url.hostname === "theater.aeoncinema.com" && /^\/theaters\/[a-z0-9_-]+\/?$/.test(url.pathname)) {
       if (action === "cookie_reject" && exact === "全て拒否") return;
+      if (action === "schedule_expand" && exact === "上映時間を見る") return;
       if (action === "seat_entry" && exact === "予約購入") return;
     }
   }

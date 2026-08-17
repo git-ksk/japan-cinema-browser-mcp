@@ -625,4 +625,325 @@ test("AEON seat DOM reader statically requires seat-[ROW]-[NUMBER] identity and 
   assert.doesNotMatch(source, /select_seats/);
   assert.doesNotMatch(source, /clickAeon[^\n]*\(.*券種選択へ/);
   assert.doesNotMatch(source, /clickAeon[^\n]*\(.*全て許可/);
+  assert.match(source, /guest\.scrollIntoView\(\{ behavior: 'instant', block: 'center', inline: 'nearest' \}\)/);
+  assert.match(source, /if \(control === guest\) return \{ x, y \}/);
+});
+
+test("AEON current collapsed schedule is expanded through exact reviewed UI before semantic normalization", async () => {
+  const rows = theaterRows();
+  rows[0] = {
+    label: "港北ニュータウン ULTILA D-BOX",
+    href: "https://theater.aeoncinema.com/theaters/kohoku/",
+    area: "神奈川"
+  };
+  const semanticStates = [
+    { url: "https://www.aeoncinema.com/theater/", value: { headingCount: 1, rows } },
+    {
+      url: "https://theater.aeoncinema.com/theaters/kohoku/?date=20260817",
+      value: {
+        title: "上映スケジュール｜港北ニュータウン｜イオンシネマ",
+        scheduleHeadingCount: 1,
+        theaterNames: ["イオンシネマ 港北ニュータウン"],
+        dateLabels: ["本日", "8/18（火）"],
+        ambiguousTimeGroups: 0,
+        scheduleCardCount: 1,
+        collapsedScheduleCardCount: 1,
+        invalidScheduleCardCount: 0,
+        showtimes: [],
+        emptySchedule: false
+      }
+    },
+    {
+      url: "https://theater.aeoncinema.com/theaters/kohoku/?date=20260817",
+      value: {
+        title: "上映スケジュール｜港北ニュータウン｜イオンシネマ",
+        scheduleHeadingCount: 1,
+        theaterNames: ["イオンシネマ 港北ニュータウン"],
+        dateLabels: ["本日", "8/18（火）"],
+        ambiguousTimeGroups: 0,
+        scheduleCardCount: 1,
+        collapsedScheduleCardCount: 0,
+        invalidScheduleCardCount: 0,
+        showtimes: [{
+          movie: "[NEW]字幕 レディ・オア・ノット2R15+",
+          label: "18:00~20:05",
+          context: "18:00~20:05 スクリーン8 予約購入"
+        }],
+        emptySchedule: false
+      }
+    }
+  ];
+  let semanticIndex = 0;
+  const expansionStates = [
+    { rejectCount: 0, allowCount: 0, settingsCount: 0 },
+    { totalCards: 1, invalidCards: 0, collapsedMovies: ["[NEW]字幕 レディ・オア・ノット2R15+"] },
+    { ok: true, movie: "[NEW]字幕 レディ・オア・ノット2R15+", label: "上映時間を見る", point: { x: 100, y: 120 } },
+    { ok: true, movie: "[NEW]字幕 レディ・オア・ノット2R15+", label: "上映時間を見る", point: { x: 100, y: 120 } },
+    { cardCount: 1, totalTickets: 1, visibleTickets: 1 },
+    { totalCards: 1, invalidCards: 0, collapsedMovies: [] }
+  ];
+  let expansionIndex = 0;
+  const clicks: Array<{ x: number; y: number }> = [];
+  const runtime = {
+    status: async () => ({ connected: true, url: "https://www.aeoncinema.com/theater/", provider: "aeon", officialSurface: true }),
+    navigateReviewed: async (url: string) => url,
+    evaluateSemanticState: async () => {
+      const next = semanticStates[semanticIndex++];
+      if (!next) throw new Error("semantic state exhausted");
+      return next;
+    },
+    evaluateAeonSeatScheduleState: async () => {
+      const value = expansionStates[expansionIndex++];
+      if (!value) throw new Error("expansion state exhausted");
+      return { url: "https://theater.aeoncinema.com/theaters/kohoku/?date=20260817", value };
+    },
+    clickAeonScheduleExpansion: async (point: { x: number; y: number }) => { clicks.push(point); },
+    clickAeonCookieReject: async () => undefined,
+    clickReviewedControl: async () => ({ clicked: true })
+  } as unknown as CinemaBrowserRuntime;
+
+  const result = await new AeonReadAdapter(runtime).getShowtimes({ theater: "港北ニュータウン", date: "2026-08-17" });
+  assert.equal(result.showtimes.length, 1);
+  assert.equal(result.showtimes[0]?.movie, "[NEW]字幕 レディ・オア・ノット2R15+");
+  assert.equal(result.showtimes[0]?.screen, "8");
+  assert.deepEqual(clicks, [{ x: 100, y: 120 }]);
+});
+
+test("AEON schedule expansion never repeats the same card when one reviewed click does not expose its tickets", async () => {
+  const rows = theaterRows();
+  rows[0] = { label: "港北ニュータウン", href: "https://theater.aeoncinema.com/theaters/kohoku/", area: "神奈川" };
+  const semanticStates = [
+    { url: "https://www.aeoncinema.com/theater/", value: { headingCount: 1, rows } },
+    {
+      url: "https://theater.aeoncinema.com/theaters/kohoku/?date=20260817",
+      value: {
+        title: "上映スケジュール｜港北ニュータウン｜イオンシネマ",
+        scheduleHeadingCount: 1,
+        theaterNames: ["イオンシネマ 港北ニュータウン"],
+        dateLabels: ["本日"],
+        ambiguousTimeGroups: 0,
+        scheduleCardCount: 1,
+        collapsedScheduleCardCount: 1,
+        invalidScheduleCardCount: 0,
+        showtimes: [],
+        emptySchedule: false
+      }
+    }
+  ];
+  let semanticIndex = 0;
+  let expansionRead = 0;
+  let clicks = 0;
+  const runtime = {
+    status: async () => ({ connected: true, url: "https://www.aeoncinema.com/theater/", provider: "aeon", officialSurface: true }),
+    navigateReviewed: async (url: string) => url,
+    evaluateSemanticState: async () => semanticStates[semanticIndex++]!,
+    evaluateAeonSeatScheduleState: async () => {
+      expansionRead += 1;
+      if (expansionRead === 1) return { url: "", value: { rejectCount: 0, allowCount: 0, settingsCount: 0 } };
+      if (expansionRead === 2) return { url: "", value: { totalCards: 1, invalidCards: 0, collapsedMovies: ["作品A"] } };
+      if (expansionRead === 3 || expansionRead === 4) return { url: "", value: { ok: true, movie: "作品A", label: "上映時間を見る", point: { x: 50, y: 60 } } };
+      return { url: "", value: { cardCount: 1, totalTickets: 2, visibleTickets: 0 } };
+    },
+    clickAeonScheduleExpansion: async () => { clicks += 1; },
+    clickAeonCookieReject: async () => undefined,
+    clickReviewedControl: async () => ({ clicked: true })
+  } as unknown as CinemaBrowserRuntime;
+
+  await assert.rejects(
+    new AeonReadAdapter(runtime).getShowtimes({ theater: "港北ニュータウン", date: "2026-08-17" }),
+    (error) => error instanceof BrowserRuntimeError && error.code === "UI_STATE_CHANGED"
+  );
+  assert.equal(clicks, 1);
+});
+
+test("AEON schedule normalization preserves screen identity and treats Web受付終了 as unavailable", () => {
+  const showtimes = normalizeAeonScheduleSnapshot(
+    {
+      title: "上映スケジュール｜白山｜イオンシネマ",
+      scheduleHeadingCount: 1,
+      theaterNames: ["イオンシネマ 白山"],
+      ambiguousTimeGroups: 0,
+      scheduleCardCount: 2,
+      collapsedScheduleCardCount: 0,
+      invalidScheduleCardCount: 0,
+      showtimes: [
+        { movie: "作品A", label: "18:00~20:05", context: "18:00~20:05 スクリーン8 予約購入" },
+        { movie: "作品B", label: "20:35~22:40", context: "20:35~22:40 スクリーン3 Web受付終了" }
+      ],
+      emptySchedule: false
+    },
+    hakusanTheater(),
+    "2026-08-17",
+    "https://theater.aeoncinema.com/theaters/hakusan/?date=20260817"
+  );
+
+  assert.deepEqual(showtimes.map((row) => [row.movie, row.startTime, row.screen, row.availability]), [
+    ["作品A", "18:00", "8", "unknown"],
+    ["作品B", "20:35", "3", "unavailable"]
+  ]);
+});
+
+test("AEON current schedule refuses structural ambiguity before any expansion click", async () => {
+  const rows = theaterRows();
+  rows[0] = { label: "港北ニュータウン", href: "https://theater.aeoncinema.com/theaters/kohoku/", area: "神奈川" };
+  let expansionReads = 0;
+  let expansionClicks = 0;
+  const runtime = {
+    status: async () => ({ connected: true, url: "https://www.aeoncinema.com/theater/", provider: "aeon", officialSurface: true }),
+    navigateReviewed: async (url: string) => url,
+    evaluateSemanticState: async (_provider: string, expression: string) => expression.includes("劇場を探す")
+      ? { url: "https://www.aeoncinema.com/theater/", value: { headingCount: 1, rows } }
+      : {
+          url: "https://theater.aeoncinema.com/theaters/kohoku/?date=20260817",
+          value: {
+            title: "上映スケジュール｜港北ニュータウン｜イオンシネマ",
+            scheduleHeadingCount: 1,
+            theaterNames: ["イオンシネマ 港北ニュータウン"],
+            dateLabels: ["本日"],
+            ambiguousTimeGroups: 0,
+            scheduleCardCount: 1,
+            collapsedScheduleCardCount: 0,
+            invalidScheduleCardCount: 1,
+            showtimes: [],
+            emptySchedule: false
+          }
+        },
+    evaluateAeonSeatScheduleState: async () => { expansionReads += 1; return { url: "", value: {} }; },
+    clickAeonScheduleExpansion: async () => { expansionClicks += 1; },
+    clickAeonCookieReject: async () => undefined,
+    clickReviewedControl: async () => ({ clicked: true })
+  } as unknown as CinemaBrowserRuntime;
+
+  await assert.rejects(
+    new AeonReadAdapter(runtime).getShowtimes({ theater: "港北ニュータウン", date: "2026-08-17" }),
+    (error) => error instanceof BrowserRuntimeError && error.code === "UI_STATE_CHANGED"
+  );
+  assert.equal(expansionReads, 0);
+  assert.equal(expansionClicks, 0);
+});
+
+test("AEON schedule expansion rejects Cookie overlay only through exact 全て拒否 before expanding", async () => {
+  const rows = theaterRows();
+  rows[0] = { label: "港北ニュータウン", href: "https://theater.aeoncinema.com/theaters/kohoku/", area: "神奈川" };
+  const semanticStates = [
+    { url: "https://www.aeoncinema.com/theater/", value: { headingCount: 1, rows } },
+    {
+      url: "https://theater.aeoncinema.com/theaters/kohoku/?date=20260817",
+      value: {
+        title: "上映スケジュール｜港北ニュータウン｜イオンシネマ",
+        scheduleHeadingCount: 1,
+        theaterNames: ["イオンシネマ 港北ニュータウン"],
+        dateLabels: ["本日"],
+        ambiguousTimeGroups: 0,
+        scheduleCardCount: 1,
+        collapsedScheduleCardCount: 1,
+        invalidScheduleCardCount: 0,
+        showtimes: [],
+        emptySchedule: false
+      }
+    },
+    {
+      url: "https://theater.aeoncinema.com/theaters/kohoku/?date=20260817",
+      value: {
+        title: "上映スケジュール｜港北ニュータウン｜イオンシネマ",
+        scheduleHeadingCount: 1,
+        theaterNames: ["イオンシネマ 港北ニュータウン"],
+        dateLabels: ["本日"],
+        ambiguousTimeGroups: 0,
+        scheduleCardCount: 1,
+        collapsedScheduleCardCount: 0,
+        invalidScheduleCardCount: 0,
+        showtimes: [{ movie: "作品A", label: "18:00~20:05", context: "18:00~20:05 スクリーン8 予約購入" }],
+        emptySchedule: false
+      }
+    }
+  ];
+  let semanticIndex = 0;
+  const expansionStates = [
+    { rejectCount: 1, allowCount: 1, settingsCount: 1, rejectPoint: { x: 10, y: 10 } },
+    { rejectCount: 0, allowCount: 0, settingsCount: 0 },
+    { totalCards: 1, invalidCards: 0, collapsedMovies: ["作品A"] },
+    { ok: true, movie: "作品A", label: "上映時間を見る", point: { x: 50, y: 60 } },
+    { ok: true, movie: "作品A", label: "上映時間を見る", point: { x: 50, y: 60 } },
+    { cardCount: 1, totalTickets: 1, visibleTickets: 1 },
+    { totalCards: 1, invalidCards: 0, collapsedMovies: [] }
+  ];
+  let expansionIndex = 0;
+  const actions: string[] = [];
+  const runtime = {
+    status: async () => ({ connected: true, url: "https://www.aeoncinema.com/theater/", provider: "aeon", officialSurface: true }),
+    navigateReviewed: async (url: string) => url,
+    evaluateSemanticState: async () => semanticStates[semanticIndex++]!,
+    evaluateAeonSeatScheduleState: async () => ({
+      url: "https://theater.aeoncinema.com/theaters/kohoku/?date=20260817",
+      value: expansionStates[expansionIndex++]!
+    }),
+    clickAeonCookieReject: async () => { actions.push("全て拒否"); },
+    clickAeonScheduleExpansion: async () => { actions.push("上映時間を見る"); },
+    clickReviewedControl: async () => ({ clicked: true })
+  } as unknown as CinemaBrowserRuntime;
+
+  const result = await new AeonReadAdapter(runtime).getShowtimes({ theater: "港北ニュータウン", date: "2026-08-17" });
+  assert.equal(result.showtimes.length, 1);
+  assert.deepEqual(actions, ["全て拒否", "上映時間を見る"]);
+});
+
+test("AEON schedule expansion fails closed on trigger ambiguity or hit-test mismatch without clicking", async () => {
+  for (const reason of ["trigger_ambiguous", "trigger_hit_test_failed"] as const) {
+    const rows = theaterRows();
+    rows[0] = { label: "港北ニュータウン", href: "https://theater.aeoncinema.com/theaters/kohoku/", area: "神奈川" };
+    const semanticStates = [
+      { url: "https://www.aeoncinema.com/theater/", value: { headingCount: 1, rows } },
+      {
+        url: "https://theater.aeoncinema.com/theaters/kohoku/?date=20260817",
+        value: {
+          title: "上映スケジュール｜港北ニュータウン｜イオンシネマ",
+          scheduleHeadingCount: 1,
+          theaterNames: ["イオンシネマ 港北ニュータウン"],
+          dateLabels: ["本日"],
+          ambiguousTimeGroups: 0,
+          scheduleCardCount: 1,
+          collapsedScheduleCardCount: 1,
+          invalidScheduleCardCount: 0,
+          showtimes: [],
+          emptySchedule: false
+        }
+      }
+    ];
+    let semanticIndex = 0;
+    let expansionRead = 0;
+    let clicks = 0;
+    const runtime = {
+      status: async () => ({ connected: true, url: "https://www.aeoncinema.com/theater/", provider: "aeon", officialSurface: true }),
+      navigateReviewed: async (url: string) => url,
+      evaluateSemanticState: async () => semanticStates[semanticIndex++]!,
+      evaluateAeonSeatScheduleState: async () => {
+        expansionRead += 1;
+        if (expansionRead === 1) return { url: "", value: { rejectCount: 0, allowCount: 0, settingsCount: 0 } };
+        if (expansionRead === 2) return { url: "", value: { totalCards: 1, invalidCards: 0, collapsedMovies: ["作品A"] } };
+        return { url: "", value: { ok: false, reason, movie: "作品A" } };
+      },
+      clickAeonScheduleExpansion: async () => { clicks += 1; },
+      clickAeonCookieReject: async () => undefined,
+      clickReviewedControl: async () => ({ clicked: true })
+    } as unknown as CinemaBrowserRuntime;
+
+    await assert.rejects(
+      new AeonReadAdapter(runtime).getShowtimes({ theater: "港北ニュータウン", date: "2026-08-17" }),
+      (error) => error instanceof BrowserRuntimeError && error.code === "UI_STATE_CHANGED",
+      reason
+    );
+    assert.equal(clicks, 0, reason);
+  }
+});
+
+test("AEON current schedule DOM reader binds visible tickets to their own movie card and excludes hidden ticket truth", () => {
+  const source = readFileSync(new URL("../src/providers/aeon/adapter.ts", import.meta.url), "utf8");
+  assert.match(source, /if \(scheduleCards\.length > 0\) \{/);
+  assert.match(source, /const movie = normalize\(card\.querySelector\('\.p-schedule__header'\)/);
+  assert.match(source, /const tickets = Array\.from\(card\.querySelectorAll\('\.p-schedule__ticket'\)\)/);
+  assert.match(source, /const visibleTickets = tickets\.filter\(visible\)/);
+  assert.match(source, /if \(visibleTickets\.length === 0\) \{/);
+  assert.match(source, /for \(const ticket of visibleTickets\) \{/);
+  assert.match(source, /Hidden ticket contents are/);
 });
