@@ -134,6 +134,22 @@ provider-neutral seat-map freshnessをdeterministic SHA-256 fingerprintへ落と
 
 推薦はconfirmed `available`だけを対象にし、semantic row、rendered gap、provider groupを尊重します。special/accessibility seatはavailabilityから独立して保持し、default推薦からは外して明示opt-inを要求します。
 
+### `src/checkout.ts`
+
+Phase 4のprovider-neutral checkout contract / safety coreです。#49ではbrowser mutationやMCP tool登録を行わず、全providerの`seatSelection=false / checkoutPreparation=false / purchaseSubmission=false`を維持したまま、provider adapterが後段で利用する境界だけを実装します。
+
+- MCP側のcheckout intentはshowtime / exact seat IDs / ticket choicesだけを受け付けるstrict schema
+- purchaser name / phone / email / birth date、credential、OTP/MFA、payment、consent、caller-supplied total/summary/final-controlはintent schemaへ入れない
+- seat mutation前に2回のread-only observationを比較し、context/layout/state fingerprintが一致したexact intended seatだけを許可する。alternate seatへの自動置換はしない
+- ticket typeはprovider ID/label、rendered price/restriction/eligibility factを保持し、labelからstudent/senior/member等のeligibilityを推測しない
+- providerがHuman reviewを要求するticket pathはcategoryだけを返してHuman Handoffへ止められる
+- checkout summaryはprovider adapterが現在のrendered UIから再取得したbounded factsだけをstrict parseし、caller intentとexact matchした場合だけmaterial SHA-256 fingerprintを生成する
+- missing subtotal / fees / totalはmissingのまま保持し、0や空配列を発明しない
+- arbitrary `providerData` / raw page/dialog / opaque checkout URLをgeneric summaryへ持ち込まない
+- `prepare_checkout` toolはreview済みprovider adapterが1社以上成立するまで登録しない
+
+`materialFingerprint`は`observedAt`だけを除外し、provider/theater/movie/date/time/screen/seats/tickets/amounts/current stageをbindingします。これはfinal purchase confirmationではなく、Phase 4で現在のrendered material factsが同じか比較するためのcontractです。
+
 ### `src/browser/chrome-process.ts`
 
 Chrome process lifecycleを管理します。
