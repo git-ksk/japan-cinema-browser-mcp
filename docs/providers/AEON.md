@@ -166,6 +166,10 @@ Phase 3 Discoveryでは、港北ニュータウンの現行schedule surfaceでmo
 - D-BOX / Gold Class等はavailabilityではなくseat attributeとして扱う必要がある
 - reviewed static seat-mapでは車椅子spaceはe席リザーブ対象外と案内される
 
-一方、holdがどの操作で開始し何分継続するかは公式公開説明から確定できず、live seat-mapにもまだ到達できていません。現在の未解決点はseat-map表示が危険という証拠ではなく、public `予約購入` buttonからのbrowser target/navigation handlingです（#36）。hidden route推測やnetwork interceptionへ逃げず、`seatMap=false / seatSelection=false`を維持します。
+#36の追加validationでpublic seat-map entryは解決しました。現行PC scheduleではvisible `予約購入` button自体は正常ですが、T360 Cookie bannerが上に重なってpointer hitを奪っていました。visible `全て拒否` を選んだ後、exact movie/time/screenの`予約購入` → Watatheatreの`チケット購入のみ（会員登録しない）` → `reserve.smart-theater.com/#/purchase/cinema/seat` のe席リザーブ座席画面へ、通常のrendered UI interactionだけで到達できます。
+
+独立clean profile 2本で同一上映を検証し、いずれも168 seats / selected(active)=0 / default 137 / disabled 31 / special 18 / wheelchair 2、rendered seat-state fingerprint一致を確認しました。したがってread-only entry safety gateは通過です。hold開始点/timeoutの公開説明はなお明示されていませんが、seat-map表示だけでseat hold / material reservation mutation / availability impactが生じた証拠はありません。
+
+ただし#36はentry/target-handling Discoveryであり、runtimeにreview済みSmart Theater target adoptionとAEON seat DOM adapterはまだ実装していません。このため `seatMap=false / seatSelection=false` は維持し、read-only adapter実装は別Issueで扱います。
 
 Discovery詳細: [`../PHASE3_SEAT_DISCOVERY.md`](../PHASE3_SEAT_DISCOVERY.md)

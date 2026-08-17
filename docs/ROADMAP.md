@@ -172,7 +172,7 @@ Discovery結果:
 
 - ✅ TOHO: live `座席指定` surfaceまでseat clickなしで検証。entry時にvisible timer / selected seatなし。read-only safety gate通過、v0.3.0 first providerを維持
 - ✅ 109: live seat-map entry時点で10分session timer開始を確認し、#35でexact rendered href / checkbox semantic read adapterを実装。seatMap=true、seatSelection=false
-- 🟡 AEON: visible `予約購入`までは確認。click後のnew targetがisolated Chromeで`about:blank`のままのためlive seat map未到達。安全性ではなくpublic navigation/target handlingが未解決（#36）
+- ✅ AEON: #36でpublic entry解決。Cookie overlayを`全て拒否`でdismissし、exact `予約購入` → non-member → e席リザーブseat mapへ到達。clean 2 sessionで168-seat fingerprint一致 / selected=0。adapter実装前なのでseatMap=false
 - ✅ special seatはavailabilityと分離してattributeとしてmodel化する方針
 - ✅ recommendationはconfirmed `available` のみをdefault対象とし、`unknown`を空席扱いしない
 - ✅ provider-neutral seat contract + deterministic adjacent / center / rear / rear-middle / aisle scoring core（#31）

@@ -54,7 +54,7 @@ TOHO / AEON / 109のseat-map / seat-hold境界を、seat clickなしで再レビ
 
 - TOHO: live `座席指定` までseat clickなしで検証し、entry時selected=0 / visible timerなし。#32でread-only adapterを実装し `seatMap=true` へ昇格
 - 109: live seat-map entryで10分session timer開始を確認する一方、`選択座席 0／8席`かつ独立session間のseat-state fingerprint一致を確認。#35でexact rendered public href + checkbox semantic adapterを実装し `seatMap=true`
-- AEON: visible `予約購入` click後のnew browser targetがisolated Chromeで`about:blank`に留まり、live seat mapは未到達。public navigation/target handlingを#36で追跡
+- AEON: #36でCookie overlayを原因特定。visible `全て拒否` → exact `予約購入` → `チケット購入のみ（会員登録しない）` からe席リザーブ座席画面へ到達。独立2 sessionで168-seat fingerprint一致 / selected=0を確認。adapter未実装のためseatMap=falseは維持
 - すべてのvalidation / smokeでseat clickは実施していない
 
 `v0.3.0 — Seat Intelligence` のTOHO first vertical sliceはread-only `get_seat_availability` / `recommend_seats`、rendered gap/orientation、freshness検知まで実装済みです。`select_seats` は含めません。

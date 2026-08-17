@@ -164,7 +164,7 @@ Explicitly excluded from v0.3.0 first scope:
 - #32 — TOHO read-only seat availability adapter, including the non-mutating-entry gate
 - #33 — seat freshness detection and `recommend_seats`
 - #35 — 109 read-only seat availability with explicit timed-session semantics — implemented 2026-08-17
-- #36 — AEON public seat-map entry / browser-target handling without hidden-route discovery
+- #36 — AEON public seat-map entry / browser-target handling without hidden-route discovery — completed 2026-08-17
 
 A `select_seats` issue should only be created after a separate provider-specific mutation/hold review. Discovery did not pass that boundary.
 
