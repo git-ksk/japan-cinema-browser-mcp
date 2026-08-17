@@ -122,6 +122,19 @@ function ownerFor(toolName: string, args: unknown, resumeStrategy: HandoffResume
 }
 
 function cinemaInterventionPrompt(intervention: CinemaIntervention): string {
+  if (
+    intervention.action?.kind === "reviewed_checkout_boundary" &&
+    intervention.action.provider === "toho" &&
+    intervention.action.boundary === "toho_terms_consent_next"
+  ) {
+    return [
+      "TOHO checkout is waiting at the reviewed terms-consent boundary.",
+      "Review the terms directly in the dedicated Chrome window and operate the exact rendered `利用規約に同意して次へ` control yourself only if you agree.",
+      "Do not change seats or paste passwords, OTP/MFA codes, PII, cookies, payment-card data, bank data, or other credentials into this MCP prompt.",
+      "Do not proceed to a final purchase. Choose Continue only after that one manual consent transition is complete, or Cancel to stop."
+    ].join(" ");
+  }
+
   const label = intervention.reason === "access_challenge"
     ? "an access challenge or CAPTCHA"
     : intervention.reason === "sign_in"
@@ -304,6 +317,7 @@ async function runToolWithHandoffUnmetered<T>(input: {
   if (!active || active.id !== state.interventionId || active.epoch !== state.epoch) {
     handoffOwners.delete(state.interventionId);
     purchaseGate.clear();
+    runtime.clearCheckoutContinuation();
     return errorResult(new BrowserRuntimeError(
       "UI_STATE_CHANGED",
       "The browser changed while waiting for Human intervention. Re-read the current cinema state before continuing."

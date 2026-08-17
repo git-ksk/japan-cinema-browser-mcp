@@ -265,3 +265,7 @@ Public repositoryではGitHub Private Vulnerability Reportingを有効化し、�
 GitHub側ではsecret scanning / push protection / Dependabot security updates / Dependency Review / CodeQL advanced setup（security-and-quality suite）を有効化します。`main` はrulesetでPR、required CI、linear history、force-push/delete禁止を強制し、CodeQL security resultもmerge protectionへ接続します。
 
 `CINEMA_CHROME_EXECUTABLE`、`CINEMA_CHROME_PROFILE_DIR`、`CINEMA_CDP_PORT` 等はローカルoperatorが起動時に与えるtrusted configurationです。MCP tool argument、provider page、external place result等のuntrusted inputからこれらを生成・上書きしてはいけません。
+
+### Phase 4 checkout continuation binding
+
+TOHOのreview済みconsent boundaryでは、Human Handoffのauthority tokenとは別にprocess-localの短命continuation bindingを使います。保存対象はprovider/boundary、exact browser target、intent digest、theater/showtime identity、selected seat IDs、seat fingerprints、sanitized host/pathだけです。password、OTP/MFA、PII、payment data、cookie、receipt、opaque query/tokenは保存しません。bindingはone-shotで、cancel/browser reset/TTL/owned material mismatch時に破棄されます。continuation digest自体をauthorization tokenとして扱わず、active intervention ownershipとcurrent rendered provider revalidationを別途必須にします。

@@ -326,19 +326,21 @@ Ticket/final boundary:
 - final purchase controlをPhase 4 adapterから到達不能にする。
 - Human interventionでprepared purchase confirmationを必ず破棄する。
 
-## J. Implementation order
+## J. Implementation status / order
 
-1. **A1 — explicit reviewed intervention plumbing**
+A1/A2 implementation landed in the #50 continuation-plumbing slice without enabling any provider capability or registering `prepare_checkout`. B1 remains the next live gate.
+
+1. **A1 — explicit reviewed intervention plumbing** — implemented
    - typed `CinemaHandoffAction`
    - provider-reviewed handoff entry point
    - boundary-specific Human prompt
    - no capability change
-2. **A2 — ephemeral continuation binding + fresh-action dispatch**
+2. **A2 — ephemeral continuation binding + fresh-action dispatch** — implemented at the binding/runtime primitive layer
    - target/provider/intent/material binding
    - one-shot consumption / invalidation
    - no seat replay
    - no capability change
-3. **B1 — TOHO post-consent Gate 1 live review**
+3. **B1 — TOHO post-consent Gate 1 live review** — next gate
    - one Human consent transition
    - read-only stage/hold/fresh-profile observation
    - natural-expiry release proof if a hold is observed
