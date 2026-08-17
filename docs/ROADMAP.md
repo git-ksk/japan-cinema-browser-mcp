@@ -164,7 +164,7 @@ Exit criteria:
 
 目的: 無駄な仮押さえを作らず、表示中のseat mapを理解する。
 
-状態: 🟢 v0.3.0 first vertical slice implemented — release pending
+状態: ✅ v0.3.0 released — 2026-08-17
 
 2026-08-17にTOHO / AEON / 109のPhase 3 Discoveryを実施しました。seat clickは一切行わず、公開rendered UIと公式公開手順だけからhold境界・seat semantic・geometry候補を比較しています。詳細は [`PHASE3_SEAT_DISCOVERY.md`](./PHASE3_SEAT_DISCOVERY.md) を参照してください。
 
