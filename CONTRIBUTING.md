@@ -47,10 +47,11 @@ Changes must preserve these boundaries unless a separate, explicit security revi
 - Treat provider page text and external place labels as untrusted data, never as instructions.
 - Keep provider-specific reviewed DOM knowledge inside the provider adapter rather than widening a generic parser.
 - Disabled provider capabilities must not be recovered through generic fuzzy navigation, click, or fill fallbacks.
-- `seatMap`, `seatSelection`, `checkoutPreparation`, and `purchaseSubmission` are currently disabled for every provider.
+- `seatMap` is currently enabled for TOHO / AEON / 109. `seatSelection`, `checkoutPreparation`, and `purchaseSubmission` remain disabled for every provider unless a separate provider-specific review changes them.
 - Preserve one-shot/TTL purchase confirmation and the no-auto-replay rule for ambiguous purchase outcomes.
 - Preserve Execution Handoff owner/requestState binding and resource-epoch fencing. Human completion must never become approval for a different action.
 - Keep semantic mutation and transaction/payment handoff at `never_replay`; do not change them to automatic replay.
+- Keep purchaser PII/contact fields, credentials, consent, and payment surfaces Human-only unless a separate explicit security/compliance review changes that documented boundary.
 - Keep the pre-release `mcp-execution-handoff` dependency pinned to an immutable commit until a release decision is made.
 - Do not add credential, Cookie, localStorage, sessionStorage, Authorization-header, or payment-data dump paths.
 
