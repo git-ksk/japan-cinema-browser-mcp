@@ -14,7 +14,57 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  classify-changes:
+    name: classify changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      runtime: ${{ steps.classify.outputs.runtime }}
+      dependency: ${{ steps.classify.outputs.dependency }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: classify
+        name: Classify changed paths
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          # Pushes to main are deliberately full validation. Path-aware
+          # selection is only an optimization for pull requests.
+          if [[ "$EVENT_NAME" != "pull_request" ]]; then
+            echo "runtime=true" >> "$GITHUB_OUTPUT"
+            echo "dependency=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          runtime=false
+          dependency=false
+
+          while IFS= read -r -d '' path; do
+            case "$path" in
+              package.json|package-lock.json)
+                runtime=true
+                dependency=true
+                ;;
+              src/*|tests/*|scripts/*|dist/*|vendor/*|tsconfig*.json|Dockerfile|.dockerignore)
+                runtime=true
+                ;;
+            esac
+          done < <(git diff --name-only -z "$BASE_SHA" "$HEAD_SHA")
+
+          echo "runtime=$runtime" >> "$GITHUB_OUTPUT"
+          echo "dependency=$dependency" >> "$GITHUB_OUTPUT"
+
   check:
+    name: check
+    needs: classify-changes
+    if: needs.classify-changes.outputs.runtime == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -27,20 +77,95 @@ jobs:
       - run: npm test
       - run: npm run build
 
-  node-compatibility:
-    name: Node ${{ matrix.node }} compatibility
+  node-20-compatibility:
+    name: Node 20 compatibility
+    needs: classify-changes
+    if: needs.classify-changes.outputs.runtime == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        node:
-          - 20
-          - 22
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: ${{ matrix.node }}
+          node-version: 20
       - run: npm ci --ignore-scripts
       - run: npm test
+
+  node-22-compatibility:
+    name: Node 22 compatibility
+    needs: classify-changes
+    if: needs.classify-changes.outputs.runtime == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - run: npm ci --ignore-scripts
+      - run: npm test
+
+  dependency-review:
+    name: dependency-review
+    needs: classify-changes
+    if: github.event_name == 'pull_request' && needs.classify-changes.outputs.dependency == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: moderate
+          fail-on-scopes: runtime, development
+
+  required-gate:
+    name: required-gate
+    needs:
+      - classify-changes
+      - check
+      - node-20-compatibility
+      - node-22-compatibility
+      - dependency-review
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      EVENT_NAME: ${{ github.event_name }}
+      CLASSIFY_RESULT: ${{ needs.classify-changes.result }}
+      RUNTIME_CHANGED: ${{ needs.classify-changes.outputs.runtime }}
+      DEPENDENCY_CHANGED: ${{ needs.classify-changes.outputs.dependency }}
+      CHECK_RESULT: ${{ needs.check.result }}
+      NODE20_RESULT: ${{ needs.node-20-compatibility.result }}
+      NODE22_RESULT: ${{ needs.node-22-compatibility.result }}
+      DEPENDENCY_REVIEW_RESULT: ${{ needs.dependency-review.result }}
+    steps:
+      - name: Verify required validations
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "$CLASSIFY_RESULT" != "success" ]]; then
+            echo "change classification did not succeed: $CLASSIFY_RESULT" >&2
+            exit 1
+          fi
+
+          if [[ "$RUNTIME_CHANGED" == "true" ]]; then
+            [[ "$CHECK_RESULT" == "success" ]] || {
+              echo "runtime check did not succeed: $CHECK_RESULT" >&2
+              exit 1
+            }
+            [[ "$NODE20_RESULT" == "success" ]] || {
+              echo "Node 20 compatibility did not succeed: $NODE20_RESULT" >&2
+              exit 1
+            }
+            [[ "$NODE22_RESULT" == "success" ]] || {
+              echo "Node 22 compatibility did not succeed: $NODE22_RESULT" >&2
+              exit 1
+            }
+          fi
+
+          if [[ "$EVENT_NAME" == "pull_request" && "$DEPENDENCY_CHANGED" == "true" ]]; then
+            [[ "$DEPENDENCY_REVIEW_RESULT" == "success" ]] || {
+              echo "dependency review did not succeed: $DEPENDENCY_REVIEW_RESULT" >&2
+              exit 1
+            }
+          fi

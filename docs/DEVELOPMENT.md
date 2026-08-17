@@ -293,7 +293,7 @@ npm run smoke:109
 
 ## Public Repo CI / dependency policy
 
-Public repositoryの標準GitHub-hosted runnerは通常CIに利用します。PRと`main`で `npm ci --ignore-scripts`、typecheck、unit test、buildを実行し、Node.js 20 / 22 / 24の互換性も継続監視します。live provider smokeは引き続き通常CIへ含めません。
+Public repositoryの標準GitHub-hosted runnerは通常CIに利用します。`main` pushでは従来どおりfull validationを行います。PRではchanged pathsを先に分類し、runtime/buildへ影響する変更だけ `npm ci --ignore-scripts`、typecheck、unit test、build、Node.js 20 / 22 compatibilityを実行します。Markdown/textだけのdocs-only PRではこれらの重いjobをskipします。live provider smokeは引き続き通常CIへ含めません。
 
 Actions workflowでは:
 
@@ -301,8 +301,10 @@ Actions workflowでは:
 - GitHub-owned actionsだけを許可
 - actionはfull commit SHAへpin
 - Dependabotでnpm dependencyとGitHub Actionsを週次更新
-- PRのdependency変更はDependency Reviewでmoderate以上の既知脆弱性を拒否
-- CodeQL advanced setupは`security-and-quality` suiteでJS/TSとGitHub Actionsを解析
+- `package.json` / `package-lock.json` が変わるPRだけDependency Reviewを実行し、moderate以上の既知脆弱性を拒否
+- CodeQL advanced setupは`security-and-quality` suiteでJS/TSとGitHub Actionsを解析し、Markdown/textだけのPRはscanを省略する
+- `main` push、weekly schedule、manual dispatchではCodeQL full scanを維持する
+- path classifierや条件付きjobの失敗を見落とさないよう、`required-gate` を `always()` で評価する
 - duplicate PR runはconcurrencyでcancel
 
 とします。
