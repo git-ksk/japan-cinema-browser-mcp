@@ -262,12 +262,14 @@ test("AEON reviewed actions are exact and cannot widen generic click policy", ()
   const schedule = "https://theater.aeoncinema.com/theaters/kohoku/?date=20260817";
   const watatheatre = "https://login.watatheatre.aeoncinema.com/login2?eventId=opaque";
   assert.doesNotThrow(() => assertAeonReviewedAction("cookie_reject", "全て拒否", schedule));
+  assert.doesNotThrow(() => assertAeonReviewedAction("schedule_expand", "上映時間を見る", schedule));
   assert.doesNotThrow(() => assertAeonReviewedAction("seat_entry", "予約購入", schedule));
   assert.doesNotThrow(() => assertAeonReviewedAction("guest_purchase", "チケット購入のみ（会員登録しない）", watatheatre));
 
   for (const [action, label, url] of [
     ["cookie_reject", "全て許可", schedule],
     ["cookie_reject", "Cookie設定", schedule],
+    ["schedule_expand", "上映時間", schedule],
     ["seat_entry", "券種選択へ", schedule],
     ["guest_purchase", "ログイン", watatheatre],
     ["guest_purchase", "チケット購入のみ（会員登録しない）", "https://reserve.smart-theater.com/#/purchase/cinema/seat"]

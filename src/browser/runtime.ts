@@ -430,6 +430,16 @@ export class CinemaBrowserRuntime {
     this.handoff.advanceResourceEpoch();
   }
 
+  async clickAeonScheduleExpansion(point: { x: number; y: number }): Promise<void> {
+    const client = await this.getClient();
+    const current = await this.currentUrlUnchecked(client);
+    this.wrapProviderPolicy(() => assertAeonReviewedAction("schedule_expand", "上映時間を見る", current));
+    await this.trustedClickExactPoint(client, point, "上映時間を見る");
+    await sleep(300);
+    this.assertOperationActive();
+    this.handoff.advanceResourceEpoch();
+  }
+
   async clickAeonSeatEntryAndAdoptWatatheatre(point: { x: number; y: number }, expectedControlLabel: string): Promise<void> {
     const client = await this.getClient();
     const current = await this.currentUrlUnchecked(client);

@@ -64,6 +64,8 @@ interface ScheduleSnapshot {
   ambiguousTimeGroups?: unknown;
   emptySchedule?: unknown;
   scheduleCardCount?: unknown;
+  collapsedScheduleCardCount?: unknown;
+  invalidScheduleCardCount?: unknown;
 }
 
 interface AeonPointSnapshot { x?: unknown; y?: unknown; }
@@ -73,6 +75,26 @@ interface AeonCookieSnapshot {
   allowCount?: unknown;
   settingsCount?: unknown;
   rejectPoint?: AeonPointSnapshot;
+}
+
+interface AeonScheduleExpansionState {
+  totalCards?: unknown;
+  invalidCards?: unknown;
+  collapsedMovies?: unknown;
+}
+
+interface AeonScheduleExpansionTarget {
+  ok?: unknown;
+  reason?: unknown;
+  movie?: unknown;
+  label?: unknown;
+  point?: AeonPointSnapshot;
+}
+
+interface AeonScheduleExpansionVerification {
+  cardCount?: unknown;
+  totalTickets?: unknown;
+  visibleTickets?: unknown;
 }
 
 interface AeonSeatEntrySnapshot {
@@ -183,78 +205,98 @@ const SCHEDULE_EXPRESSION = `(() => {
 
   const timeRange = /(?:^|\\D)((?:[01]?\\d|2\\d)[:：][0-5]\\d)\\s*[~〜～ー-]\\s*((?:[01]?\\d|2\\d)[:：][0-5]\\d)(?!\\d)/;
   const allTimeRanges = (text) => Array.from(text.matchAll(/((?:[01]?\\d|2\\d)[:：][0-5]\\d)\\s*[~〜～ー-]\\s*((?:[01]?\\d|2\\d)[:：][0-5]\\d)/g));
-  const titleRejected = /^(?:上映スケジュール|劇場情報|作品から探す|上映時間から探す|販売開始日時について|すべてを読む|予約購入|Coming soon)$/i;
-  const titleNodes = Array.from(document.querySelectorAll('a[href*="/movie/"],h2,h3,h4,h5,h6'))
-    .filter(visible)
-    .map((el) => ({ el, text: normalize(el.textContent), preferred: el.matches('a[href*="/movie/"]') }))
-    .filter((item) => item.text.length >= 2 && item.text.length <= 180 && !titleRejected.test(item.text) && !/^イオンシネマ(?:\\s|$)/.test(item.text));
-
-  const candidateElements = Array.from(document.querySelectorAll('a,button,div,p,span,li')).filter(visible);
-  const timeItems = candidateElements
-    .map((el) => ({ el, text: normalize(el.getAttribute('aria-label') || el.textContent) }))
-    .filter((item) => item.text.length > 0 && item.text.length <= 260 && timeRange.test(item.text))
-    .map((item) => ({ ...item, ranges: allTimeRanges(item.text) }))
-    .filter((item) => !Array.from(item.el.children).some((child) => visible(child) && timeRange.test(normalize(child.textContent))));
-  const ambiguousTimeGroups = timeItems.filter((item) => item.ranges.length !== 1).length;
-  const timeNodes = timeItems.filter((item) => item.ranges.length === 1);
-
-  const titleFor = (control) => {
-    let parent = control.parentElement;
-    for (let depth = 0; parent && depth < 8; depth += 1, parent = parent.parentElement) {
-      const candidates = titleNodes.filter((item) => parent.contains(item.el) && before(item.el, control));
-      const preferred = candidates.filter((item) => item.preferred);
-      const pool = preferred.length > 0 ? preferred : candidates;
-      if (pool.length > 0) return pool[pool.length - 1].text;
-    }
-    return '';
-  };
-
-  const contextFor = (control) => {
-    let parent = control.parentElement;
-    for (let depth = 0; parent && depth < 6; depth += 1, parent = parent.parentElement) {
-      const text = normalize(parent.innerText || parent.textContent);
-      if (text.length >= 8 && text.length <= 700) return text;
-    }
-    return normalize(control.textContent).slice(0, 260);
-  };
-
   const showtimes = [];
   const seen = new Set();
-  for (const item of timeNodes) {
-    const match = item.ranges[0];
-    if (!match?.[1] || !match[2]) continue;
-    const movie = titleFor(item.el);
-    const key = movie + '|' + match[1] + '|' + match[2];
-    if (seen.has(key)) continue;
-    seen.add(key);
-    showtimes.push({ movie, label: match[1] + '~' + match[2], context: contextFor(item.el) });
-    if (showtimes.length >= 180) break;
-  }
-
-  // Current reviewed AEON public UI renders each movie under
-  // .p-schedule__information and each public showtime under
-  // .p-schedule__ticket. Prefer that explicit rendered structure when the
-  // generic semantic walker briefly sees no leaf ranges during hydration.
   const scheduleCards = Array.from(document.querySelectorAll('.p-schedule__information')).filter(visible);
-  if (showtimes.length === 0 && scheduleCards.length > 0) {
+  let collapsedScheduleCardCount = 0;
+  let invalidScheduleCardCount = 0;
+  let ambiguousTimeGroups = 0;
+
+  // Current reviewed AEON schedule UI: only visible tickets inside the same
+  // .p-schedule__information card are read truth. Hidden ticket contents are
+  // never normalized as showtimes; collapsed cards must be explicitly opened
+  // through the reviewed exact 上映時間を見る action first.
+  if (scheduleCards.length > 0) {
     for (const card of scheduleCards) {
-      const header = card.querySelector('.p-schedule__header');
-      const movie = normalize(header?.textContent).replace(/\s*上映時間[:：].*$/, '').trim();
-      if (!movie || movie.length > 180) continue;
-      for (const ticket of Array.from(card.querySelectorAll('.p-schedule__ticket')).filter(visible)) {
-        const label = normalize(ticket.querySelector('.p-schedule__time')?.textContent || ticket.textContent);
-        const match = label.match(timeRange);
-        if (!match?.[1] || !match[2]) continue;
-        const key = movie + '|' + match[1] + '|' + match[2];
-        if (seen.has(key)) continue;
+      const movie = normalize(card.querySelector('.p-schedule__header')?.textContent).replace(/\\s*上映時間[:：].*$/, '').trim();
+      const tickets = Array.from(card.querySelectorAll('.p-schedule__ticket'));
+      const visibleTickets = tickets.filter(visible);
+      const triggers = Array.from(card.querySelectorAll('.p-schedule__listTrigger'))
+        .filter(visible)
+        .filter((el) => normalize(el.getAttribute('aria-label') || el.textContent) === '上映時間を見る');
+      if (!movie || movie.length > 180 || tickets.length === 0) {
+        invalidScheduleCardCount += 1;
+        continue;
+      }
+      if (visibleTickets.length === 0) {
+        if (triggers.length !== 1) invalidScheduleCardCount += 1;
+        else collapsedScheduleCardCount += 1;
+        continue;
+      }
+      if (visibleTickets.length !== tickets.length) {
+        invalidScheduleCardCount += 1;
+        continue;
+      }
+      for (const ticket of visibleTickets) {
+        const context = normalize(ticket.innerText || ticket.textContent).slice(0, 260);
+        const ranges = allTimeRanges(context);
+        if (ranges.length !== 1 || !ranges[0]?.[1] || !ranges[0]?.[2]) {
+          ambiguousTimeGroups += 1;
+          continue;
+        }
+        const key = movie + '|' + ranges[0][1] + '|' + ranges[0][2];
+        if (seen.has(key)) {
+          invalidScheduleCardCount += 1;
+          continue;
+        }
         seen.add(key);
-        showtimes.push({
-          movie,
-          label: match[1] + '~' + match[2],
-          context: normalize(ticket.innerText || ticket.textContent).slice(0, 260)
-        });
+        showtimes.push({ movie, label: ranges[0][1] + '~' + ranges[0][2], context });
         if (showtimes.length >= 180) break;
       }
+      if (showtimes.length >= 180) break;
+    }
+  } else {
+    // Legacy reviewed layout fallback. This branch is unreachable whenever the
+    // current .p-schedule__information structure is present.
+    const titleRejected = /^(?:上映スケジュール|劇場情報|作品から探す|上映時間から探す|販売開始日時について|すべてを読む|予約購入|Coming soon)$/i;
+    const titleNodes = Array.from(document.querySelectorAll('a[href*="/movie/"],h2,h3,h4,h5,h6'))
+      .filter(visible)
+      .map((el) => ({ el, text: normalize(el.textContent), preferred: el.matches('a[href*="/movie/"]') }))
+      .filter((item) => item.text.length >= 2 && item.text.length <= 180 && !titleRejected.test(item.text) && !/^イオンシネマ(?:\\s|$)/.test(item.text));
+    const candidateElements = Array.from(document.querySelectorAll('a,button,div,p,span,li')).filter(visible);
+    const timeItems = candidateElements
+      .map((el) => ({ el, text: normalize(el.getAttribute('aria-label') || el.textContent) }))
+      .filter((item) => item.text.length > 0 && item.text.length <= 260 && timeRange.test(item.text))
+      .map((item) => ({ ...item, ranges: allTimeRanges(item.text) }))
+      .filter((item) => !Array.from(item.el.children).some((child) => visible(child) && timeRange.test(normalize(child.textContent))));
+    ambiguousTimeGroups = timeItems.filter((item) => item.ranges.length !== 1).length;
+    const timeNodes = timeItems.filter((item) => item.ranges.length === 1);
+    const titleFor = (control) => {
+      let parent = control.parentElement;
+      for (let depth = 0; parent && depth < 8; depth += 1, parent = parent.parentElement) {
+        const candidates = titleNodes.filter((item) => parent.contains(item.el) && before(item.el, control));
+        const preferred = candidates.filter((item) => item.preferred);
+        const pool = preferred.length > 0 ? preferred : candidates;
+        if (pool.length > 0) return pool[pool.length - 1].text;
+      }
+      return '';
+    };
+    const contextFor = (control) => {
+      let parent = control.parentElement;
+      for (let depth = 0; parent && depth < 6; depth += 1, parent = parent.parentElement) {
+        const text = normalize(parent.innerText || parent.textContent);
+        if (text.length >= 8 && text.length <= 700) return text;
+      }
+      return normalize(control.textContent).slice(0, 260);
+    };
+    for (const item of timeNodes) {
+      const match = item.ranges[0];
+      if (!match?.[1] || !match[2]) continue;
+      const movie = titleFor(item.el);
+      const key = movie + '|' + match[1] + '|' + match[2];
+      if (seen.has(key)) continue;
+      seen.add(key);
+      showtimes.push({ movie, label: match[1] + '~' + match[2], context: contextFor(item.el) });
       if (showtimes.length >= 180) break;
     }
   }
@@ -268,10 +310,11 @@ const SCHEDULE_EXPRESSION = `(() => {
     showtimes,
     ambiguousTimeGroups,
     scheduleCardCount: scheduleCards.length,
+    collapsedScheduleCardCount,
+    invalidScheduleCardCount,
     emptySchedule: /(?:上映スケジュールはありません|上映予定はありません|上映回はありません)/.test(bodyText)
   };
 })()`;
-
 
 const AEON_COOKIE_EXPRESSION = `(() => {
   const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
@@ -288,6 +331,91 @@ const AEON_COOKIE_EXPRESSION = `(() => {
   const point = reject.length === 1 ? (() => { const r = reject[0].el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })() : null;
   return { rejectCount: reject.length, allowCount: allow.length, settingsCount: settings.length, rejectPoint: point };
 })()`;
+
+const AEON_SCHEDULE_EXPANSION_STATE_EXPRESSION = `(() => {
+  const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+  const visible = (el) => {
+    const r = el.getBoundingClientRect();
+    const s = getComputedStyle(el);
+    return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
+  };
+  const cards = Array.from(document.querySelectorAll('.p-schedule__information')).filter(visible);
+  const collapsedMovies = [];
+  let invalidCards = 0;
+  for (const card of cards) {
+    const movie = normalize(card.querySelector('.p-schedule__header')?.textContent).replace(/\\s*上映時間[:：].*$/, '').trim();
+    const tickets = Array.from(card.querySelectorAll('.p-schedule__ticket'));
+    const visibleTickets = tickets.filter(visible);
+    const triggers = Array.from(card.querySelectorAll('.p-schedule__listTrigger'))
+      .filter(visible)
+      .filter((el) => normalize(el.getAttribute('aria-label') || el.textContent) === '上映時間を見る');
+    if (!movie || tickets.length === 0) {
+      invalidCards += 1;
+      continue;
+    }
+    if (visibleTickets.length === tickets.length) continue;
+    if (visibleTickets.length !== 0 || triggers.length !== 1) {
+      invalidCards += 1;
+      continue;
+    }
+    collapsedMovies.push(movie);
+  }
+  return { totalCards: cards.length, invalidCards, collapsedMovies };
+})()`;
+
+function aeonScheduleExpansionTargetExpression(movie: string): string {
+  return `(() => {
+    const expectedMovie = ${JSON.stringify(movie)};
+    const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+    const visible = (el) => {
+      const r = el.getBoundingClientRect();
+      const s = getComputedStyle(el);
+      return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' && s.pointerEvents !== 'none';
+    };
+    const cards = Array.from(document.querySelectorAll('.p-schedule__information')).filter(visible)
+      .filter((card) => normalize(card.querySelector('.p-schedule__header')?.textContent).replace(/\\s*上映時間[:：].*$/, '').trim() === expectedMovie);
+    if (cards.length !== 1) return { ok: false, reason: 'movie_card_ambiguous', movie: expectedMovie };
+    const card = cards[0];
+    const tickets = Array.from(card.querySelectorAll('.p-schedule__ticket'));
+    const visibleTickets = tickets.filter(visible);
+    if (tickets.length === 0 || visibleTickets.length !== 0) return { ok: false, reason: 'movie_not_collapsed', movie: expectedMovie };
+    const triggers = Array.from(card.querySelectorAll('.p-schedule__listTrigger'))
+      .filter(visible)
+      .filter((el) => normalize(el.getAttribute('aria-label') || el.textContent) === '上映時間を見る');
+    if (triggers.length !== 1) return { ok: false, reason: 'trigger_ambiguous', movie: expectedMovie };
+    const trigger = triggers[0];
+    trigger.scrollIntoView({ block: 'center', inline: 'nearest' });
+    const rect = trigger.getBoundingClientRect();
+    for (let yi = 1; yi <= 5; yi += 1) {
+      for (let xi = 1; xi <= 5; xi += 1) {
+        const x = rect.left + rect.width * xi / 6;
+        const y = rect.top + rect.height * yi / 6;
+        if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) continue;
+        const hit = document.elementFromPoint(x, y);
+        const control = hit?.closest?.('a,button,[role="button"],[role="link"]');
+        if (control === trigger) return { ok: true, movie: expectedMovie, label: '上映時間を見る', point: { x, y } };
+      }
+    }
+    return { ok: false, reason: 'trigger_hit_test_failed', movie: expectedMovie };
+  })()`;
+}
+
+function aeonScheduleExpansionVerificationExpression(movie: string): string {
+  return `(() => {
+    const expectedMovie = ${JSON.stringify(movie)};
+    const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+    const visible = (el) => {
+      const r = el.getBoundingClientRect();
+      const s = getComputedStyle(el);
+      return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
+    };
+    const cards = Array.from(document.querySelectorAll('.p-schedule__information')).filter(visible)
+      .filter((card) => normalize(card.querySelector('.p-schedule__header')?.textContent).replace(/\\s*上映時間[:：].*$/, '').trim() === expectedMovie);
+    if (cards.length !== 1) return { cardCount: cards.length, totalTickets: 0, visibleTickets: 0 };
+    const tickets = Array.from(cards[0].querySelectorAll('.p-schedule__ticket'));
+    return { cardCount: 1, totalTickets: tickets.length, visibleTickets: tickets.filter(visible).length };
+  })()`;
+}
 
 function aeonSeatEntryExpression(showtime: AeonShowtime): string {
   const expectedMovie = JSON.stringify(normalizeText(showtime.movie));
@@ -359,7 +487,22 @@ const AEON_WATATHEATRE_EXPRESSION = `(() => {
   };
   const controls = Array.from(document.querySelectorAll('button,a,[role="button"],[role="link"],input[type="button"],input[type="submit"]')).filter(visible);
   const guests = controls.filter((el) => normalize(el.getAttribute('aria-label') || el.value || el.textContent) === 'チケット購入のみ（会員登録しない）');
-  const point = guests.length === 1 ? (() => { const r = guests[0].getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })() : null;
+  const point = guests.length === 1 ? (() => {
+    const guest = guests[0];
+    guest.scrollIntoView({ behavior: 'instant', block: 'center', inline: 'nearest' });
+    const r = guest.getBoundingClientRect();
+    for (let yi = 1; yi <= 5; yi += 1) {
+      for (let xi = 1; xi <= 5; xi += 1) {
+        const x = r.left + r.width * xi / 6;
+        const y = r.top + r.height * yi / 6;
+        if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) continue;
+        const hit = document.elementFromPoint(x, y);
+        const control = hit?.closest?.('button,a,[role="button"],[role="link"],input[type="button"],input[type="submit"]');
+        if (control === guest) return { x, y };
+      }
+    }
+    return null;
+  })() : null;
   const fields = Array.from(document.querySelectorAll('input,textarea,select')).filter(visible);
   const challenges = Array.from(document.querySelectorAll('iframe[src*="recaptcha"],iframe[src*="hcaptcha"],iframe[src*="challenge"],#captcha,input[name*="captcha" i]')).filter(visible);
   return {
@@ -588,6 +731,8 @@ function theaterSnapshotReady(snapshot: TheaterSnapshot): boolean {
 
 function scheduleSnapshotReady(snapshot: ScheduleSnapshot): boolean {
   if (snapshot.scheduleHeadingCount !== 1) return false;
+  if (typeof snapshot.invalidScheduleCardCount === "number" && snapshot.invalidScheduleCardCount > 0) return true;
+  if (typeof snapshot.collapsedScheduleCardCount === "number" && snapshot.collapsedScheduleCardCount > 0) return true;
   if (typeof snapshot.ambiguousTimeGroups === "number" && snapshot.ambiguousTimeGroups > 0) return true;
   return (Array.isArray(snapshot.showtimes) && snapshot.showtimes.length > 0) || snapshot.emptySchedule === true;
 }
@@ -606,6 +751,16 @@ export function normalizeAeonScheduleSnapshot(
       expected: theater.name,
       title: snapshot.title,
       observed: snapshot.theaterNames
+    });
+  }
+  if (typeof snapshot.invalidScheduleCardCount === "number" && snapshot.invalidScheduleCardCount > 0) {
+    throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON current schedule cards are structurally ambiguous; refusing partial normalization.", {
+      invalidScheduleCardCount: snapshot.invalidScheduleCardCount
+    });
+  }
+  if (typeof snapshot.collapsedScheduleCardCount === "number" && snapshot.collapsedScheduleCardCount > 0) {
+    throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON current schedule still contains collapsed movie cards; hidden ticket content is not read truth.", {
+      collapsedScheduleCardCount: snapshot.collapsedScheduleCardCount
     });
   }
   if (typeof snapshot.ambiguousTimeGroups === "number" && snapshot.ambiguousTimeGroups > 0) {
@@ -639,7 +794,7 @@ export function normalizeAeonScheduleSnapshot(
       : /吹替|DUBBED/i.test(semanticText)
         ? "dubbed" as const
         : undefined;
-    const availability = /販売期間外/.test(semanticText)
+    const availability = /販売期間外|Web受付終了/.test(semanticText)
       ? "unavailable" as const
       : /完売|売(?:り)?切れ/.test(semanticText)
         ? "sold_out" as const
@@ -1003,7 +1158,20 @@ export class AeonReadAdapter implements CinemaReadAdapter<"aeon", AeonTheater, A
         actual: sourceUrl
       });
     }
-    const semantic = await this.timedPhase("read_schedule_semantic", () => this.readScheduleSemantic());
+    let semantic = await this.timedPhase("read_schedule_semantic", () => this.readScheduleSemantic());
+    const currentCardCount = typeof semantic.value.scheduleCardCount === "number" ? semantic.value.scheduleCardCount : 0;
+    const currentInvalidCards = typeof semantic.value.invalidScheduleCardCount === "number" ? semantic.value.invalidScheduleCardCount : 0;
+    const currentCollapsedCards = typeof semantic.value.collapsedScheduleCardCount === "number" ? semantic.value.collapsedScheduleCardCount : 0;
+    if (currentCardCount > 0 && currentInvalidCards > 0) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON current schedule card structure is ambiguous before any reviewed expansion.", {
+        scheduleCardCount: currentCardCount,
+        invalidScheduleCardCount: currentInvalidCards
+      });
+    }
+    if (currentCardCount > 0 && currentCollapsedCards > 0) {
+      await this.timedPhase("expand_schedule_rows", () => this.expandCurrentScheduleForRead());
+      semantic = await this.timedPhase("read_expanded_schedule_semantic", () => this.readScheduleSemantic());
+    }
     let showtimes = normalizeAeonScheduleSnapshot(semantic.value, theater, date, semantic.url);
     const dateAvailable = showtimes.length > 0 || semantic.value.emptySchedule === true;
     if (input.movie?.trim()) {
@@ -1154,6 +1322,80 @@ export class AeonReadAdapter implements CinemaReadAdapter<"aeon", AeonTheater, A
       theaters = theaters.filter((theater) => matchesAeonTheater(theater, query));
     }
     return { sourceUrl: semantic.url, theaters };
+  }
+
+  private async dismissAeonCookieForReviewedSchedule(): Promise<void> {
+    const cookie = await this.runtime.evaluateAeonSeatScheduleState<AeonCookieSnapshot>(AEON_COOKIE_EXPRESSION);
+    const rejectCount = typeof cookie.value.rejectCount === "number" ? cookie.value.rejectCount : 0;
+    const allowCount = typeof cookie.value.allowCount === "number" ? cookie.value.allowCount : 0;
+    const settingsCount = typeof cookie.value.settingsCount === "number" ? cookie.value.settingsCount : 0;
+    if (rejectCount > 1 || allowCount > 1 || settingsCount > 1) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON Cookie controls are ambiguous before schedule expansion.", { rejectCount, allowCount, settingsCount });
+    }
+    if (rejectCount === 0) {
+      if (allowCount > 0 || settingsCount > 0) {
+        throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON Cookie surface is visible without one exact `全て拒否` control; refusing schedule expansion.");
+      }
+      return;
+    }
+    const rejectPoint = pointFrom(cookie.value.rejectPoint);
+    if (!rejectPoint) throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON exact `全て拒否` Cookie control has no usable rendered pointer geometry.");
+    await this.runtime.clickAeonCookieReject(rejectPoint);
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const next = await this.runtime.evaluateAeonSeatScheduleState<AeonCookieSnapshot>(AEON_COOKIE_EXPRESSION);
+      const r = typeof next.value.rejectCount === "number" ? next.value.rejectCount : 0;
+      const a = typeof next.value.allowCount === "number" ? next.value.allowCount : 0;
+      const s = typeof next.value.settingsCount === "number" ? next.value.settingsCount : 0;
+      if (r === 0 && a === 0 && s === 0) return;
+      if (r !== 1 || a > 1 || s > 1) throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON Cookie surface changed to an unreviewed state after exact rejection.");
+      await sleep(READY_POLL_MS);
+    }
+    throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON Cookie overlay did not dismiss after the exact privacy-preserving rejection action.");
+  }
+
+  private async expandCurrentScheduleForRead(): Promise<void> {
+    await this.dismissAeonCookieForReviewedSchedule();
+    const state = await this.runtime.evaluateAeonSeatScheduleState<AeonScheduleExpansionState>(AEON_SCHEDULE_EXPANSION_STATE_EXPRESSION);
+    const totalCards = typeof state.value.totalCards === "number" ? state.value.totalCards : 0;
+    const invalidCards = typeof state.value.invalidCards === "number" ? state.value.invalidCards : -1;
+    const movies = Array.isArray(state.value.collapsedMovies)
+      ? state.value.collapsedMovies.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+      : [];
+    if (totalCards < 1 || totalCards > 160 || invalidCards !== 0 || movies.length > totalCards || new Set(movies).size !== movies.length) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON collapsed schedule cards are missing, ambiguous, or internally inconsistent.", { totalCards, invalidCards, collapsedCount: movies.length });
+    }
+    for (const movie of movies) {
+      const first = await this.runtime.evaluateAeonSeatScheduleState<AeonScheduleExpansionTarget>(aeonScheduleExpansionTargetExpression(movie));
+      if (first.value.ok !== true || rawString(first.value.movie) !== movie || rawString(first.value.label) !== "上映時間を見る") {
+        throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON exact schedule expansion target could not be resolved before settling.", { movie, reason: first.value.reason });
+      }
+      await sleep(READY_POLL_MS);
+      const second = await this.runtime.evaluateAeonSeatScheduleState<AeonScheduleExpansionTarget>(aeonScheduleExpansionTargetExpression(movie));
+      const point = pointFrom(second.value.point);
+      if (second.value.ok !== true || rawString(second.value.movie) !== movie || rawString(second.value.label) !== "上映時間を見る" || !point) {
+        throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON exact schedule expansion target changed before trusted pointer dispatch.", { movie, reason: second.value.reason });
+      }
+      await this.runtime.clickAeonScheduleExpansion(point);
+      let expanded = false;
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        const verify = await this.runtime.evaluateAeonSeatScheduleState<AeonScheduleExpansionVerification>(aeonScheduleExpansionVerificationExpression(movie));
+        const cardCount = typeof verify.value.cardCount === "number" ? verify.value.cardCount : 0;
+        const totalTickets = typeof verify.value.totalTickets === "number" ? verify.value.totalTickets : 0;
+        const visibleTickets = typeof verify.value.visibleTickets === "number" ? verify.value.visibleTickets : 0;
+        if (cardCount === 1 && totalTickets > 0 && visibleTickets === totalTickets) { expanded = true; break; }
+        if (cardCount !== 1 || totalTickets <= 0 || visibleTickets > totalTickets) {
+          throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON schedule card changed to an invalid state after one exact expansion.", { movie, cardCount, totalTickets, visibleTickets });
+        }
+        await sleep(READY_POLL_MS);
+      }
+      if (!expanded) throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON schedule card did not fully expand after one exact reviewed action; refusing a repeated click.", { movie });
+    }
+    const finalState = await this.runtime.evaluateAeonSeatScheduleState<AeonScheduleExpansionState>(AEON_SCHEDULE_EXPANSION_STATE_EXPRESSION);
+    const finalInvalid = typeof finalState.value.invalidCards === "number" ? finalState.value.invalidCards : -1;
+    const finalCollapsed = Array.isArray(finalState.value.collapsedMovies) ? finalState.value.collapsedMovies.length : -1;
+    if (finalInvalid !== 0 || finalCollapsed !== 0) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "AEON schedule remained partially collapsed after bounded reviewed expansion.", { finalInvalid, finalCollapsed });
+    }
   }
 
   private async readScheduleSemantic(): Promise<{ url: string; value: ScheduleSnapshot }> {
