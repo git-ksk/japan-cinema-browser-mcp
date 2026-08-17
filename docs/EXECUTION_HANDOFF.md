@@ -67,7 +67,7 @@ Human intervention開始時にprepared purchase confirmationを全破棄しま�
 
 Human completionはpurchase approvalではありません。将来final purchaseを有効化する場合も、provider capability、runtime purchase flag、current provider/page verification、fresh one-shot material confirmation、final-control verificationをすべて別に満たす必要があります。ambiguous submission outcomeはautomatic retryしません。
 
-Phase 4 TOHO checkout continuationでは、reviewed consent boundaryでexplicit interventionを作り、Human完了後も元のsemantic mutationをretryしません。fresh `prepare_checkout`がcurrent rendered stageをpositiveに再検証し、短命なmaterial bindingへ再bindした場合だけ次stageへ進む設計です。詳細は [`PHASE4_TOHO_CONTINUATION_DESIGN.md`](./PHASE4_TOHO_CONTINUATION_DESIGN.md) を参照してください。
+Phase 4 TOHO checkout continuationでは、reviewed consent boundaryでexplicit interventionを作り、Human完了後も元のsemantic mutationをretryしません。A1/A2ではbounded `reviewed_checkout_boundary` action（provider/boundary/continuation digestのみ）とprocess-local one-shot bindingを実装済みです。bindingはexact browser target / provider / intent / showtime / selected seats / pre-Human fingerprintsへbindし、cancel、browser reset、TTL、owned context mismatchで破棄します。HumanがContinueだけ返してpre-consent controlが残っている場合はverificationでHumanへ戻します。fresh `prepare_checkout`がcurrent rendered stageをpositiveに再検証できるまでbindingはconsumeしません。詳細は [`PHASE4_TOHO_CONTINUATION_DESIGN.md`](./PHASE4_TOHO_CONTINUATION_DESIGN.md) を参照してください。
 
 ## Invocation ownership
 

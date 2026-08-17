@@ -10,6 +10,12 @@ import {
 import { ChromeProcess } from "./chrome-process.js";
 import { CINEMA_HANDOFF_POLICY } from "../handoff-policy.js";
 import {
+  CheckoutContinuationStore,
+  type CheckoutContinuationBinding,
+  type CheckoutContinuationBindingInput,
+  type CheckoutContinuationMatch
+} from "../checkout-continuation.js";
+import {
   CINEMA_PROVIDERS,
   ProviderPolicyError,
   assertAeonReviewedAction,
@@ -40,7 +46,22 @@ export type CinemaInterventionReason =
   | "access_challenge"
   | "sign_in"
   | "consent";
-export type CinemaIntervention = ExecutionIntervention<never, CinemaInterventionReason>;
+
+export type CinemaHandoffAction = {
+  kind: "reviewed_checkout_boundary";
+  provider: "toho";
+  boundary: "toho_terms_consent_next";
+  continuationDigest: string;
+};
+
+export interface CinemaReviewedBrowserContext {
+  provider: CinemaProviderId;
+  targetId: string;
+  host: string;
+  pathname: string;
+}
+
+export type CinemaIntervention = ExecutionIntervention<CinemaHandoffAction, CinemaInterventionReason>;
 
 export class BrowserRuntimeError extends Error {
   constructor(
@@ -96,6 +117,19 @@ const INTERVENTION_EXPRESSION = `(() => {
     if (hasConsentTopic && hasConsentControl) return 'consent';
   }
   return null;
+})()`;
+
+const TOHO_REVIEWED_CONSENT_BOUNDARY_VERIFY_EXPRESSION = `(() => {
+  const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+  const visible = (el) => {
+    const rect = el.getBoundingClientRect();
+    const style = getComputedStyle(el);
+    return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && style.pointerEvents !== 'none';
+  };
+  const matching = Array.from(document.querySelectorAll('button,a,input[type="button"],input[type="submit"]'))
+    .filter(visible)
+    .filter((el) => normalize(el.getAttribute('aria-label') || el.value || el.textContent) === '利用規約に同意して次へ');
+  return { preConsentBoundaryVisible: matching.length === 1, matchingControls: matching.length };
 })()`;
 
 function visibleTextExpression(maxChars: number): string {
@@ -220,7 +254,8 @@ export class CinemaBrowserRuntime {
   private readonly operationSignal = new AsyncLocalStorage<AbortSignal>();
   private port?: number;
   private targetId?: string;
-  private readonly handoff = new ExecutionHandoffState<never, CinemaInterventionReason>();
+  private readonly handoff = new ExecutionHandoffState<CinemaHandoffAction, CinemaInterventionReason>();
+  private readonly checkoutContinuations = new CheckoutContinuationStore();
 
   constructor(
     private readonly chrome: ChromeProcess,
@@ -676,6 +711,83 @@ export class CinemaBrowserRuntime {
     return this.handoff.getResourceEpoch();
   }
 
+  async getReviewedBrowserContext(expectedProvider: CinemaProviderId): Promise<CinemaReviewedBrowserContext> {
+    const current = await this.assertOfficialCurrentUrl(expectedProvider);
+    if (!this.targetId) {
+      throw new BrowserRuntimeError("BROWSER_UNAVAILABLE", "The reviewed browser target identity is unavailable.");
+    }
+    const url = new URL(current);
+    return { provider: expectedProvider, targetId: this.targetId, host: url.host, pathname: url.pathname };
+  }
+
+  createCheckoutContinuation(input: CheckoutContinuationBindingInput): CheckoutContinuationBinding {
+    this.handoff.assertAgentAuthority();
+    if (!this.targetId || input.browserTargetId !== this.targetId) {
+      this.checkoutContinuations.clear();
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "Checkout continuation is not bound to the active reviewed browser target.");
+    }
+    return this.checkoutContinuations.create(input);
+  }
+
+  peekCheckoutContinuation(): CheckoutContinuationBinding | undefined {
+    return this.checkoutContinuations.peek();
+  }
+
+  requireMatchingCheckoutContinuation(match: CheckoutContinuationMatch): CheckoutContinuationBinding {
+    this.handoff.assertAgentAuthority();
+    return this.checkoutContinuations.requireMatching(match);
+  }
+
+  consumeMatchingCheckoutContinuation(match: CheckoutContinuationMatch): CheckoutContinuationBinding {
+    this.handoff.assertAgentAuthority();
+    return this.checkoutContinuations.consumeMatching(match);
+  }
+
+  clearCheckoutContinuation(): void {
+    this.checkoutContinuations.clear();
+  }
+
+  async requireReviewedHumanIntervention(input: {
+    reason: "consent";
+    action: CinemaHandoffAction;
+    message: string;
+  }): Promise<never> {
+    this.handoff.assertAgentAuthority();
+    if (
+      input.action.kind !== "reviewed_checkout_boundary" ||
+      input.action.provider !== "toho" ||
+      input.action.boundary !== "toho_terms_consent_next" ||
+      !/^sha256:[a-f0-9]{64}$/.test(input.action.continuationDigest)
+    ) {
+      throw new BrowserRuntimeError("UNREVIEWED_INTERACTION", "The requested Human checkout boundary is not a reviewed provider action.");
+    }
+    const activeBinding = this.checkoutContinuations.peek();
+    if (
+      !activeBinding ||
+      activeBinding.provider !== input.action.provider ||
+      activeBinding.boundary !== input.action.boundary ||
+      activeBinding.continuationDigest !== input.action.continuationDigest
+    ) {
+      this.checkoutContinuations.clear();
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "The reviewed Human checkout boundary is not bound to the current checkout context.");
+    }
+    const current = await this.getReviewedBrowserContext(input.action.provider);
+    if (
+      current.targetId !== activeBinding.browserTargetId ||
+      current.host !== activeBinding.sourceSurface.host ||
+      current.pathname !== activeBinding.sourceSurface.pathname
+    ) {
+      this.checkoutContinuations.clear();
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "The reviewed Human checkout boundary left its bound provider surface before handoff.");
+    }
+    const intervention = this.handoff.begin({
+      reason: input.reason,
+      action: input.action,
+      resumePolicy: CINEMA_HANDOFF_POLICY.semantic_mutation.resumePolicy
+    });
+    throw new BrowserRuntimeError("HUMAN_ACTION_REQUIRED", input.message, undefined, intervention);
+  }
+
   getActiveIntervention(): CinemaIntervention | undefined {
     return this.handoff.getActive();
   }
@@ -696,7 +808,7 @@ export class CinemaBrowserRuntime {
     const client = await this.getVerificationClient();
     const url = await this.currentUrlUnchecked(client);
     try {
-      assertOfficialUrl(url);
+      assertOfficialUrl(url, active.action?.kind === "reviewed_checkout_boundary" ? active.action.provider : undefined);
     } catch {
       throw new BrowserRuntimeError(
         "HUMAN_ACTION_REQUIRED",
@@ -705,6 +817,44 @@ export class CinemaBrowserRuntime {
         active
       );
     }
+    if (active.action?.kind === "reviewed_checkout_boundary") {
+      const binding = this.checkoutContinuations.peek();
+      if (
+        !binding ||
+        binding.continuationDigest !== active.action.continuationDigest ||
+        binding.provider !== active.action.provider ||
+        binding.boundary !== active.action.boundary ||
+        !this.targetId ||
+        binding.browserTargetId !== this.targetId
+      ) {
+        this.checkoutContinuations.clear();
+        throw new BrowserRuntimeError(
+          "UI_STATE_CHANGED",
+          "The reviewed checkout context changed while Human control was active.",
+          undefined,
+          active
+        );
+      }
+      if (active.action.provider !== "toho" || active.action.boundary !== "toho_terms_consent_next") {
+        this.checkoutContinuations.clear();
+        throw new BrowserRuntimeError("UNREVIEWED_INTERACTION", "The reviewed checkout handoff action is no longer supported.", undefined, active);
+      }
+      const verifiedBoundary = await client.Runtime.evaluate({
+        expression: TOHO_REVIEWED_CONSENT_BOUNDARY_VERIFY_EXPRESSION,
+        returnByValue: true,
+        awaitPromise: true
+      });
+      const boundaryState = verifiedBoundary.result.value as { preConsentBoundaryVisible?: boolean; matchingControls?: number } | undefined;
+      if (boundaryState?.preConsentBoundaryVisible === true) {
+        throw new BrowserRuntimeError(
+          "HUMAN_ACTION_REQUIRED",
+          "The reviewed TOHO terms-consent continuation is still visible. Complete or cancel that exact manual browser step before continuing.",
+          { matchingControls: boundaryState.matchingControls },
+          active
+        );
+      }
+    }
+
     const surface = await this.detectInterventionSurface(client);
     if (surface) {
       throw new BrowserRuntimeError(
@@ -717,15 +867,17 @@ export class CinemaBrowserRuntime {
     return this.handoff.markVerified(interventionId);
   }
 
-  resumeAfterHumanIntervention(interventionId: string): ResumeDecision<never> {
+  resumeAfterHumanIntervention(interventionId: string): ResumeDecision<CinemaHandoffAction> {
     return this.handoff.resumeAgent(interventionId);
   }
 
   cancelHumanIntervention(interventionId: string): void {
     this.handoff.cancel(interventionId);
+    this.checkoutContinuations.clear();
   }
 
   async close(): Promise<void> {
+    this.checkoutContinuations.clear();
     const active = this.handoff.getActive();
     if (active) this.handoff.cancel(active.id);
     const client = this.client;
@@ -975,6 +1127,7 @@ export class CinemaBrowserRuntime {
         if (this.client === existingClient) {
           this.client = undefined;
           this.targetId = undefined;
+          this.checkoutContinuations.clear();
         }
       }
     }
@@ -1005,6 +1158,7 @@ export class CinemaBrowserRuntime {
         if (this.client === client) {
           this.client = undefined;
           this.targetId = undefined;
+          this.checkoutContinuations.clear();
         }
         throw error;
       }

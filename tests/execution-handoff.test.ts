@@ -15,6 +15,8 @@ import {
   handoffStateMatchesInvocation
 } from "mcp-execution-handoff/mcp";
 import { CINEMA_HANDOFF_POLICY } from "../src/handoff-policy.js";
+import { BrowserRuntimeError, CinemaBrowserRuntime } from "../src/browser/runtime.js";
+import type { ChromeProcess } from "../src/browser/chrome-process.js";
 import { OperationQueue } from "../src/operation-queue.js";
 import { PurchaseGate } from "../src/purchase-gate.js";
 
@@ -131,7 +133,213 @@ test("v0.1.0 handoff dependency is immutable and transaction replay remains stat
   const server = fs.readFileSync(path.join(root, "src/server.ts"), "utf8");
   assert.match(server, /Human browser activity invalidates every prepared transaction confirmation/);
   assert.match(server, /CINEMA_HANDOFF_POLICY\.transaction\.resumeStrategy/);
+  assert.match(server, /TOHO checkout is waiting at the reviewed terms-consent boundary/);
+  assert.match(server, /利用規約に同意して次へ/);
   const runtime = fs.readFileSync(path.join(root, "src/browser/runtime.ts"), "utf8");
   assert.match(runtime, /CINEMA_HANDOFF_POLICY\.transaction\.resumePolicy/);
   assert.doesNotMatch(runtime, /captcha.{0,40}(solve|bypass)|hcaptcha.{0,40}(solve|bypass)/i);
+});
+
+test("reviewed TOHO checkout boundary carries only a bounded digest action and remains never_replay", async () => {
+  const runtime = new CinemaBrowserRuntime({ close: async () => undefined } as unknown as ChromeProcess, 1_000);
+  const mutable = runtime as unknown as { targetId: string };
+  mutable.targetId = "target-1";
+  const checkoutIntent = {
+    provider: "toho" as const,
+    showtime: {
+      theater: "TOHOシネマズ ららぽーと横浜",
+      theaterId: "036",
+      date: "2026-08-18",
+      movie: "隣人たち（字幕版）",
+      startTime: "21:50",
+      screen: "4"
+    },
+    seatIds: ["A-2"],
+    ticketChoices: [{ label: "一般", quantity: 1 }]
+  };
+  const binding = runtime.createCheckoutContinuation({
+    provider: "toho",
+    boundary: "toho_terms_consent_next",
+    intent: checkoutIntent,
+    theaterId: "036",
+    showtimeIdentity: "toho|036|2026-08-18|隣人たち（字幕版）|21:50|23:35|4",
+    selectedSeatIds: ["A-2"],
+    preHumanFingerprints: {
+      algorithm: "sha256",
+      context: "sha256:context",
+      layout: "sha256:layout",
+      state: "sha256:state"
+    },
+    sourceSurface: { host: "hlo.tohotheater.jp", pathname: "/net/ticket/036/TNPI2010J01.do" },
+    browserTargetId: "target-1"
+  });
+
+  const mutableHandoff = runtime as unknown as { getReviewedBrowserContext: () => Promise<{ provider: "toho"; targetId: string; host: string; pathname: string }> };
+  mutableHandoff.getReviewedBrowserContext = async () => ({ provider: "toho", targetId: "target-1", host: "hlo.tohotheater.jp", pathname: "/net/ticket/036/TNPI2010J01.do" });
+  await assert.rejects(
+    runtime.requireReviewedHumanIntervention({
+      reason: "consent",
+      action: {
+        kind: "reviewed_checkout_boundary",
+        provider: "toho",
+        boundary: "toho_terms_consent_next",
+        continuationDigest: binding.continuationDigest
+      },
+      message: "review terms in Chrome"
+    }),
+    (error: unknown) => {
+      if (!(error instanceof BrowserRuntimeError)) return false;
+      assert.equal(error.code, "HUMAN_ACTION_REQUIRED");
+      assert.equal(error.intervention?.resumePolicy, "never_replay");
+      assert.deepEqual(error.intervention?.action, {
+        kind: "reviewed_checkout_boundary",
+        provider: "toho",
+        boundary: "toho_terms_consent_next",
+        continuationDigest: binding.continuationDigest
+      });
+      assert.deepEqual(Object.keys(error.intervention?.action ?? {}).sort(), [
+        "boundary", "continuationDigest", "kind", "provider"
+      ].sort());
+      return true;
+    }
+  );
+
+  const active = runtime.getActiveIntervention();
+  assert.ok(active);
+  runtime.cancelHumanIntervention(active.id);
+  assert.equal(runtime.peekCheckoutContinuation(), undefined);
+});
+
+test("reviewed checkout continuation is cleared on browser close and cannot start from an unreviewed boundary", async () => {
+  const runtime = new CinemaBrowserRuntime({ close: async () => undefined } as unknown as ChromeProcess, 1_000);
+  const mutable = runtime as unknown as { targetId: string };
+  mutable.targetId = "target-1";
+  const checkoutIntent = {
+    provider: "toho" as const,
+    showtime: { theater: "TOHOシネマズ ららぽーと横浜", theaterId: "036", date: "2026-08-18", movie: "映画", startTime: "21:50", screen: "4" },
+    seatIds: ["A-2"],
+    ticketChoices: [{ label: "一般", quantity: 1 }]
+  };
+  const binding = runtime.createCheckoutContinuation({
+    provider: "toho",
+    boundary: "toho_terms_consent_next",
+    intent: checkoutIntent,
+    theaterId: "036",
+    showtimeIdentity: "showtime-1",
+    selectedSeatIds: ["A-2"],
+    preHumanFingerprints: { algorithm: "sha256", context: "sha256:c", layout: "sha256:l", state: "sha256:s" },
+    sourceSurface: { host: "hlo.tohotheater.jp", pathname: "/net/ticket/036/TNPI2010J01.do" },
+    browserTargetId: "target-1"
+  });
+  const mutableHandoff = runtime as unknown as { getReviewedBrowserContext: () => Promise<{ provider: "toho"; targetId: string; host: string; pathname: string }> };
+  mutableHandoff.getReviewedBrowserContext = async () => ({ provider: "toho", targetId: "target-1", host: "hlo.tohotheater.jp", pathname: "/net/ticket/036/TNPI2010J01.do" });
+  await assert.rejects(
+    runtime.requireReviewedHumanIntervention({
+      reason: "consent",
+      action: {
+        kind: "reviewed_checkout_boundary",
+        provider: "toho",
+        boundary: "toho_terms_consent_next",
+        continuationDigest: `sha256:${"0".repeat(64)}`
+      },
+      message: "bad digest"
+    }),
+    (error: unknown) => error instanceof BrowserRuntimeError && error.code === "UI_STATE_CHANGED"
+  );
+  assert.equal(runtime.peekCheckoutContinuation(), undefined);
+
+  mutable.targetId = "target-1";
+  runtime.createCheckoutContinuation({
+    provider: "toho",
+    boundary: "toho_terms_consent_next",
+    intent: checkoutIntent,
+    theaterId: "036",
+    showtimeIdentity: "showtime-1",
+    selectedSeatIds: ["A-2"],
+    preHumanFingerprints: { algorithm: "sha256", context: "sha256:c", layout: "sha256:l", state: "sha256:s" },
+    sourceSurface: { host: "hlo.tohotheater.jp", pathname: "/net/ticket/036/TNPI2010J01.do" },
+    browserTargetId: "target-1"
+  });
+  await runtime.close();
+  assert.equal(runtime.peekCheckoutContinuation(), undefined);
+  void binding;
+});
+
+test("reviewed TOHO consent verification returns to Human while the exact pre-consent control remains visible", async () => {
+  const runtime = new CinemaBrowserRuntime({ close: async () => undefined } as unknown as ChromeProcess, 1_000);
+  const mutable = runtime as unknown as {
+    targetId: string;
+    getVerificationClient: () => Promise<unknown>;
+    currentUrlUnchecked: () => Promise<string>;
+    detectInterventionSurface: () => Promise<undefined>;
+    getReviewedBrowserContext: () => Promise<{ provider: "toho"; targetId: string; host: string; pathname: string }>;
+  };
+  mutable.targetId = "target-1";
+  const checkoutIntent = {
+    provider: "toho" as const,
+    showtime: { theater: "TOHOシネマズ ららぽーと横浜", theaterId: "036", date: "2026-08-18", movie: "映画", startTime: "21:50", screen: "4" },
+    seatIds: ["A-2"],
+    ticketChoices: [{ label: "一般", quantity: 1 }]
+  };
+  const binding = runtime.createCheckoutContinuation({
+    provider: "toho",
+    boundary: "toho_terms_consent_next",
+    intent: checkoutIntent,
+    theaterId: "036",
+    showtimeIdentity: "showtime-1",
+    selectedSeatIds: ["A-2"],
+    preHumanFingerprints: { algorithm: "sha256", context: "sha256:c", layout: "sha256:l", state: "sha256:s" },
+    sourceSurface: { host: "hlo.tohotheater.jp", pathname: "/net/ticket/036/TNPI2010J01.do" },
+    browserTargetId: "target-1"
+  });
+  let startedId = "";
+  mutable.getReviewedBrowserContext = async () => ({ provider: "toho", targetId: "target-1", host: "hlo.tohotheater.jp", pathname: "/net/ticket/036/TNPI2010J01.do" });
+  await assert.rejects(
+    runtime.requireReviewedHumanIntervention({
+      reason: "consent",
+      action: {
+        kind: "reviewed_checkout_boundary",
+        provider: "toho",
+        boundary: "toho_terms_consent_next",
+        continuationDigest: binding.continuationDigest
+      },
+      message: "review terms"
+    }),
+    (error: unknown) => {
+      if (!(error instanceof BrowserRuntimeError) || !error.intervention) return false;
+      startedId = error.intervention.id;
+      return error.code === "HUMAN_ACTION_REQUIRED";
+    }
+  );
+
+  let preConsentVisible = true;
+  const client = {
+    Runtime: {
+      evaluate: async () => ({
+        result: { value: { preConsentBoundaryVisible: preConsentVisible, matchingControls: preConsentVisible ? 1 : 0 } }
+      })
+    }
+  };
+  mutable.getVerificationClient = async () => client;
+  mutable.currentUrlUnchecked = async () => "https://hlo.tohotheater.jp/net/ticket/036/TNPI2010J01.do";
+  mutable.detectInterventionSurface = async () => undefined;
+
+  runtime.claimHumanControl(startedId);
+  runtime.markHumanControlComplete(startedId);
+  await assert.rejects(
+    runtime.verifyHumanIntervention(startedId),
+    (error) => error instanceof BrowserRuntimeError && error.code === "HUMAN_ACTION_REQUIRED"
+  );
+  assert.equal(runtime.peekCheckoutContinuation()?.continuationDigest, binding.continuationDigest);
+
+  runtime.claimHumanControl(startedId);
+  runtime.markHumanControlComplete(startedId);
+  preConsentVisible = false;
+  const verified = await runtime.verifyHumanIntervention(startedId);
+  assert.equal(verified.status, "ready_to_resume");
+  const decision = runtime.resumeAfterHumanIntervention(startedId);
+  assert.equal(decision.resumePolicy, "never_replay");
+  assert.equal(decision.action?.continuationDigest, binding.continuationDigest);
+  assert.equal(runtime.peekCheckoutContinuation()?.continuationDigest, binding.continuationDigest);
+  runtime.clearCheckoutContinuation();
 });

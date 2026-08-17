@@ -5,6 +5,8 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import type { CinemaSeatMap, SeatAvailabilityResult } from "../src/cinema.js";
 import { CheckoutCoreError, type CinemaCheckoutIntent } from "../src/checkout.js";
+import { CheckoutContinuationStore } from "../src/checkout-continuation.js";
+import { BrowserRuntimeError, type CinemaHandoffAction } from "../src/browser/runtime.js";
 import {
   TOHO_SEAT_MAP_EXPRESSION,
   normalizeTohoSeatSnapshot,
@@ -105,6 +107,8 @@ function intent(seatIds: string[]): CinemaCheckoutIntent {
 function runtimeForSnapshots(snapshots: TohoSeatSnapshot[], options: { boundaryCount?: number; sensitiveFields?: number } = {}) {
   const clicks: string[] = [];
   const expressions: string[] = [];
+  const handoffs: Array<{ reason: "consent"; action: CinemaHandoffAction; message: string }> = [];
+  const continuations = new CheckoutContinuationStore();
   const queue = [...snapshots];
   const runtime = {
     evaluateSemanticState: async (_provider: "toho", expression: string) => {
@@ -142,9 +146,20 @@ function runtimeForSnapshots(snapshots: TohoSeatSnapshot[], options: { boundaryC
     clickReviewedElementPoint: async (_point: { x: number; y: number }, _provider: "toho", element: { id: string }) => {
       clicks.push(element.id);
       return { clickedElementId: element.id, url: seatUrl };
+    },
+    getReviewedBrowserContext: async () => ({
+      provider: "toho" as const,
+      targetId: "target-1",
+      host: "hlo.tohotheater.jp",
+      pathname: "/net/ticket/036/TNPI2010J01.do"
+    }),
+    createCheckoutContinuation: (input: Parameters<CheckoutContinuationStore["create"]>[0]) => continuations.create(input),
+    requireReviewedHumanIntervention: async (input: { reason: "consent"; action: CinemaHandoffAction; message: string }): Promise<never> => {
+      handoffs.push(input);
+      throw new BrowserRuntimeError("HUMAN_ACTION_REQUIRED", input.message);
     }
   };
-  return { runtime, clicks, expressions };
+  return { runtime, clicks, expressions, handoffs, continuations };
 }
 
 function reader(first: CinemaSeatMap<"toho">, second: CinemaSeatMap<"toho">) {
@@ -158,13 +173,16 @@ function reader(first: CinemaSeatMap<"toho">, second: CinemaSeatMap<"toho">) {
   };
 }
 
-test("TOHO internal checkout adapter selects only the exact intended seat set and stops at Human consent", async () => {
+test("TOHO internal checkout adapter selects only the exact intended seat set and starts a reviewed never-replay consent handoff", async () => {
   const baselineFirst = map(rawSnapshot(), "2026-08-17T07:00:00.000Z");
   const baselineSecond = map(rawSnapshot(), "2026-08-17T07:00:02.000Z");
-  const { runtime, clicks, expressions } = runtimeForSnapshots([rawSnapshot(), rawSnapshot(["A-2"])]);
+  const { runtime, clicks, expressions, handoffs, continuations } = runtimeForSnapshots([rawSnapshot(), rawSnapshot(["A-2"])]);
   const adapter = new TohoCheckoutAdapter(runtime, reader(baselineFirst, baselineSecond));
 
-  const output = await adapter.selectExactSeatsToConsentBoundary(intent(["A-2"]));
+  await assert.rejects(
+    adapter.selectExactSeatsToConsentBoundary(intent(["A-2"])),
+    (error) => error instanceof BrowserRuntimeError && error.code === "HUMAN_ACTION_REQUIRED"
+  );
 
   assert.deepEqual(clicks, ["A-2"]);
   const targetExpression = expressions.find((expression) =>
@@ -172,11 +190,15 @@ test("TOHO internal checkout adapter selects only the exact intended seat set an
   );
   assert.ok(targetExpression);
   assert.doesNotThrow(() => new Function(`return ${targetExpression};`));
-  assert.deepEqual(output.selectedSeatIds, ["A-2"]);
-  assert.equal(output.status, "human_action_required");
-  assert.equal(output.reason, "consent");
-  assert.equal(output.consentControlLabel, "利用規約に同意して次へ");
-  assert.equal(output.sourceUrl, seatUrl);
+  assert.equal(handoffs.length, 1);
+  assert.deepEqual(handoffs[0]?.action.kind, "reviewed_checkout_boundary");
+  assert.equal(handoffs[0]?.action.provider, "toho");
+  assert.equal(handoffs[0]?.action.boundary, "toho_terms_consent_next");
+  assert.match(handoffs[0]?.action.continuationDigest ?? "", /^sha256:[a-f0-9]{64}$/);
+  assert.match(handoffs[0]?.message ?? "", /利用規約に同意して次へ/);
+  const binding = continuations.peek();
+  assert.deepEqual(binding?.selectedSeatIds, ["A-2"]);
+  assert.equal(binding?.browserTargetId, "target-1");
 });
 
 test("TOHO internal checkout adapter revalidates between intended seats and never clicks a substitute or retries", async () => {

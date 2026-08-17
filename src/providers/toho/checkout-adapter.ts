@@ -1,12 +1,18 @@
-import { BrowserRuntimeError, type CinemaBrowserRuntime } from "../../browser/runtime.js";
+import {
+  BrowserRuntimeError,
+  type CinemaBrowserRuntime,
+  type CinemaHandoffAction,
+  type CinemaReviewedBrowserContext
+} from "../../browser/runtime.js";
 import type { CinemaSeatMap, CinemaSeatReadAdapter, SeatAvailabilityQuery } from "../../cinema.js";
 import {
   CheckoutCoreError,
+  currentCheckoutSeatFingerprints,
   parseCinemaCheckoutIntent,
   validateCheckoutSeatIntent,
-  type CinemaCheckoutFreshnessBinding,
   type CinemaCheckoutIntent
 } from "../../checkout.js";
+import type { CheckoutContinuationBinding, CheckoutContinuationBindingInput } from "../../checkout-continuation.js";
 import { compareCinemaSeatObservations } from "../../seat-freshness.js";
 import {
   TOHO_SEAT_MAP_EXPRESSION,
@@ -26,6 +32,13 @@ interface TohoCheckoutRuntime {
     expectedProvider: "toho",
     expectedElement: { id: string; tagName: string }
   ): Promise<Record<string, unknown>>;
+  getReviewedBrowserContext(expectedProvider: "toho"): Promise<CinemaReviewedBrowserContext>;
+  createCheckoutContinuation(input: CheckoutContinuationBindingInput): CheckoutContinuationBinding;
+  requireReviewedHumanIntervention(input: {
+    reason: "consent";
+    action: CinemaHandoffAction;
+    message: string;
+  }): Promise<never>;
 }
 
 interface TohoSeatClickTarget {
@@ -45,15 +58,6 @@ interface TohoConsentBoundarySnapshot {
   visibleLabels?: unknown;
 }
 
-export interface TohoSeatSelectionPreparation {
-  status: "human_action_required";
-  provider: "toho";
-  reason: "consent";
-  selectedSeatIds: string[];
-  consentControlLabel: typeof TOHO_CONSENT_NEXT_LABEL;
-  sourceUrl: string;
-  freshness: CinemaCheckoutFreshnessBinding;
-}
 
 function exactSeatClickTargetExpression(seatId: string): string {
   if (!/^[A-Z]+-\d+$/.test(seatId)) {
@@ -194,7 +198,7 @@ export class TohoCheckoutAdapter {
     this.seatReader = seatReader ?? new TohoReadAdapter(runtime as CinemaBrowserRuntime);
   }
 
-  async selectExactSeatsToConsentBoundary(rawIntent: CinemaCheckoutIntent): Promise<TohoSeatSelectionPreparation> {
+  async selectExactSeatsToConsentBoundary(rawIntent: CinemaCheckoutIntent): Promise<never> {
     const intent = parseCinemaCheckoutIntent(rawIntent);
     if (intent.provider !== "toho") {
       throw new CheckoutCoreError("INVALID_INTENT", "TOHO checkout adapter received another provider intent.");
@@ -208,6 +212,7 @@ export class TohoCheckoutAdapter {
     assertOrdinaryIntendedSeats(baseline, plan.seatIds);
 
     const selected: string[] = [];
+    let finalSelectedMap = baseline;
     for (const seatId of plan.seatIds) {
       const beforeSemantic = await this.runtime.evaluateSemanticState<TohoSeatSnapshot>("toho", TOHO_SEAT_MAP_EXPRESSION);
       const before = normalizeTohoSeatSnapshot(
@@ -260,6 +265,7 @@ export class TohoCheckoutAdapter {
         { allowSelected: true }
       );
       assertOnlyExpectedSelectionChanged(baseline, after, selected);
+      finalSelectedMap = after;
     }
 
     const boundary = await this.runtime.evaluateSemanticState<TohoConsentBoundarySnapshot>(
@@ -281,14 +287,38 @@ export class TohoCheckoutAdapter {
       );
     }
 
-    return {
-      status: "human_action_required",
+    const browserContext = await this.runtime.getReviewedBrowserContext("toho");
+    const baselineUrl = new URL(baseline.sourceUrl);
+    if (browserContext.host !== baselineUrl.host || browserContext.pathname !== baselineUrl.pathname) {
+      throw new CheckoutCoreError("STALE_CONTEXT", "TOHO browser target changed before the reviewed Human consent handoff.");
+    }
+
+    const binding = this.runtime.createCheckoutContinuation({
       provider: "toho",
+      boundary: "toho_terms_consent_next",
+      intent,
+      theaterId: second.theater.id,
+      showtimeIdentity: finalSelectedMap.showtimeIdentity,
+      selectedSeatIds: selected,
+      preHumanFingerprints: currentCheckoutSeatFingerprints(finalSelectedMap),
+      sourceSurface: { host: browserContext.host, pathname: browserContext.pathname },
+      browserTargetId: browserContext.targetId
+    });
+
+    return this.runtime.requireReviewedHumanIntervention({
       reason: "consent",
-      selectedSeatIds: [...selected],
-      consentControlLabel: TOHO_CONSENT_NEXT_LABEL,
-      sourceUrl: baseline.sourceUrl,
-      freshness: plan.freshness
-    };
+      action: {
+        kind: "reviewed_checkout_boundary",
+        provider: "toho",
+        boundary: "toho_terms_consent_next",
+        continuationDigest: binding.continuationDigest
+      },
+      message: [
+        `TOHO rendered the reviewed ${TOHO_CONSENT_NEXT_LABEL} boundary for the exact selected seats.`,
+        "Review the terms directly in Chrome and operate that exact control yourself only if you agree.",
+        "Do not change seats, enter credentials/OTP/PII/payment data through MCP, or proceed to a final purchase.",
+        "After the manual consent transition, choose Continue so the agent can verify the new rendered stage without replaying seat selection."
+      ].join(" ")
+    });
   }
 }

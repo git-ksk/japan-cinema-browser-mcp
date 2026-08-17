@@ -5,12 +5,13 @@ import {
 } from "mcp-execution-handoff/core";
 import type {
   CinemaBrowserRuntime,
-  CinemaIntervention
+  CinemaIntervention,
+  CinemaHandoffAction
 } from "./browser/runtime.js";
 
 export type CinemaExecutionAdapter = RegisteredExecutionAdapter<
   CinemaIntervention,
-  ResumeDecision<never>
+  ResumeDecision<CinemaHandoffAction>
 >;
 
 export function createCinemaExecutionAdapter(runtime: CinemaBrowserRuntime): CinemaExecutionAdapter {
