@@ -230,12 +230,15 @@ Discovery: [`PHASE4_CHECKOUT_DISCOVERY.md`](./PHASE4_CHECKOUT_DISCOVERY.md) / #4
 - ✅ legal/terms consent、credential、OTP/MFA、CAPTCHA/challenge、paymentはHuman-only
 - ✅ semantic mutation / transactionは `never_replay`、Human後はfresh semantic action + provider/context再検証
 - ✅ TOHOをconditional first vertical sliceに維持。Gate 0でhold/release semanticsを証明できなければcapabilityを上げずblocked扱い
+- 🟡 #50 Gate 0実測: exact ordinary seat activationはrendered local/session selectionだけを変更し、別fresh profileのavailability/state fingerprintへ影響しないことを確認。server-side hold triggerはseat clickより後段
+- 🟡 seat選択後のrendered `利用規約に同意して次へ` はHuman-only。post-consent hold start / release semanticsは未証明なので `seatSelection=false` / `checkoutPreparation=false` を継続
+- 🟡 internal TOHO adapterはexact pointer hit-test、1席ごとのexpected-state revalidation、no substitute/retry、special-seat拒否、consent boundary stopまでを実装。MCP toolには未登録
 - ✅ #49 generic core: checkout intentからPII/credential/payment/consent/caller-supplied summaryを除外し、missing amount factはmissingのまま保持。arbitrary provider data / raw page-dialog / opaque checkout URLもgeneric summaryへ持ち込まない
 
 Implementation split:
 
 - ✅ #49 — provider-neutral checkout contract/core。strict intent、2-read seat freshness、exact-seat validation、ticket normalization、rendered summary/material fingerprintまで実装。`prepare_checkout` tool自体は未登録でtransaction capabilityは全社false
-- ⬜ #50 — TOHO first vertical slice。Gate 0通過後だけexact intended seat mutation / ticket pathを実装
+- 🟡 #50 — TOHO first vertical slice。individual seat clickはlocal/session selectionと実証、internal exact-seat primitiveは実装中。post-consent hold/release未証明のためcapability false維持
 - ⬜ #51 — AEON hold/release review + provider adapter。TOHO parityを強制しない
 - ⬜ #52 — 109 explicit 10-minute hold review + provider adapter。TOHO parityを強制しない
 

@@ -128,6 +128,19 @@ provider-neutral seat-map freshnessをdeterministic SHA-256 fingerprintへ落と
 - layout: seat identity / row / slot / attributes / gap/group / screen edge
 - state: seat identity / availability / unavailable reason
 
+### `src/providers/toho/checkout-adapter.ts`
+
+Phase 4 #50のTOHO first-slice implementationです。現時点では**internal only**で、MCP tool registryやprovider capabilityには接続しません。
+
+- #49 coreの2-read freshness / exact-seat intent bindingを再利用
+- ordinary seatだけを対象にし、special/accessibility seatはfirst sliceではmutation前に停止
+- adapterがrendered seatをscrollしてexact pointを解決し、runtimeは`elementFromPoint`のexact ID/tag hit-test後だけpointer eventをdispatch
+- 1席ごとにbaselineからexpected selected stateを再構成し、unrelated inventory/context/layout変化があれば次のmutation前にfail closed
+- alternate seat、automatic retry、generic click fallbackを使わない
+- exact selected setを確認後、rendered `利用規約に同意して次へ` をHuman-only boundaryとして返し、自動clickしない
+
+Gate 0 live reviewではindividual seat activationがcross-session availabilityを変更しないことを確認しましたが、post-consent server-side hold start/releaseは未証明です。このため`seatSelection` / `checkoutPreparation`はfalseのままです。
+
 ### `src/seat-recommendation.ts` / `src/recommend-seats.ts`
 
 純粋なseat scoringとbrowser orchestrationを分離します。`recommend_seats`は同一exact showtimeを2回readし、context/layout/stateの3 fingerprintが全一致した場合だけ2回目の観測からrecommendationを作ります。1席でも変化した場合はstale resultを返さずfail closedします。
@@ -172,6 +185,7 @@ CDP targetと、公開UIに対する最小限のbrowser primitiveを担当しま
 - visible control検索
 - generic read-only click/fill policyとprovider capability enforcement
 - provider adapter向けreviewed read-only click primitive
+- provider adapter内部専用のexact-element pointer primitive（official provider + semantic-mutation policy + exact `elementFromPoint` identityを再検証。northbound generic clickからは未公開）
 - TOHO exact non-member continuation専用のnarrow intermediate-control primitive（generic purchase matcherは緩和しない）
 - generic上映時刻候補抽出
 - Human-only surface（access challenge/CAPTCHA、sign-in/authentication、consent）のcategory-only検出

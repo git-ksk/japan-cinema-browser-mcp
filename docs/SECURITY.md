@@ -192,6 +192,7 @@ Human-only surfaceは `mcp-execution-handoff` のgeneric control planeへ接続�
 - Human intervention開始時にprepared purchase confirmationを破棄する
 - Human completionをpurchaseや別actionのapprovalとして扱わない
 - seat/checkout/purchase capabilityのfalseをhandoff経由で迂回しない
+- provider adapter内部のexact pointer primitiveをnorthbound generic click/fillやdisabled capabilityの迂回路として公開しない。TOHO #50ではexact rendered seat ID/tag hit-test後のordinary-seat mutationだけに限定し、post-consent hold境界が未証明の間はtool/capabilityへ接続しない
 - Phase 4 checkout intentへpurchaser PII/contact、credential、payment、consent、caller-supplied amount/summary/final-controlを追加しない
 - checkout summaryはprovider-rendered bounded factsを再読した結果だけから作り、missing amount factを0等へ補完しない
 - provider-specific raw page/dialog、arbitrary provider data、opaque checkout URL/session tokenをgeneric checkout resultへ流さない

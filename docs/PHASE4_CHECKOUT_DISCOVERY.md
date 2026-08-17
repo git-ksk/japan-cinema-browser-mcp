@@ -28,6 +28,8 @@ What remains unresolved is the exact mutation trigger: seat activation, seat dec
 
 TOHO remains the conditional first vertical slice because it already has the strongest seat identity/freshness implementation, a reviewed guest continuation, and the clearest documented checkout stage order.
 
+Post-Discovery Gate 0 update (2026-08-17): one bounded exact ordinary-seat activation was performed after two stable read-only observations and an exact rendered pointer hit-test. The seat changed locally from `seat_1.gif` / `空席(選択可)` to `seat_3.gif` / `選択中`, while an independent fresh profile still observed the same seat as available and the full pre-click seat-state fingerprint was unchanged. Therefore individual seat activation is not the server-side hold trigger. The next rendered material control is `利用規約に同意して次へ`; because legal consent is Human-only, the later documented hold trigger/release boundary remains unproven and no capability is enabled. #50 may implement only an internal exact-seat primitive that stops at that Human boundary.
+
 ### AEON
 
 The official e-seat instructions show that a selected seat can be clicked again to deselect and that ticket selection/payment/review follow seat selection. Existing repository code also has a reviewed guest transition to the Smart Theater seat surface.
