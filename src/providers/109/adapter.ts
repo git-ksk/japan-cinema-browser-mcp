@@ -316,7 +316,7 @@ const SEAT_MAP_EXPRESSION = `(() => {
     universal: String(el.getAttribute('data-universal') || ''),
     group: String(el.getAttribute('seat-group') || '')
   }));
-  const selected = body.match(/選択座席\\s*([0-9０-９]+)\\s*[／/]\\s*([0-9０-９]+)席/);
+  const selected = body.match(/選択座席\\s*[:：]?\\s*([0-9０-９]+)\\s*[／/]\\s*([0-9０-９]+)席/);
   return {
     title: document.title,
     timerVisible: /今から\\s*10分以内に購入が完了しない場合、?\\s*座席が解放されます/.test(body),
@@ -775,7 +775,7 @@ export function normalize109SeatSnapshot(
     throw new BrowserRuntimeError("UI_STATE_CHANGED", "109 Cinemas 10-minute timed-session notice is missing from the reviewed seat-map surface.");
   }
   const selectedSummary = asciiDigits(rawString(snapshot.selectedSummary));
-  const selectedMatch = selectedSummary.match(/選択座席\s*(\d+)\s*[／/]\s*(\d+)席/);
+  const selectedMatch = selectedSummary.match(/選択座席\s*[:：]?\s*(\d+)\s*[／/]\s*(\d+)席/);
   if (!selectedMatch || Number(selectedMatch[1]) !== 0) {
     throw new BrowserRuntimeError("UI_STATE_CHANGED", "109 Cinemas read-only seat-map entry unexpectedly contains selected seats.", { selectedSummary });
   }

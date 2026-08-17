@@ -43,6 +43,10 @@ Visible deselection is not proof that there is no server-side hold. Public evide
 
 This separates seat-map entry from seat hold but also establishes that selecting a seat is a server-side reversible/expiring mutation. `seatSelection=false` therefore remains correct until the exact activation/release behavior is reviewed.
 
+Post-Discovery read-only revalidation (2026-08-17): the current rendered seat page now formats the zero-selection summary as `選択座席：0／8席` (full-width colon). The adapter previously required the older no-colon form and correctly failed closed before returning a seat map. The read-only parser now accepts only the same reviewed label with an optional ASCII/full-width colon; it does not weaken the zero-selected-seat requirement.
+
+After that narrow parser update, two independent fresh temporary Chrome profiles opened the same exact public showtime (109シネマズ港北 / 2026-08-18 / `オークストリートの異変[字幕]` / 11:15 / Screen 5). Both rendered the reviewed 10-minute release notice, `選択座席：0／8席`, 94 seats / available 83 / unavailable 11 / selected 0 / universal 2, and identical context/layout/state SHA-256 fingerprints. No seat was activated and no `次へ`, guest/member continuation, ticket type, consent, purchaser PII, payment, or purchase control was used. This reconfirms that seat-map entry creates the timed session context but does not itself create a seat hold or cross-session availability change. It does **not** authorize seat mutation: `seatSelection=false`, `checkoutPreparation=false`, and `purchaseSubmission=false` remain unchanged pending the separate exact activation/release review in #52.
+
 ## Checkout stage matrix
 
 | Stage | TOHO | AEON | 109 |

@@ -92,6 +92,8 @@ Discoveryではseat clickを行わず、公開rendered UI・公式公開情報�
 - Phase 3でseat-map entry timerとactual seat holdを分離済み
 - seat activationはserver-side reversible/expiring semantic mutationとして#52で個別reviewする
 
+- 2026-08-17 current-UI revalidation: `選択座席：0／8席` の全角コロン表記driftをread-only parserで狭く吸収。fresh profile 2本で同一上映の94 seats / available 83 / unavailable 11 / selected 0 / universal 2とcontext/layout/state fingerprint一致を再確認。seat-map entryだけではcross-session availability changeなし。seat mutationは未レビューのためcapabilityはfalse維持
+
 ### Common Phase 4 contract direction
 
 - caller inputはintentでありtransaction truthではない
