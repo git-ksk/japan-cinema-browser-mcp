@@ -371,7 +371,7 @@ Phase 1 read adaptersはこのtransaction flowへ入らず、上映回のpurchas
 
 ## Remote / Cloud Run / Multi-user
 
-標準runtimeは引き続きlocal stdioです。加えて、Phase 3ではsingle-user向けのbounded Cloud Run runtimeを実装しています。Streamable HTTP entryはMCP OAuth 2.1で保護し、Protected Resource Metadata、CIMD、PKCE S256、resource-bound opaque access/refresh tokenを扱います。Human authorization時だけFirebase Authでowner UIDを検証し、そのUIDからnon-secret logical principal bindingを作ります。これをheadless dedicated browser、exact Host/Origin boundary、bounded request body、browser operation timeout、Firestore-backed usage controlと組み合わせます。
+標準runtimeは引き続きlocal stdioです。加えて、Phase 3ではsingle-user向けのbounded Cloud Run runtimeを実装しています。Streamable HTTP entryはMCP OAuth 2.1で保護し、Protected Resource Metadata、CIMD、PKCE S256、resource-bound opaque access/refresh tokenを扱います。Human authorization時だけFirebase Authでowner UIDを検証し、そのUIDからnon-secret logical principal bindingを作ります。これをheadless dedicated browser、exact Host/Origin boundary、bounded request body、browser operation timeoutと組み合わせます。Cloud Run profileではOAuth protocol stateの共有永続化にFirestoreを採用していますが、これはOAuth自体の要件ではなくdeployment choiceです。また `mcp-usage-control` はoptional integrationで、このrepositoryではdogfoodingとしてFirestore-backed storeを接続しています。coreは`UsageStore` abstractionを持つため、consumer側ではMemory storeや別のconforming provider-backed storeを選択できます。
 
 Cloud Run runtimeではHuman Handoffとpurchase executionを意図的に無効化します。challenge、sign-in、consentが必要になった場合は回避せずfail closedし、必要ならlocal headed stdioへ戻します。
 
