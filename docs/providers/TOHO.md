@@ -5,7 +5,9 @@ Provider ID: `toho`
 公式root: `https://www.tohotheater.jp/`
 
 初回Private MVPレビュー日: 2026-08-12  
-Phase 1 read adapterレビュー日: 2026-08-13
+Phase 1 read adapterレビュー日: 2026-08-13  
+Phase 3 seat adapterレビュー日: 2026-08-17  
+Phase 4 checkout Discoveryレビュー日: 2026-08-17
 
 ## 現在のCapability
 
@@ -15,10 +17,10 @@ Phase 1 read adapterレビュー日: 2026-08-13
 | Generic bounded read | 有効 | page内容は永続保存しない |
 | 劇場一覧/選択semantic | 有効 | 公式劇場一覧のvisible linkのみ |
 | 上映情報semantic | 有効 | 劇場・日付・作品・上映回をrendered UIから抽出 |
-| Seat map read | 無効 | 未レビュー |
-| Seat selection | 無効 | 未レビュー |
-| Checkout preparation | 無効 | 未レビュー |
-| Final purchase | 無効 | 別途厳格レビューが必要 |
+| Seat map read | 有効 | #32 read-only adapter + #33 freshness/recommendation |
+| Seat selection | 無効 | Phase 4 Gate 0でhold trigger / release semanticsを個別reviewするまでfalse |
+| Checkout preparation | 無効 | #49 / #50。seat mutation gate通過前に有効化しない |
+| Final purchase | 無効 | Phase 5で別途厳格レビューが必要 |
 
 ## Phase 1で確認した公式導線
 
@@ -96,7 +98,7 @@ raw HTML、DOM dump、showtime datasetをMCP resultへ返したり永続保存�
 
 ## Safety Boundary
 
-Phase 1 adapterで有効化するのはread-only上映取得だけです。
+Phase 1 adapterで有効化するのはread-only上映取得だけです。Phase 3で追加したseat surfaceもread-onlyです。
 
 変更していないInvariant:
 
@@ -106,8 +108,9 @@ Phase 1 adapterで有効化するのはread-only上映取得だけです。
 - CAPTCHA/anti-bot challengeで停止
 - purchase confirmation TTL / one-shot / URL binding
 - final purchaseのruntime default無効
+- seat / checkout mutationのautomatic replay禁止
 
-`get_showtimes` は日付タブのような可逆な表示切替のみ行います。上映回の購入リンク、座席、券種、checkout、final submitには進みません。
+`get_showtimes` は日付タブのような可逆な表示切替のみ行います。Phase 3のseat adapterはseat DOMを読みますがseat activationを実行しません。
 
 ## テスト
 
@@ -139,31 +142,6 @@ smokeは低頻度・明示実行とし、CIの通常testには含めません。
 
 CAPTCHA/anti-bot等が表示された環境では突破せずsmokeを失敗させます。
 
-## 今後の確認項目
-
-Phase 3 first sliceではseat-map entry / availability / row-seat normalization / rendered gap / SCREEN orientation / freshness / recommendationまでread-onlyで確認・実装済みです。seat clickは行っていません。
-
-次のmutation review前には、seat activation自体のhold開始点・release条件を別Issueで再確認します。`select_seats`はそれまで追加しません。
-
-Checkout automation前:
-
-- login/auth/paymentのHuman-only境界を確認
-- sensitive fieldはユーザー入力のままにする
-- third-party surfaceへ遷移する場合は停止する
-- transaction summaryを正規化する
-
-Final purchase前:
-
-- 現行規約/サイトポリシーを再確認
-- exact final controlを確認
-- duplicate submission防止
-- `PURCHASE_UNKNOWN` handling
-- timeout/disconnect後の自動replay禁止
-
-## 方針
-
-TOHOはPhase 1のread-only上映取得に加え、Phase 3でread-only seat mapを個別レビューして有効化します。seat selection以降は引き続き別capabilityとして無効化し、provider UI・規約・仮押さえ挙動を再レビューした場合だけ昇格させます。
-
 ## Phase 3 Seat Intelligence Discovery — 2026-08-17
 
 Phase 3 Discoveryでは、ららぽーと横浜の現行schedule surfaceを確認した後、追加のbounded validationでvisible showtimeとvisible non-member continuationを通り、live `座席指定` surfaceまで到達しました。座席自体は一切クリックしていません。
@@ -177,9 +155,9 @@ Phase 3 Discoveryでは、ららぽーと横浜の現行schedule surfaceを確�
 - FAQでは「希望座席を決定してから15分以内」に購入完了しないとtimeout
 - 仮押さえしたseatは一定時間後に再解放
 
-このためTOHOをv0.3.0のfirst providerに選定します。追加validationではseat-map entry時にvisible countdownもselected-seat stateもなく、read-only entryの安全ゲートを通過しました。ここでの基準は「全server-side stateがゼロ」ではなく、seat hold / material reservation mutation / availability impactを起こさないことです。#32でadapter / fail-closed test / isolated live smokeまで完了し、TOHOのみ `seatMap=true` へ昇格しました。`seatSelection=false` は維持します。
+このためTOHOをv0.3.0のfirst providerに選定しました。追加validationではseat-map entry時にvisible countdownもselected-seat stateもなく、read-only entryの安全ゲートを通過しました。ここでの基準は「全server-side stateがゼロ」ではなく、seat hold / material reservation mutation / availability impactを起こさないことです。#32でadapter / fail-closed test / isolated live smokeまで完了し、TOHO `seatMap=true` へ昇格しました。`seatSelection=false` は維持します。
 
-v0.3.0候補scope:
+v0.3.0 scope:
 
 - read-only `get_seat_availability`
 - `recommend_seats`
@@ -195,3 +173,77 @@ v0.3.0候補scope:
 #33ではrendered `#screen-defimg.screen-map` のofficial `screen.gif`とseat位置関係を検証できた場合だけ`screenEdge=top`を付与します。`recommend_seats`は同一seat mapを2回readし、context/layout/stateのSHA-256 fingerprintが全一致した時だけ2回目の状態をscoreします。special seatはdefault候補から除外し、明示opt-inが必要です。
 
 Discovery詳細: [`../PHASE3_SEAT_DISCOVERY.md`](../PHASE3_SEAT_DISCOVERY.md)
+
+## Phase 4 Checkout Preparation Discovery — 2026-08-17
+
+Phase 4 Discoveryではseat clickを行わず、公式公開手順・FAQ・既存Phase 3実測からcheckout boundaryを再整理しました。全体のmatrixは [`../PHASE4_CHECKOUT_DISCOVERY.md`](../PHASE4_CHECKOUT_DISCOVERY.md)、trackingは#48、first-provider implementation gateは#50です。
+
+### Checkout stage
+
+公式公開情報から確認できる大枠は:
+
+1. 作品 / 日時
+2. 座席
+3. チケット種別
+4. 購入者情報
+5. 支払い情報
+6. 購入内容確認
+7. 購入完了
+
+TOHO-ONEへログインせず購入できるguest pathは既存review済みです。ただしmember authentication、購入者情報、payment、consent/final purchaseはPhase 4で自動化しません。
+
+### Seat hold Gate 0
+
+公式FAQの15分timeoutはhold/sessionがmaterialな時間制約を持つことを示しますが、Phase 4 Discoveryだけでは「seat DOMをactivateした瞬間」「seat決定control」「次stageへの遷移」のどこがexact hold startなのかを十分に証明できていません。
+
+したがって:
+
+- `seatSelection=false` を維持
+- #50 Gate 0通過前にseat clickを実装しない
+- eventual live validationは1 user-intended showtime / 1 exact seat setだけ
+- pre-read + freshness確認後にのみ一度だけmutation候補を検証
+- alternate seat probing / repeated click experimentation / bulk hold禁止
+- selected/held setがrequested setと完全一致しなければfail closed
+- release/deselectを自動化するのはprovider semanticsを別途証明できた場合だけ
+- Human Handoff後にseat mutationをreplayしない
+
+### Human-only boundary
+
+初期Phase 4では以下をHumanへ戻します:
+
+- password / member credential
+- OTP / MFA / challenge
+- purchaser name / phone / email / birth date
+- legal/terms consent
+- payment credential / wallet approval
+- final purchase
+
+これは単なるsecret deny-listではなく、新しいPII ingress / logging / result pathを作らないためのPhase 4 product boundaryです。
+
+### TOHO first vertical slice decision
+
+TOHOをconditional first providerとして維持します。理由はPhase 3のseat identity/freshness infrastructure、review済みguest continuation、公開されたcheckout stage/15分timeout情報が3社の中で最も揃っているためです。
+
+ただしfirst providerという位置付けはcapability approvalではありません。Gate 0でhold/release semanticsを安全に証明できない場合、TOHOはblockedのままにし、`seatSelection` / `checkoutPreparation` をfalseで維持します。
+
+## 今後
+
+Phase 4:
+
+- #49 provider-neutral `prepare_checkout` contract/core
+- #50 TOHO Gate 0 + first adapter
+- transaction truthはcaller inputでなくcurrent rendered UIから再取得
+- ticket eligibilityをMCPが推測しない
+- checkout preparationとPhase 5 final purchaseを分離
+
+Final purchase前:
+
+- 現行規約/サイトポリシーを再確認
+- exact final controlを確認
+- duplicate submission防止
+- `PURCHASE_UNKNOWN` handling
+- timeout/disconnect後の自動replay禁止
+
+## 方針
+
+TOHOはPhase 1 read-only上映取得とPhase 3 read-only seat intelligenceを有効化済みです。Phase 4ではseat selection / checkout preparationを別capabilityとして個別reviewし、Gate 0を通過した範囲だけ段階的に昇格させます。final purchaseはPhase 5まで無効のままです。
