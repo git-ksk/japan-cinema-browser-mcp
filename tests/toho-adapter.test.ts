@@ -378,6 +378,57 @@ test("TOHO seat-map normalization derives read-only availability and preserves p
   assert.equal(seatMap.seats.find((seat) => seat.id === "C-11")?.leftBoundary, "gap");
 });
 
+test("TOHO wheelchair semantics follow the rendered seat image instead of assuming an HC row identity", () => {
+  const theater = {
+    provider: "toho" as const,
+    id: "036",
+    name: "TOHOシネマズ ららぽーと横浜",
+    aliases: ["TOHOシネマズ ららぽーと横浜"],
+    url: "https://hlo.tohotheater.jp/net/schedule/036/TNPI2000J01.do",
+    sourceUrl: THEATER_LIST_URL
+  };
+  const showtime = {
+    provider: "toho" as const,
+    theaterId: "036",
+    theater: theater.name,
+    date: "2026-08-18",
+    movie: "映画A",
+    startTime: "21:50",
+    endTime: "23:35",
+    formats: [],
+    screen: "4",
+    availability: "unknown" as const,
+    sourceUrl: theater.url
+  };
+  const seats = Array.from({ length: 20 }, (_, index) => {
+    const number = String(index + 2);
+    const wheelchair = index >= 18;
+    return {
+      id: `A-${number}`,
+      row: "A",
+      number,
+      src: wheelchair ? "seat_4.gif" : "seat_1.gif",
+      alt: `A-${number} 空席(選択可)`,
+      onclick: `JavaScript:seatSelect('A','${number}', '1');`,
+      x: index,
+      y: 10
+    };
+  });
+  const seatMap = normalizeTohoSeatSnapshot({
+    title: "座席指定 || TOHOシネマズ",
+    selectedSummary: "",
+    standardCapacity: 18,
+    wheelchairCapacity: 2,
+    gridX: seats.map((seat) => seat.x),
+    seats
+  }, "https://hlo.tohotheater.jp/net/ticket/036/TNPI2010J01.do", theater, showtime);
+
+  assert.deepEqual(seatMap.seats.find((seat) => seat.id === "A-20")?.attributes, ["wheelchair"]);
+  assert.deepEqual(seatMap.seats.find((seat) => seat.id === "A-21")?.attributes, ["wheelchair"]);
+  assert.equal(seatMap.seats.find((seat) => seat.id === "A-20")?.state, "available");
+  assert.equal(seatMap.seats.find((seat) => seat.id === "A-21")?.state, "available");
+});
+
 test("TOHO seat-map normalization fails closed on selected-seat state and wrong theater route", () => {
   const theater = {
     provider: "toho" as const,
@@ -404,6 +455,17 @@ test("TOHO seat-map normalization fails closed on selected-seat state and wrong 
   assert.throws(
     () => normalizeTohoSeatSnapshot({ ...snapshot, selectedSummary: "" }, "https://hlo.tohotheater.jp/net/ticket/999/TNPI2010J01.do", theater, showtime),
     (error) => error instanceof BrowserRuntimeError && error.code === "UI_STATE_CHANGED"
+  );
+  assert.throws(
+    () => normalizeTohoSeatSnapshot({
+      ...snapshot,
+      selectedSummary: "",
+      seats: seats.map((seat, index) => index === 0
+        ? { ...seat, src: "seat_3.gif", alt: "C-1 選択中" }
+        : seat)
+    }, "https://hlo.tohotheater.jp/net/ticket/036/TNPI2010J01.do", theater, showtime),
+    (error) => error instanceof BrowserRuntimeError && error.code === "UI_STATE_CHANGED" &&
+      Array.isArray(error.details?.selectedSeats) && error.details?.selectedSeats[0] === "C-1"
   );
 });
 

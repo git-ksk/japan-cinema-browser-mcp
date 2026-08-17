@@ -74,17 +74,18 @@ interface PromotionSnapshot {
   sensitiveFields?: unknown;
 }
 
-interface TohoSeatSnapshotRow {
+export interface TohoSeatSnapshotRow {
   id?: unknown;
   row?: unknown;
   number?: unknown;
   src?: unknown;
+  alt?: unknown;
   onclick?: unknown;
   x?: unknown;
   y?: unknown;
 }
 
-interface TohoSeatSnapshot {
+export interface TohoSeatSnapshot {
   title?: unknown;
   selectedSummary?: unknown;
   standardCapacity?: unknown;
@@ -309,7 +310,7 @@ const PROMOTION_EXPRESSION = `(() => {
   return { title: document.title, exactNonMemberControls: controls.length, sensitiveFields: sensitiveFields.length };
 })()`;
 
-const SEAT_MAP_EXPRESSION = `(() => {
+export const TOHO_SEAT_MAP_EXPRESSION = `(() => {
   const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
   const visible = (el) => {
     const r = el.getBoundingClientRect();
@@ -331,6 +332,7 @@ const SEAT_MAP_EXPRESSION = `(() => {
       row: match[1],
       number: match[2],
       src,
+      alt: String(img.getAttribute('alt') || '').trim(),
       onclick: String(img.getAttribute('onclick') || '').trim(),
       x: rect.x,
       y: rect.y
@@ -719,7 +721,8 @@ export function normalizeTohoSeatSnapshot(
   sourceUrl: string,
   theater: TohoTheater,
   showtime: TohoShowtime,
-  observedAt = new Date().toISOString()
+  observedAt = new Date().toISOString(),
+  options: { allowSelected?: boolean } = {}
 ): CinemaSeatMap<"toho"> {
   let url: URL;
   try { url = assertOfficialUrl(sourceUrl, "toho"); } catch {
@@ -732,7 +735,7 @@ export function normalizeTohoSeatSnapshot(
   if (!rawString(snapshot.title).includes("座席指定")) {
     throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO seat-map title is missing from the rendered public surface.");
   }
-  if (rawString(snapshot.selectedSummary)) {
+  if (rawString(snapshot.selectedSummary) && options.allowSelected !== true) {
     throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO read-only seat-map entry unexpectedly contains a selected seat state.");
   }
   if (!Array.isArray(snapshot.seats) || snapshot.seats.length < 20 || snapshot.seats.length > 1000) {
@@ -767,11 +770,14 @@ export function normalizeTohoSeatSnapshot(
     }
     positions.add(position);
     const src = rawString(raw.src);
+    const alt = rawString(raw.alt);
     const onclick = rawString(raw.onclick);
     const clickMatch = onclick.match(/^JavaScript:seatSelect\('([A-Z]+)','(\d+)',\s*'\d+'\);$/);
     const clickMatchesIdentity = Boolean(clickMatch && clickMatch[1] === row && clickMatch[2] === number);
     let state: CinemaSeat["state"] = "unknown";
-    if (clickMatchesIdentity && (src === "seat_1.gif" || (row === "HC" && src === "seat_4.gif"))) {
+    if (src === "seat_3.gif" && alt === `${id} 選択中`) {
+      state = "selected";
+    } else if (clickMatchesIdentity && (src === "seat_1.gif" || src === "seat_4.gif")) {
       state = "available";
     } else if (!onclick && (src === "seat_0.gif" || src === "seat_2.gif")) {
       state = "unavailable";
@@ -782,7 +788,7 @@ export function normalizeTohoSeatSnapshot(
       number,
       state,
       ...(state === "unavailable" ? { unavailableReason: "unknown" as const } : {}),
-      attributes: row === "HC" ? ["wheelchair"] : [],
+      attributes: src === "seat_4.gif" ? ["wheelchair"] : [],
       rowIndex,
       columnIndex,
       x: columnIndex,
@@ -807,6 +813,14 @@ export function normalizeTohoSeatSnapshot(
         right.leftBoundary = "gap";
       }
     }
+  }
+  const selectedSeats = seats.filter((seat) => seat.state === "selected").map((seat) => seat.id);
+  if (selectedSeats.length > 0 && options.allowSelected !== true) {
+    throw new BrowserRuntimeError(
+      "UI_STATE_CHANGED",
+      "TOHO read-only seat-map entry unexpectedly contains a selected seat state.",
+      { selectedSeats }
+    );
   }
   const screenEdge = reviewedTohoScreenEdge(snapshot.screenMarker);
   const standardCapacity = typeof snapshot.standardCapacity === "number" && Number.isInteger(snapshot.standardCapacity) ? snapshot.standardCapacity : undefined;
@@ -1073,12 +1087,12 @@ export class TohoReadAdapter implements CinemaReadAdapter<"toho", TohoTheater, T
     if (!seatMatch || seatMatch[1] !== schedule.theater.id || current.search || current.hash) {
       throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO seat-map route did not settle on the resolved theater context.");
     }
-    let semantic = await this.runtime.evaluateSemanticState<TohoSeatSnapshot>("toho", SEAT_MAP_EXPRESSION);
+    let semantic = await this.runtime.evaluateSemanticState<TohoSeatSnapshot>("toho", TOHO_SEAT_MAP_EXPRESSION);
     for (let attempt = 0; attempt < 16; attempt += 1) {
       const seatCount = Array.isArray(semantic.value.seats) ? semantic.value.seats.length : 0;
       if (rawString(semantic.value.title).includes("座席指定") && seatCount >= 20 && seatCount <= 1000) break;
       await sleep(180);
-      semantic = await this.runtime.evaluateSemanticState<TohoSeatSnapshot>("toho", SEAT_MAP_EXPRESSION);
+      semantic = await this.runtime.evaluateSemanticState<TohoSeatSnapshot>("toho", TOHO_SEAT_MAP_EXPRESSION);
     }
     const seatMap = normalizeTohoSeatSnapshot(semantic.value, semantic.url, schedule.theater, showtime);
     return { provider: "toho", theater: schedule.theater, showtime, seatMap };

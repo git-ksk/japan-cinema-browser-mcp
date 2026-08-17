@@ -18,8 +18,8 @@ Phase 4 checkout Discoveryレビュー日: 2026-08-17
 | 劇場一覧/選択semantic | 有効 | 公式劇場一覧のvisible linkのみ |
 | 上映情報semantic | 有効 | 劇場・日付・作品・上映回をrendered UIから抽出 |
 | Seat map read | 有効 | #32 read-only adapter + #33 freshness/recommendation |
-| Seat selection | 無効 | Phase 4 Gate 0でhold trigger / release semanticsを個別reviewするまでfalse |
-| Checkout preparation | 無効 | #49 / #50。seat mutation gate通過前に有効化しない |
+| Seat selection | 無効 | Gate 0でindividual seat clickはlocal/session selectionと確認。post-consent hold trigger / release境界が未証明のためfalse維持 |
+| Checkout preparation | 無効 | #49 coreは完了。#50 internal TOHO sliceはHuman consent境界で停止し、tool/capabilityは未公開 |
 | Final purchase | 無効 | Phase 5で別途厳格レビューが必要 |
 
 ## Phase 1で確認した公式導線
@@ -194,18 +194,33 @@ TOHO-ONEへログインせず購入できるguest pathは既存review済みで�
 
 ### Seat hold Gate 0
 
-公式FAQの15分timeoutはhold/sessionがmaterialな時間制約を持つことを示しますが、Phase 4 Discoveryだけでは「seat DOMをactivateした瞬間」「seat決定control」「次stageへの遷移」のどこがexact hold startなのかを十分に証明できていません。
+公式FAQの15分timeoutはhold/sessionがmaterialな時間制約を持つことを示します。#50ではDiscovery後に、fresh temporary profileと1上映・1通常席だけを使ったbounded validationを実施しました。
 
-したがって:
+2026-08-17 Gate 0で確認できた事実:
 
-- `seatSelection=false` を維持
-- #50 Gate 0通過前にseat clickを実装しない
-- eventual live validationは1 user-intended showtime / 1 exact seat setだけ
-- pre-read + freshness確認後にのみ一度だけmutation候補を検証
-- alternate seat probing / repeated click experimentation / bulk hold禁止
-- selected/held setがrequested setと完全一致しなければfail closed
-- release/deselectを自動化するのはprovider semanticsを別途証明できた場合だけ
-- Human Handoff後にseat mutationをreplayしない
+- 対象はTOHOシネマズ ららぽーと横浜、2026-08-18 21:50 `隣人たち（字幕版）` Screen 4、通常席 `A-2` の1席だけ
+- mutation前に2回のread-only observationでcontext / layout / state fingerprintが一致
+- exact `#A-2` がviewport内のpointer hit targetであることを再確認した後、実seat activationは1回だけ実施
+- rendered stateは `A-2 空席(選択可)` / `seat_1.gif` から `A-2 選択中` / `seat_3.gif` へ変化
+- 直後に別fresh profileで同じ上映を再読しても `A-2` は `available` のままで、pre-clickとseat-state fingerprintも一致
+- したがって**individual seat activation自体はcross-session/server-side seat holdを開始しない**。documented hold triggerはseat clickより後段
+- seat selection後の次のmaterial controlはrendered `利用規約に同意して次へ`。legal consentはHuman-onlyなので自動clickしない
+- post-consentのどの瞬間に15分holdが開始するか、およびそのrelease semanticsは未証明
+
+同じGate 0で現行rendered UI driftも確認しました。車いす席は旧来想定の `HC-*` IDに限られず、Screen 4ではvisible `113席 + 2車いす席` とexactly two `seat_4.gif` (`A-10`, `A-11`) が対応し、別Screenでも同じ構造を確認しました。このためwheelchair attributeはprovider-visible `seat_4.gif` とvisible capacityを相互検証して付与します。またselected-seat signalは旧 `#seatList1` だけでは不十分で、現行UIの `seat_3.gif` + exact `<seatId> 選択中` も明示的に検出し、read-only adapterでは1席でもselectedならfail closedします。
+
+#50 internal sliceでは、capabilityを上げずに次のprimitiveを実装します:
+
+- exact ordinary seatだけを対象にする
+- `elementFromPoint` がexact seat ID / `IMG`に一致してからpointer dispatch
+- alternate seat / retry / speculative selectionなし
+- 複数intentの場合も1席ごとにbaselineからexpected state fingerprintを再構成し、自分が選択したseat以外のstate変化があれば次のclick前に停止
+- special/accessibility seatはfirst sliceではmutation前に拒否
+- exact selected setを確認後、`利用規約に同意して次へ` をHuman-required boundaryとして返して終了
+- consent / ticket / purchaser PII / payment / final purchaseは操作しない
+- Human Handoff後にseat mutationをautomatic replayしない
+
+Gate 0は**部分的に通過**していますが、post-consent hold/release境界が未証明なので `seatSelection=false` / `checkoutPreparation=false` を維持します。internal adapterやmilestoneの存在をcapability approvalとして扱いません。
 
 ### Human-only boundary
 

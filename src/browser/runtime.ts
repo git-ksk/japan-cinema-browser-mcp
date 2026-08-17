@@ -556,6 +556,65 @@ export class CinemaBrowserRuntime {
     return { clicked: resolved.label, url: after };
   }
 
+  /**
+   * Provider-adapter-only semantic mutation primitive. This is intentionally not exposed
+   * through the northbound generic click tool: the adapter must first resolve an exact
+   * rendered element and provide its point plus stable DOM identity.
+   */
+  async clickReviewedElementPoint(
+    point: { x: number; y: number },
+    expectedProvider: CinemaProviderId,
+    expectedElement: { id: string; tagName: string }
+  ): Promise<Record<string, unknown>> {
+    const before = await this.assertOfficialCurrentUrl(expectedProvider);
+    await this.assertNoIntervention(CINEMA_HANDOFF_POLICY.semantic_mutation.resumePolicy);
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y) || !expectedElement.id.trim() || !expectedElement.tagName.trim()) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "Reviewed element click target is incomplete or invalid.");
+    }
+    const client = await this.getClient();
+    const x = Math.round(point.x * 100) / 100;
+    const y = Math.round(point.y * 100) / 100;
+    const expectedId = JSON.stringify(expectedElement.id);
+    const expectedTag = JSON.stringify(expectedElement.tagName.toUpperCase());
+    const inspected = await client.Runtime.evaluate({
+      expression: `(() => {
+        const x = ${x}; const y = ${y};
+        const expectedId = ${expectedId}; const expectedTag = ${expectedTag};
+        if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) return { ok: false, reason: 'outside_viewport' };
+        const hit = document.elementFromPoint(x, y);
+        if (!hit) return { ok: false, reason: 'no_hit' };
+        const rect = hit.getBoundingClientRect();
+        const style = getComputedStyle(hit);
+        const visible = rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && style.pointerEvents !== 'none';
+        const exact = String(hit.id || '') === expectedId && String(hit.tagName || '').toUpperCase() === expectedTag;
+        return { ok: visible && exact, reason: visible && exact ? null : 'identity_mismatch', id: String(hit.id || ''), tagName: String(hit.tagName || '') };
+      })()`,
+      returnByValue: true,
+      awaitPromise: true
+    });
+    const value = inspected.result.value as { ok?: boolean; reason?: unknown; id?: unknown; tagName?: unknown } | undefined;
+    if (!value?.ok) {
+      throw new BrowserRuntimeError(
+        "UI_STATE_CHANGED",
+        "Reviewed provider element changed before trusted pointer dispatch.",
+        {
+          expectedElement,
+          observedId: typeof value?.id === "string" ? value.id : undefined,
+          observedTagName: typeof value?.tagName === "string" ? value.tagName : undefined,
+          reason: value?.reason
+        }
+      );
+    }
+    await client.Input.dispatchMouseEvent({ type: "mouseMoved", x, y });
+    await client.Input.dispatchMouseEvent({ type: "mousePressed", x, y, button: "left", clickCount: 1 });
+    await client.Input.dispatchMouseEvent({ type: "mouseReleased", x, y, button: "left", clickCount: 1 });
+    await sleep(250);
+    await this.assertNoIntervention(CINEMA_HANDOFF_POLICY.semantic_mutation.resumePolicy);
+    const after = await this.assertOfficialCurrentUrl(expectedProvider);
+    this.handoff.advanceResourceEpoch();
+    return { clickedElementId: expectedElement.id, url: after, previousUrl: before };
+  }
+
   async clickReviewedIntermediateControl(label: string, expectedProvider: CinemaProviderId): Promise<Record<string, unknown>> {
     const before = await this.assertOfficialCurrentUrl(expectedProvider);
     await this.assertNoIntervention(CINEMA_HANDOFF_POLICY.semantic_mutation.resumePolicy);

@@ -281,3 +281,59 @@ test("AEON trusted pointer primitive dispatches real CDP mouse input only after 
   assert.deepEqual(events.map((event) => event.type), ["mouseMoved", "mousePressed", "mouseReleased"]);
   assert.equal(events[1]?.button, "left");
 });
+
+test("provider-adapter exact element pointer mutation dispatches only after exact rendered hit-test", async () => {
+  const runtime = new CinemaBrowserRuntime({} as ChromeProcess, 1_000);
+  const events: Array<{ type: string; x?: number; y?: number }> = [];
+  const client = {
+    Runtime: {
+      evaluate: async () => ({ result: { value: { ok: true, id: "A-2", tagName: "IMG", reason: null } } })
+    },
+    Input: {
+      dispatchMouseEvent: async (event: { type: string; x?: number; y?: number }) => { events.push(event); }
+    }
+  };
+  const mutable = runtime as unknown as {
+    assertOfficialCurrentUrl: () => Promise<string>;
+    assertNoIntervention: () => Promise<void>;
+    getClient: () => Promise<unknown>;
+  };
+  mutable.assertOfficialCurrentUrl = async () => "https://hlo.tohotheater.jp/net/ticket/036/TNPI2010J01.do";
+  mutable.assertNoIntervention = async () => undefined;
+  mutable.getClient = async () => client;
+
+  const result = await runtime.clickReviewedElementPoint(
+    { x: 285, y: 234.48 },
+    "toho",
+    { id: "A-2", tagName: "IMG" }
+  );
+  assert.equal(result.clickedElementId, "A-2");
+  assert.deepEqual(events.map((event) => event.type), ["mouseMoved", "mousePressed", "mouseReleased"]);
+});
+
+test("provider-adapter exact element pointer mutation fails before dispatch on hit-test identity drift", async () => {
+  const runtime = new CinemaBrowserRuntime({} as ChromeProcess, 1_000);
+  let dispatches = 0;
+  const client = {
+    Runtime: {
+      evaluate: async () => ({ result: { value: { ok: false, id: "A-3", tagName: "IMG", reason: "identity_mismatch" } } })
+    },
+    Input: {
+      dispatchMouseEvent: async () => { dispatches += 1; }
+    }
+  };
+  const mutable = runtime as unknown as {
+    assertOfficialCurrentUrl: () => Promise<string>;
+    assertNoIntervention: () => Promise<void>;
+    getClient: () => Promise<unknown>;
+  };
+  mutable.assertOfficialCurrentUrl = async () => "https://hlo.tohotheater.jp/net/ticket/036/TNPI2010J01.do";
+  mutable.assertNoIntervention = async () => undefined;
+  mutable.getClient = async () => client;
+
+  await assert.rejects(
+    runtime.clickReviewedElementPoint({ x: 285, y: 234.48 }, "toho", { id: "A-2", tagName: "IMG" }),
+    (error) => error instanceof BrowserRuntimeError && error.code === "UI_STATE_CHANGED" && error.details?.observedId === "A-3"
+  );
+  assert.equal(dispatches, 0);
+});
