@@ -181,7 +181,7 @@ Discovery結果:
 - ✅ TOHO row / seat normalization + rendered gap geometry extraction（#32）
 - ✅ `recommend_seats` + bounded reread + context/layout/state fingerprint freshness detection（#33）
 - ✅ rendered SCREEN markerからfront/rear orientationを明示検証。推測できない場合はscoringをfail closed
-- ✅ special/accessibility seatはdefault recommendationから除外し、明示opt-in時だけ候補化
+- ✅ special/accessibility seatはdefault候補から除外し、明示opt-inが必要
 
 v0.3.0 implemented scope:
 
@@ -212,13 +212,34 @@ Exit criteria:
 
 ## Phase 4 — Checkout Preparation / Human Handoff
 
-目的: 可逆・低リスク操作を自動化し、認証/決済はユーザーへ戻す。
+目的: user-intendedな1 bookingの可逆・低リスクな準備だけをprovider別review後に自動化し、identity / PII / consent / payment / final purchaseはHumanへ戻す。
 
-状態: 🟡 generic Human Handoff基盤実装済み / checkout transaction capabilityは未解禁
+状態: 🟡 Discovery complete / generic Human Handoff基盤実装済み / transaction capabilityは全社未解禁
 
-- ⬜ ticket type normalization
-- ⬜ member/non-member分岐
-- ⬜ 非機密checkout field入力
+Discovery: [`PHASE4_CHECKOUT_DISCOVERY.md`](./PHASE4_CHECKOUT_DISCOVERY.md) / #48
+
+2026-08-17 Discovery結論:
+
+- ✅ TOHO / AEON / 109のcheckout stageをread-only / semantic mutation / Human-only / final purchaseへ分類
+- ✅ TOHO: guest pathと15分timeout semanticsを確認。ただしseat activation/decisionのexact hold trigger・release境界は未証明のため `seatSelection=false` 維持
+- ✅ AEON: visible deselectionは確認できるがserver-side hold trigger/timeout/release semanticsは未証明のため `seatSelection=false` 維持
+- ✅ 109: 10分seat holdが公式明記。Phase 3でentry timerとseat holdを分離済みだがseat activationはserver-side reversible/expiring mutationとして個別reviewが必要
+- ✅ ticket type normalization候補を定義。provider label/restrictionをauthoritativeとしeligibilityを推測しない
+- ✅ checkout summary候補を定義。caller inputではなくcurrent rendered UIをtransaction truthとする
+- ✅ purchaser name / phone / email / birth dateは初期Phase 4ではHuman-onlyとし、新規PII ingress/logging/result pathを作らない
+- ✅ legal/terms consent、credential、OTP/MFA、CAPTCHA/challenge、paymentはHuman-only
+- ✅ semantic mutation / transactionは `never_replay`、Human後はfresh semantic action + provider/context再検証
+- ✅ TOHOをconditional first vertical sliceに維持。Gate 0でhold/release semanticsを証明できなければcapabilityを上げずblocked扱い
+
+Implementation split:
+
+- 🟡 #49 — provider-neutral `prepare_checkout` contract/core。transaction capabilityを全社falseのまま実装可能な層から開始
+- ⬜ #50 — TOHO first vertical slice。Gate 0通過後だけexact intended seat mutation / ticket pathを実装
+- ⬜ #51 — AEON hold/release review + provider adapter。TOHO parityを強制しない
+- ⬜ #52 — 109 explicit 10-minute hold review + provider adapter。TOHO parityを強制しない
+
+既存generic Human Handoff:
+
 - ✅ sign-in/authentication surface検出とHuman Handoff
 - ✅ CAPTCHA / access challenge検出とHuman Handoff（bypassなし）
 - ✅ OTP/MFA入力をMCPへ渡さずHuman-onlyに維持
@@ -226,19 +247,45 @@ Exit criteria:
 - ✅ Human操作後のofficial provider / challenge state再検証
 - ✅ semantic mutation / transactionのautomatic replay禁止
 - ✅ Human intervention開始時のprepared purchase confirmation破棄
-- ⬜ provider-specific checkout summary正規化
 
-TOHO / AEON / 109のread-only `seatMap` がPhase 3でtrueになりました。`seatSelection` / `checkoutPreparation` / `purchaseSubmission` は引き続き全providerでfalseです。Human Handoff実装はtransaction capabilityの解禁を意味しません。
+TOHO / AEON / 109のread-only `seatMap` はtrueです。`seatSelection` / `checkoutPreparation` / `purchaseSubmission` は引き続き全providerでfalseです。Human Handoff実装はtransaction capabilityの解禁を意味しません。
 
 目標tool:
 
-- `prepare_checkout`
+- `prepare_checkout` — 少なくとも1 providerのreview済みadapterが安全に機能する段階で公開。coreだけ先にmergeしてunsupported providerをprepared扱いしない
+
+`prepare_checkout` の責務候補:
+
+1. exact user-intended showtime / seats / ticket choicesへbinding
+2. mutation前にshowtime / seat freshnessを再確認
+3. provider-specific reviewed primitiveだけでexact intended seatsを一度だけ操作
+4. alternate seatのspeculative selection / automatic retry禁止
+5. rendered selected/held stateを再検証
+6. ticket eligibilityを推測せずprovider semanticを保持
+7. reviewed guest pathだけ自動化候補にする
+8. identity / purchaser PII / consent / payment / challengeでHuman Handoff
+9. Human後はmutationをreplayせずfresh semantic action + material context再検証
+10. safely reachableなprovider-rendered pre-purchase summaryを正規化
+11. final purchase/payment submitは絶対に行わない
+
+Release direction:
+
+- `v0.4.0 — Checkout Preparation` をcandidate next releaseとする
+- 初期candidate scopeはgeneric core + TOHO first slice
+- AEON / 109は個別reviewでscopeが固まった場合だけ同milestoneへ追加
+- milestoneやIssue assignmentはcapability approvalを意味しない
+- version bump / tag / GitHub Release / npm publish / production deployはPhase 4 Discoveryでは行わない
 
 Exit criteria:
 
-- password/payment secretがMCP引数に入らない
-- human-only surfaceで必ず停止する
-- checkout preparationと購入確定が分離されている
+- provider-neutral contractがprovider semanticを潰さない
+- password/payment secretだけでなく初期scopeのpurchaser PIIもMCP引数へ入らない
+- Human-only surfaceで必ず停止する
+- exact intended seatだけを操作しspeculative/bulk holdを作らない
+- hold/release semanticsが未証明ならprovider capabilityをfalseのまま維持する
+- checkout summaryはcurrent rendered UIから再検証する
+- checkout preparationと購入確定が明確に分離されている
+- generic click/fill/navigation policyを弱体化しない
 
 ## Phase 5 — 購入確定
 
@@ -333,8 +380,11 @@ providerごとに購入を解禁する前に必須:
 4. ✅ common Theater / Showtime schema
 5. ✅ `find_showtimes` + `resolve_theater_targets` bounded composition
 6. ✅ Public repository safety hardening / CI / security operations
-7. seat mapをproviderごとに個別reviewして追加
-8. checkout preparationをproviderごとに個別reviewして追加
-9. final purchaseはprovider監査後のみ
+7. ✅ seat mapをproviderごとに個別reviewして追加
+8. ✅ Phase 4 Discovery / checkout + seat-hold boundary review
+9. 🟡 `prepare_checkout` provider-neutral contract/core (#49)
+10. TOHO Gate 0 + first checkout-preparation adapter (#50)
+11. AEON / 109は個別reviewが通ったproviderだけ展開 (#51 / #52)
+12. final purchaseはprovider監査後のみ
 
 providerごとに難易度や利用条件が違うため、feature parityを無理に揃えません。capability単位で安全にdegradeできる設計を優先します。
