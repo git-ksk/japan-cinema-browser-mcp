@@ -132,7 +132,7 @@ jobs:
           # Match the repository's prior merge-protection thresholds:
           # security severity High or Critical, or quality severity Error.
           for severity in critical high error; do
-            response="$(curl --fail-with-body --silent --show-error --location \
+            response="$(curl --fail-with-body --silent --show-error --location --retry 3 --retry-all-errors --retry-delay 2 --retry-max-time 20 \
               -H "Accept: application/vnd.github+json" \
               -H "Authorization: Bearer $GH_TOKEN" \
               -H "X-GitHub-Api-Version: 2026-03-10" \
