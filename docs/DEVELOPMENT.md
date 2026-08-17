@@ -302,7 +302,8 @@ Actions workflowでは:
 - actionはfull commit SHAへpin
 - Dependabotでnpm dependencyとGitHub Actionsを週次更新
 - `package.json` / `package-lock.json` が変わるPRだけDependency Reviewを実行し、moderate以上の既知脆弱性を拒否
-- CodeQL advanced setupは`security-and-quality` suiteでJS/TSとGitHub Actionsを解析し、Markdown/textだけのPRはscanを省略する
+- CodeQL advanced setupは`security-and-quality` suiteでJS/TSとGitHub Actionsを解析し、Markdown/textだけのPRはanalysisを省略する
+- `codeql-gate` は常に実行し、analysis対象PRではCodeQL job成功に加えてPR-scoped alertを確認し、Critical / High security alertまたはError quality alertをfail closedで拒否する
 - `main` push、weekly schedule、manual dispatchではCodeQL full scanを維持する
 - path classifierや条件付きjobの失敗を見落とさないよう、`required-gate` を `always()` で評価する
 - duplicate PR runはconcurrencyでcancel

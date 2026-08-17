@@ -7,9 +7,6 @@ on:
   pull_request:
     branches:
       - main
-    paths-ignore:
-      - "**/*.md"
-      - "**/*.txt"
   schedule:
     - cron: "23 19 * * 1"
   workflow_dispatch:
@@ -22,8 +19,50 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  classify-codeql:
+    name: classify CodeQL scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      scan: ${{ steps.classify.outputs.scan }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: classify
+        name: Decide whether CodeQL analysis is required
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          # Default branch, scheduled, and manual runs are always full scans.
+          if [[ "$EVENT_NAME" != "pull_request" ]]; then
+            echo "scan=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          scan=false
+          while IFS= read -r -d '' path; do
+            case "$path" in
+              *.md|*.txt)
+                ;;
+              *)
+                scan=true
+                break
+                ;;
+            esac
+          done < <(git diff --name-only -z "$BASE_SHA" "$HEAD_SHA")
+
+          echo "scan=$scan" >> "$GITHUB_OUTPUT"
+
   analyze:
     name: CodeQL (${{ matrix.language }})
+    needs: classify-codeql
+    if: needs.classify-codeql.outputs.scan == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -45,3 +84,63 @@ jobs:
       - uses: github/codeql-action/analyze@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
         with:
           category: /language:${{ matrix.language }}
+
+  codeql-gate:
+    name: codeql-gate
+    needs:
+      - classify-codeql
+      - analyze
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      security-events: read
+    env:
+      CLASSIFY_RESULT: ${{ needs.classify-codeql.result }}
+      SCAN_REQUIRED: ${{ needs.classify-codeql.outputs.scan }}
+      ANALYZE_RESULT: ${{ needs.analyze.result }}
+      EVENT_NAME: ${{ github.event_name }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Enforce CodeQL policy
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "$CLASSIFY_RESULT" != "success" ]]; then
+            echo "CodeQL scope classification did not succeed: $CLASSIFY_RESULT" >&2
+            exit 1
+          fi
+
+          if [[ "$SCAN_REQUIRED" != "true" ]]; then
+            echo "Markdown/text-only pull request; CodeQL analysis is not required."
+            exit 0
+          fi
+
+          if [[ "$ANALYZE_RESULT" != "success" ]]; then
+            echo "CodeQL analysis did not succeed: $ANALYZE_RESULT" >&2
+            exit 1
+          fi
+
+          # Push/scheduled/manual scans only need the analysis jobs to succeed.
+          if [[ "$EVENT_NAME" != "pull_request" ]]; then
+            exit 0
+          fi
+
+          # Match the repository's prior merge-protection thresholds:
+          # security severity High or Critical, or quality severity Error.
+          for severity in critical high error; do
+            response="$(curl --fail-with-body --silent --show-error --location \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/code-scanning/alerts?pr=${PR_NUMBER}&state=open&tool_name=CodeQL&severity=${severity}&per_page=1")"
+
+            count="$(python3 -c 'import json,sys; print(len(json.load(sys.stdin)))' <<<"$response")"
+            if [[ "$count" != "0" ]]; then
+              echo "CodeQL found an open ${severity} alert in PR #${PR_NUMBER}." >&2
+              exit 1
+            fi
+          done
