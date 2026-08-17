@@ -3,6 +3,10 @@
 
 日本の映画館公式サイトを、ユーザー本人のブラウザ上で安全に操作するための Browser-first MCP です。
 
+本プロジェクトは、ユーザー本人の指示による個人利用のブラウザ操作を目的としており、映画館データの収集・集約・再配布を目的とするサービスではありません。
+
+This project is designed for user-directed, personal browser interaction and is not a cinema data aggregation or redistribution service.
+
 当面の対応対象は次の3社です。
 
 - TOHOシネマズ
