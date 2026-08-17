@@ -460,13 +460,20 @@ function aeonSeatEntryExpression(showtime: AeonShowtime): string {
     }
     const actionable = matchedRows.filter((row) => row.isTicketButton && row.statuses.length === 1);
     const point = actionable.length === 1 ? (() => {
-      const status = actionable[0].statuses[0];
-      let r = status.getBoundingClientRect();
-      if (r.bottom <= 0 || r.top >= innerHeight || r.right <= 0 || r.left >= innerWidth) {
-        actionable[0].ticket.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
-        r = status.getBoundingClientRect();
+      const ticket = actionable[0].ticket;
+      ticket.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
+      const r = ticket.getBoundingClientRect();
+      for (let yi = 1; yi <= 5; yi += 1) {
+        for (let xi = 1; xi <= 5; xi += 1) {
+          const x = r.left + r.width * xi / 6;
+          const y = r.top + r.height * yi / 6;
+          if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) continue;
+          const hit = document.elementFromPoint(x, y);
+          const control = hit?.closest?.('button,a,[role="button"],[role="link"],input[type="submit"],input[type="button"]');
+          if (control === ticket) return { x, y };
+        }
       }
-      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      return null;
     })() : null;
     return {
       matchedRows: matchedRows.length,

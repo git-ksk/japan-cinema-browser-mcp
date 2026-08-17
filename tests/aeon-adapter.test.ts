@@ -627,6 +627,10 @@ test("AEON seat DOM reader statically requires seat-[ROW]-[NUMBER] identity and 
   assert.doesNotMatch(source, /clickAeon[^\n]*\(.*全て許可/);
   assert.match(source, /guest\.scrollIntoView\(\{ behavior: 'instant', block: 'center', inline: 'nearest' \}\)/);
   assert.match(source, /if \(control === guest\) return \{ x, y \}/);
+  assert.match(source, /const ticket = actionable\[0\]\.ticket/);
+  assert.match(source, /ticket\.scrollIntoView\(\{ block: 'center', inline: 'nearest', behavior: 'instant' \}\)/);
+  assert.match(source, /if \(control === ticket\) return \{ x, y \}/);
+  assert.doesNotMatch(source, /const status = actionable\[0\]\.statuses\[0\]/);
 });
 
 test("AEON current collapsed schedule is expanded through exact reviewed UI before semantic normalization", async () => {
