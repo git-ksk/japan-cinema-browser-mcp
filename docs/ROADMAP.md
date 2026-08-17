@@ -214,7 +214,7 @@ Exit criteria:
 
 目的: user-intendedな1 bookingの可逆・低リスクな準備だけをprovider別review後に自動化し、identity / PII / consent / payment / final purchaseはHumanへ戻す。
 
-状態: 🟡 Discovery complete / generic Human Handoff基盤実装済み / transaction capabilityは全社未解禁
+状態: 🟡 Discovery + provider-neutral core complete / generic Human Handoff基盤実装済み / transaction capabilityは全社未解禁
 
 Discovery: [`PHASE4_CHECKOUT_DISCOVERY.md`](./PHASE4_CHECKOUT_DISCOVERY.md) / #48
 
@@ -230,10 +230,11 @@ Discovery: [`PHASE4_CHECKOUT_DISCOVERY.md`](./PHASE4_CHECKOUT_DISCOVERY.md) / #4
 - ✅ legal/terms consent、credential、OTP/MFA、CAPTCHA/challenge、paymentはHuman-only
 - ✅ semantic mutation / transactionは `never_replay`、Human後はfresh semantic action + provider/context再検証
 - ✅ TOHOをconditional first vertical sliceに維持。Gate 0でhold/release semanticsを証明できなければcapabilityを上げずblocked扱い
+- ✅ #49 generic core: checkout intentからPII/credential/payment/consent/caller-supplied summaryを除外し、missing amount factはmissingのまま保持。arbitrary provider data / raw page-dialog / opaque checkout URLもgeneric summaryへ持ち込まない
 
 Implementation split:
 
-- 🟡 #49 — provider-neutral `prepare_checkout` contract/core。transaction capabilityを全社falseのまま実装可能な層から開始
+- ✅ #49 — provider-neutral checkout contract/core。strict intent、2-read seat freshness、exact-seat validation、ticket normalization、rendered summary/material fingerprintまで実装。`prepare_checkout` tool自体は未登録でtransaction capabilityは全社false
 - ⬜ #50 — TOHO first vertical slice。Gate 0通過後だけexact intended seat mutation / ticket pathを実装
 - ⬜ #51 — AEON hold/release review + provider adapter。TOHO parityを強制しない
 - ⬜ #52 — 109 explicit 10-minute hold review + provider adapter。TOHO parityを強制しない
