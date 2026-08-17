@@ -192,6 +192,10 @@ Human-only surfaceは `mcp-execution-handoff` のgeneric control planeへ接続�
 - Human intervention開始時にprepared purchase confirmationを破棄する
 - Human completionをpurchaseや別actionのapprovalとして扱わない
 - seat/checkout/purchase capabilityのfalseをhandoff経由で迂回しない
+- Phase 4 checkout intentへpurchaser PII/contact、credential、payment、consent、caller-supplied amount/summary/final-controlを追加しない
+- checkout summaryはprovider-rendered bounded factsを再読した結果だけから作り、missing amount factを0等へ補完しない
+- provider-specific raw page/dialog、arbitrary provider data、opaque checkout URL/session tokenをgeneric checkout resultへ流さない
+- seat mutation候補は2回のread-only freshness確認後のexact intended seatだけとし、stale/missing/unavailable時に代替席を自動選択しない
 - CAPTCHA/challenge bypass、solver、anti-bot evasionを追加しない
 
 仕様は [`EXECUTION_HANDOFF.md`](./EXECUTION_HANDOFF.md) を参照してください。
