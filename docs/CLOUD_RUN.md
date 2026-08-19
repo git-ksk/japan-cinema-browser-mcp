@@ -104,7 +104,7 @@ Cloud Run reserves some paths ending in `z`; the deployment therefore uses `/hea
 
 `mcp-usage-control` is an optional integration, not a requirement of Cinema MCP, MCP OAuth, or Firebase Authentication. This repository enables it in the documented Cloud Run profile as dogfooding for bounded remote-operation accounting.
 
-The current deployment wiring uses vendored `mcp-usage-control` v0.4.0 with the Firestore adapter because Cloud Run benefits from shared restart-durable accounting. The core `mcp-usage-control` package is storage-vendor independent and exposes a `UsageStore` contract plus a process-local `MemoryUsageStore`; other conforming provider-backed stores can be used by consumers. Cinema MCP currently wires the Firestore adapter when `MCP_USAGE_FIRESTORE_PROJECT_ID` is configured.
+The current deployment wiring uses vendored `mcp-usage-control` v0.7.0 with the Firestore adapter because Cloud Run benefits from shared restart-durable accounting. The core `mcp-usage-control` package is storage-vendor independent and exposes a `UsageStore` contract plus a process-local `MemoryUsageStore`; other conforming provider-backed stores can be used by consumers. Cinema MCP currently wires the Firestore adapter when `MCP_USAGE_FIRESTORE_PROJECT_ID` is configured.
 
 Lifecycle:
 
