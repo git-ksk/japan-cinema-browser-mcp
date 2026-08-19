@@ -3,7 +3,6 @@ import { createHash } from "node:crypto";
 
 export interface RequestPrincipal {
   subject: string;
-  operationScope?: string;
 }
 
 const principalContext = new AsyncLocalStorage<RequestPrincipal>();

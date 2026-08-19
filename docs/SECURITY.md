@@ -162,9 +162,9 @@ Phase 3 remote runtimeは汎用browser hostingではありません。以下をs
 - remote modeはheadless必須、external CDP禁止、purchase flag false必須
 - challenge / sign-in / consentはHuman Handoffへ昇格せずfail closed
 - operation timeout超過時はdedicated browser sessionを閉じる
-- optionalなMCPUsageを有効化する場合は、Firebase UIDからderiveしたauthenticated logical principalへbindし、現在のCloud Run profileではFirestore transactionでreserve / liable / settleする
-- usage stateへraw credential、page text、Cookie、bearer、payment/auth dataを保存しない
-- Firestoreは現在のCloud Run implementationでOAuth state / optional usage stateに採用するbackendであり、protocol上の必須要件ではない。代替backendは同等のone-shot / rotation / binding / expiry / atomicity semanticsを維持すること
+- usage accounting / rate limitingはCinema MCP core外のauthenticated deployment boundaryで実装し、Cinemaのbrowser / handoff execution authorityを変更しない
+- 外部usage layerへraw credential、page text、Cookie、bearer、payment/auth dataを渡したり保存したりしない
+- Firestoreは現在のCloud Run implementationでOAuth stateに採用するbackendであり、protocol上の必須要件ではない。代替OAuth backendは同等のone-shot / rotation / binding / expiry / atomicity semanticsを維持すること
 - `/health` はpassive livenessのみ。browser起動を伴う `/ready` と `/mcp` はscope `mcp:tools` を持つOAuth bearer必須
 - Chromium sandboxは既定で有効。`CINEMA_ALLOW_UNSANDBOXED_CHROMIUM` はverified incompatibility時だけの明示fallback
 

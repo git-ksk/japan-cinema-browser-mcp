@@ -101,11 +101,6 @@ export interface AppConfig {
     enabled: boolean;
     disableHumanHandoff: boolean;
   };
-  usage?: {
-    projectId: string;
-    dailyLimit: number;
-    leaseTtlMs: number;
-  };
   policy: {
     maxReadChars: number;
     confirmationTtlMs: number;
@@ -157,15 +152,6 @@ export function loadConfig(): AppConfig {
     }
   }
 
-  const usageRequired = envBool("MCP_USAGE_REQUIRED", false);
-  const usageProjectId = process.env.MCP_USAGE_FIRESTORE_PROJECT_ID?.trim() || undefined;
-  if (usageRequired && !usageProjectId) {
-    throw new Error("MCP_USAGE_FIRESTORE_PROJECT_ID is required when MCP_USAGE_REQUIRED=true");
-  }
-  if (usageProjectId && !remoteEnabled) {
-    throw new Error("Firestore MCP usage control currently requires CINEMA_REMOTE_MODE=true so local multi-round handoff semantics remain unchanged");
-  }
-
   const httpPort = process.env.MCP_HTTP_PORT === undefined
     ? envInt("PORT", 8787, 1, 65535)
     : envInt("MCP_HTTP_PORT", 8787, 1, 65535);
@@ -210,13 +196,6 @@ export function loadConfig(): AppConfig {
       enabled: remoteEnabled,
       disableHumanHandoff: remoteEnabled
     },
-    ...(usageProjectId ? {
-      usage: {
-        projectId: usageProjectId,
-        dailyLimit: envInt("MCP_USAGE_DAILY_LIMIT", 100, 1, 10_000),
-        leaseTtlMs: envInt("MCP_USAGE_LEASE_TTL_MS", 300_000, 10_000, 600_000)
-      }
-    } : {}),
     policy: {
       maxReadChars: envInt("CINEMA_MAX_READ_CHARS", 8_000, 500, 30_000),
       confirmationTtlMs: envInt("CINEMA_CONFIRMATION_TTL_SECONDS", 120, 30, 600) * 1_000,

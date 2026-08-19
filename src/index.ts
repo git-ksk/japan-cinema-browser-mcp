@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 import { once } from "node:events";
-import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import {
   bearerAuthChallengeResponse,
@@ -224,7 +223,7 @@ async function startHttp(): Promise<void> {
     void (async () => {
       const authorized = await authorize(oauth, req, res);
       if (!authorized) return;
-      await runWithRequestPrincipal({ ...authorized.principal, operationScope: randomUUID() }, async () => {
+      await runWithRequestPrincipal(authorized.principal, async () => {
         try {
           const request = await toWebRequest(req, controller.signal);
           const response = await mcpHandler.fetch(request, { authInfo: authorized.authInfo });
@@ -250,8 +249,8 @@ async function startHttp(): Promise<void> {
   httpServer.headersTimeout = 10_000;
   // find_showtimes may isolate up to three provider reads sequentially. Keep the
   // HTTP envelope larger than that bounded aggregate (plus cold Chromium and
-  // auth/usage overhead) so the transport cannot cancel a structured partial
-  // result before the tool boundary returns it.
+  // auth overhead) so the transport cannot cancel a structured partial result
+  // before the tool boundary returns it.
   httpServer.requestTimeout = Math.max(
     40_000,
     Math.min(420_000, config.policy.operationTimeoutMs * 3 + 60_000)
@@ -264,7 +263,6 @@ async function startHttp(): Promise<void> {
   });
   console.error(`[japan-cinema-browser-mcp] Streamable HTTP listening on http://${config.http.host}:${config.http.port}/mcp`);
   console.error(`[japan-cinema-browser-mcp] Remote mode: ${config.remote.enabled ? "enabled" : "disabled"}`);
-  console.error(`[japan-cinema-browser-mcp] MCP usage control: ${config.usage ? "firestore" : "disabled"}`);
   console.error("[japan-cinema-browser-mcp] Remote authentication: OAuth 2.1 + Firebase Auth");
 
   const shutdown = async () => {
