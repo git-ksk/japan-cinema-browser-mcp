@@ -49,9 +49,7 @@ import { Cinemas109ReadAdapter } from "./providers/109/adapter.js";
 import { AeonReadAdapter } from "./providers/aeon/adapter.js";
 import { TohoReadAdapter } from "./providers/toho/adapter.js";
 import { PurchaseGate, PurchaseGateError, type PurchaseSummary } from "./purchase-gate.js";
-import { UsageDeniedError } from "mcp-usage-control";
 import { currentRequestPrincipal, principalBinding } from "./request-principal.js";
-import { CinemaUsageRuntime } from "./usage.js";
 
 const SERVER_VERSION = "0.1.0";
 export const config = loadConfig();
@@ -63,7 +61,6 @@ const tohoReadAdapter = new TohoReadAdapter(runtime);
 const aeonReadAdapter = new AeonReadAdapter(runtime);
 const cinemas109ReadAdapter = new Cinemas109ReadAdapter(runtime);
 const purchaseGate = new PurchaseGate(config.policy.confirmationTtlMs);
-const usageRuntime = config.usage ? new CinemaUsageRuntime(config.usage) : undefined;
 const handoffStateCodec = createRequestStateCodec<HandoffRequestState>({
   key: randomBytes(32).toString("base64url"),
   ttlSeconds: HANDOFF_STATE_TTL_SECONDS
@@ -82,21 +79,17 @@ function jsonResult(value: unknown): CallToolResult {
 }
 
 function errorResult(error: unknown): CallToolResult {
-  const usageDenied = error instanceof UsageDeniedError;
   const known =
     error instanceof BrowserRuntimeError ||
     error instanceof ProviderPolicyError ||
     error instanceof PurchaseGateError ||
     error instanceof SeatRecommendationError ||
-    error instanceof ExecutionHandoffError ||
-    usageDenied;
+    error instanceof ExecutionHandoffError;
   if (!known) console.error("[japan-cinema-browser-mcp] unexpected tool error", error);
-  const code = usageDenied ? "USAGE_LIMIT_REACHED" : known ? (error as { code: string }).code : "INTERNAL_ERROR";
-  const message = usageDenied
-    ? "The daily MCP usage limit has been reached for this authenticated principal."
-    : known
-      ? error.message
-      : "The operation failed unexpectedly. Check the local MCP server logs.";
+  const code = known ? (error as { code: string }).code : "INTERNAL_ERROR";
+  const message = known
+    ? error.message
+    : "The operation failed unexpectedly. Check the local MCP server logs.";
   const details = error instanceof BrowserRuntimeError || error instanceof SeatRecommendationError ? error.details : undefined;
   return {
     content: [{ type: "text" as const, text: JSON.stringify({ error: code, message, details }) }],
@@ -284,7 +277,7 @@ async function executeToolTask<T>(
   }
 }
 
-async function runToolWithHandoffUnmetered<T>(input: {
+async function runToolWithHandoff<T>(input: {
   toolName: string;
   args: unknown;
   resumeStrategy: HandoffResumeStrategy;
@@ -361,32 +354,6 @@ async function runToolWithHandoffUnmetered<T>(input: {
   return executeToolTask(input.toolName, input.args, input.resumeStrategy, input.task, input.timeoutMs);
 }
 
-async function runToolWithHandoff<T>(input: {
-  toolName: string;
-  args: unknown;
-  resumeStrategy: HandoffResumeStrategy;
-  ctx: ServerContext;
-  task: () => Promise<T>;
-  timeoutMs?: number;
-}): Promise<CallToolResult | InputRequiredResult> {
-  if (!usageRuntime) return runToolWithHandoffUnmetered(input);
-  const principal = currentRequestPrincipal();
-  if (!principal) {
-    return errorResult(new Error("MCP usage control requires an authenticated HTTP principal"));
-  }
-  try {
-    return await usageRuntime.execute({
-      operationId: `${principal.operationScope ?? "stdio"}:${String(input.ctx.mcpReq.id)}`,
-      principalId: principalBinding(principal),
-      tool: input.toolName,
-      args: input.args,
-      task: () => runToolWithHandoffUnmetered(input)
-    });
-  } catch (error) {
-    return errorResult(error);
-  }
-}
-
 function requireReadAdapter(provider: CinemaProviderId, capability: "theaters" | "showtimes"): CinemaReadAdapter {
   assertProviderCapability(provider, capability);
   if (provider === "toho") return tohoReadAdapter;
@@ -409,7 +376,6 @@ function requireSeatAdapter(provider: CinemaProviderId): CinemaSeatReadAdapter {
   );
 }
 
-
 function requireRecommendationSeatAdapter(provider: CinemaProviderId): CinemaSeatReadAdapter {
   assertProviderCapability(provider, "seatMap");
   if (provider === "toho") return tohoReadAdapter;
@@ -420,15 +386,10 @@ function requireRecommendationSeatAdapter(provider: CinemaProviderId): CinemaSea
 }
 
 function findShowtimesTimeoutMs(targetCount: number): number {
-  // Input is capped at three targets and operationTimeoutMs is capped by config,
-  // so this remains bounded while still giving every target its full isolated
-  // provider budget before the aggregate envelope can fire.
   return config.policy.operationTimeoutMs * targetCount + 5_000;
 }
 
 function recommendSeatsTimeoutMs(): number {
-  // Freshness verification performs exactly two sequential read-only seat-map
-  // observations. Preserve one bounded provider budget for each observation.
   return config.policy.operationTimeoutMs * 2 + 5_000;
 }
 
@@ -891,5 +852,4 @@ export async function probeBrowserReady(): Promise<void> {
 export async function shutdownRuntime(): Promise<void> {
   purchaseGate.clear();
   await runtime.close();
-  await usageRuntime?.close().catch(() => undefined);
 }
