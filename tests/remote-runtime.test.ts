@@ -16,7 +16,7 @@ function withEnv(values: Record<string, string | undefined>, fn: () => void): vo
   }
 }
 
-test("remote mode is bounded, authenticated, headless, purchase-disabled and usage-aware", () => {
+test("remote mode is bounded, authenticated, headless, and purchase-disabled", () => {
   withEnv({
     CINEMA_REMOTE_MODE: "true",
     CINEMA_HEADLESS: "true",
@@ -29,9 +29,6 @@ test("remote mode is bounded, authenticated, headless, purchase-disabled and usa
     MCP_FIREBASE_PROJECT_ID: "test-mcp-runtime",
     MCP_FIREBASE_WEB_API_KEY: "public-web-api-key",
     MCP_ALLOWED_FIREBASE_UIDS: "owner-uid",
-    MCP_USAGE_REQUIRED: "true",
-    MCP_USAGE_FIRESTORE_PROJECT_ID: "test-mcp-runtime",
-    MCP_USAGE_DAILY_LIMIT: "100",
     CINEMA_OPERATION_TIMEOUT_MS: "30000"
   }, () => {
     const config = loadConfig();
@@ -40,9 +37,6 @@ test("remote mode is bounded, authenticated, headless, purchase-disabled and usa
     assert.equal(config.browser.headless, true);
     assert.equal(config.policy.enablePurchase, false);
     assert.equal(config.policy.operationTimeoutMs, 30_000);
-    assert.equal(config.usage?.dailyLimit, 100);
-    assert.equal(config.usage?.projectId, "test-mcp-runtime");
-    assert.equal(config.usage?.leaseTtlMs, 300_000);
     assert.equal(config.oauth?.publicBaseUrl, "https://cinema.example");
     assert.deepEqual(config.oauth?.allowedClientHosts, ["chatgpt.com"]);
     assert.equal(config.oauth?.accessTokenTtlMs, 3_600_000);
@@ -61,28 +55,6 @@ test("remote mode fails closed without required isolation and authentication set
   });
   withEnv({ CINEMA_REMOTE_MODE: "true", CINEMA_HEADLESS: "true", MCP_FIREBASE_PROJECT_ID: "p", MCP_FIREBASE_WEB_API_KEY: "k", MCP_ALLOWED_FIREBASE_UIDS: "u", MCP_PUBLIC_BASE_URL: undefined }, () => {
     assert.throws(() => loadConfig(), /requires MCP_PUBLIC_BASE_URL/);
-  });
-});
-
-test("Firestore usage control cannot silently attach to local handoff mode", () => {
-  withEnv({ CINEMA_REMOTE_MODE: "false", MCP_USAGE_FIRESTORE_PROJECT_ID: "test-mcp-runtime" }, () => {
-    assert.throws(() => loadConfig(), /requires CINEMA_REMOTE_MODE=true/);
-  });
-  withEnv({
-    CINEMA_REMOTE_MODE: "true",
-    CINEMA_HEADLESS: "true",
-    MCP_HTTP_HOST: "0.0.0.0",
-    MCP_ALLOW_NONLOOPBACK: "true",
-    MCP_ALLOWED_HOSTS: "cinema.example",
-    MCP_PUBLIC_BASE_URL: "https://cinema.example",
-    MCP_OAUTH_ALLOWED_CLIENT_HOSTS: "chatgpt.com",
-    MCP_FIREBASE_PROJECT_ID: "p",
-    MCP_FIREBASE_WEB_API_KEY: "k",
-    MCP_ALLOWED_FIREBASE_UIDS: "u",
-    MCP_USAGE_REQUIRED: "true",
-    MCP_USAGE_FIRESTORE_PROJECT_ID: undefined
-  }, () => {
-    assert.throws(() => loadConfig(), /MCP_USAGE_FIRESTORE_PROJECT_ID is required/);
   });
 });
 
