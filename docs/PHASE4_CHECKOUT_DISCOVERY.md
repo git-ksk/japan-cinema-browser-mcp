@@ -1,91 +1,180 @@
-# Phase 4 Checkout Preparation / Human Handoff Discovery
+# Phase 4 購入準備・Human Handoff調査
 
-Review date: 2026-08-17
-
+レビュー日: 2026-08-17  
 Tracking: #48
 
-This document records the safety boundary for Phase 4 before any provider enables seat selection or checkout preparation. Discovery is limited to official public information, rendered official UI, and the repository's existing reviewed behavior. It does not authorize private/internal APIs, network interception, hidden endpoint discovery, guessed routes, challenge bypass, credential automation, payment handling, or final purchase.
+## 目的
 
-## Decision
+Phase 4では、座席選択や購入準備を有効にする前に、**どこまでをAgentが扱い、どこからを人間へ戻すべきか**を映画館ごとに整理しました。
 
-Phase 4 does not enable a transaction capability during Discovery.
+この調査は、公式公開情報、表示中の公式Web画面、すでにレビュー済みの既存実装だけを対象にしています。
 
-| Provider | seatMap | seatSelection | checkoutPreparation | purchaseSubmission | Phase 4 status |
+次は許可していません。
+
+- 非公開API・内部APIの利用
+- 通信内容の傍受
+- 隠しエンドポイントの探索
+- URLやクエリ値の推測
+- CAPTCHAやアクセスチャレンジの回避
+- 認証情報の自動入力
+- 決済処理
+- 最終購入
+
+## 結論
+
+**この調査だけでは、状態を変える購入系機能を1つも有効にしません。**
+
+| 映画館 | `seatMap` | `seatSelection` | `checkoutPreparation` | `purchaseSubmission` | Phase 4の状態 |
 |---|---:|---:|---:|---:|---|
-| TOHO | true | false | false | false | conditional first vertical slice |
-| AEON | true | false | false | false | hold/release semantics need provider review |
-| 109 | true | false | false | false | explicit 10-minute hold; mutation review required |
+| TOHO | true | false | false | false | 最初の候補。追加ゲートで段階確認 |
+| イオン | true | false | false | false | 座席確保・解除条件の追加確認が必要 |
+| 109 | true | false | false | false | 10分の座席確保が明示されており、状態変更レビューが必要 |
 
-`seatSelection` is a semantic mutation. It must remain `never_replay` and cannot be recovered through generic click/fill or Human Handoff.
+座席選択は意味のある状態変更です。`never_replay` を維持し、汎用クリックやHuman Handoff完了後の自動再実行で代替してはいけません。
 
-## Seat-selection / hold boundary
+## 座席選択と一時確保の境界
 
-### TOHO
+### TOHOシネマズ
 
-Official public guidance separates seat selection from ticket type, purchaser information, payment, and final review. TOHO also documents that a purchase must be completed within 15 minutes after the desired seat is decided. Phase 3 proved that entering the seat map itself does not create a selected seat.
+公式案内では、座席選択の後に券種、購入者情報、支払い、最終確認へ進みます。また、希望座席を決定してから15分以内に購入を完了する必要があると説明されています。
 
-What remains unresolved is the exact mutation trigger: seat activation, seat decision/confirmation, or a later transition. The exact release behavior also needs a bounded provider review. Therefore Phase 4 does not click a live seat during Discovery and keeps `seatSelection=false`.
+Phase 3では、座席表へ入るだけでは選択席が発生しないことを確認しました。
 
-TOHO remains the conditional first vertical slice because it already has the strongest seat identity/freshness implementation, a reviewed guest continuation, and the clearest documented checkout stage order.
+一方、調査開始時点では「どの操作からサーバー側の座席確保が始まるか」は未確定でした。
 
-Post-Discovery Gate 0 update (2026-08-17): one bounded exact ordinary-seat activation was performed after two stable read-only observations and an exact rendered pointer hit-test. The seat changed locally from `seat_1.gif` / `空席(選択可)` to `seat_3.gif` / `選択中`, while an independent fresh profile still observed the same seat as available and the full pre-click seat-state fingerprint was unchanged. Therefore individual seat activation is not the cross-session/server-side hold trigger. A later B1 preflight corrected one earlier assumption: TOHO's rendered public instructions include an intermediate `確認する` seat-decision step before the legal-consent continuation. The direct seat-image activation used for Gate 0 does not prove that this seat-decision step was completed; in isolated live validation the selected image state appeared while the exact `確認する` control remained non-interactive and the selected-seat summary did not advance. TOHO's documented 15-minute timeout starts after the desired seat is "decided", so `確認する` is now treated as the candidate material hold boundary until separately proven. `利用規約に同意して次へ` remains Human-only and is not reached automatically. No capability is enabled.
- Additional B1/Gate 0b setup validation stayed on the same showtime/seat and did not click `確認する` or any consent control. The default isolated `756x469` viewport exposed TOHO's horizontal-orientation blocker after seat-image selection, while a temporary desktop `1280x813` rendered viewport removed that environment concern but still left the exact `確認する` element non-interactive. The adapter therefore treats both unsupported checkout layout and the intermediate seat-confirmation step as fail-closed conditions instead of retrying seat activation.
+候補は次のいずれかです。
 
-### AEON
+- 座席画像を選択した時点
+- 座席を `確認する` で確定した時点
+- その後の画面遷移
 
-The official e-seat instructions show that a selected seat can be clicked again to deselect and that ticket selection/payment/review follow seat selection. Existing repository code also has a reviewed guest transition to the Smart Theater seat surface.
+#### Gate 0で分かったこと
 
-Visible deselection is not proof that there is no server-side hold. Public evidence reviewed for Discovery does not establish the hold trigger, timeout, or release semantics. AEON therefore remains blocked at `seatSelection=false` until an individual provider review proves that boundary.
+調査後、1上映・通常席1席だけを使い、事前に2回の読み取り結果が一致した状態で、対象座席を1回だけ選択しました。
 
-Current-UI revalidation (2026-08-17): #59 replaced the drifted schedule grouping with the reviewed current `.p-schedule__information` structure. Cookie handling is exact `全て拒否` only, collapsed movies are opened only through exact visible `上映時間を見る`, and only visible `.p-schedule__ticket` rows bound to the header in the same movie card become showtime truth. Hidden ticket DOM is never returned. #60 separately hardened the reviewed `予約購入` pointer so the chosen point must hit the exact same ticket BUTTON rather than relying on a nested status-center coordinate. Both changes preserve fail-closed semantics and do not widen transaction capabilities.
+結果:
 
-The requested post-fix two-fresh-profile seat-map proof is still outstanding. Independent fresh runs failed closed at current rendered boundaries including unresolved exact seat-entry row, reservation transition leaving only a new `about:blank` target within the bounded wait, and Smart Theater rendered context not proving the exact requested theater/movie/date/time/screen. No seat activation, alternate/retry interaction, ticket type, consent, PII, payment, or purchase action was performed. #51 therefore remains blocked before Gate 0; `seatSelection=false`, `checkoutPreparation=false`, and `purchaseSubmission=false` remain unchanged.
+- 画面上は `空席(選択可)` から `選択中` へ変化
+- 別の新規プロファイルから見ると、同じ座席は引き続き空席
+- 事前の座席状態fingerprintとも一致
 
-### 109
+このため、**座席画像を1回選択しただけでは、別セッションへ影響するサーバー側座席確保は始まらない**と判断しました。
 
-109's official purchase instructions explicitly describe a 10-minute seat hold. Phase 3 separately observed that seat-map entry starts a 10-minute purchase-session timer while the rendered selected-seat count remains zero and fresh-session inventory does not change.
+その後のB1事前確認で、TOHOの実画面には利用規約同意より前に `確認する` という座席決定段階が存在することを再確認しました。
 
-This separates seat-map entry from seat hold but also establishes that selecting a seat is a server-side reversible/expiring mutation. `seatSelection=false` therefore remains correct until the exact activation/release behavior is reviewed.
+座席画像が `選択中` になっても、選択座席の要約は先へ進まず、`確認する` も操作可能な状態になりませんでした。そのため、座席画像の選択と「希望座席を決定」は同じ状態とみなしません。
 
-Post-Discovery read-only revalidation (2026-08-17): the current rendered seat page now formats the zero-selection summary as `選択座席：0／8席` (full-width colon). The adapter previously required the older no-colon form and correctly failed closed before returning a seat map. The read-only parser now accepts only the same reviewed label with an optional ASCII/full-width colon; it does not weaken the zero-selected-seat requirement.
+現在は `確認する` を、15分制限が始まる可能性のある重要境界として別途確認する方針です。
 
-After that narrow parser update, two independent fresh temporary Chrome profiles opened the same exact public showtime (109シネマズ港北 / 2026-08-18 / `オークストリートの異変[字幕]` / 11:15 / Screen 5). Both rendered the reviewed 10-minute release notice, `選択座席：0／8席`, 94 seats / available 83 / unavailable 11 / selected 0 / universal 2, and identical context/layout/state SHA-256 fingerprints. No seat was activated and no `次へ`, guest/member continuation, ticket type, consent, purchaser PII, payment, or purchase control was used. This reconfirms that seat-map entry creates the timed session context but does not itself create a seat hold or cross-session availability change. It does **not** authorize seat mutation: `seatSelection=false`, `checkoutPreparation=false`, and `purchaseSubmission=false` remain unchanged pending the separate exact activation/release review in #52.
+`利用規約に同意して次へ` は、その後に存在するHuman-onlyの境界です。Agentは自動操作しません。
 
-## Checkout stage matrix
+また、隔離環境の標準 `756x469` viewportでは横向き表示に関するブロックが出ました。`1280x813` ではその環境要因は解消しましたが、`確認する` は依然として操作可能になりませんでした。
 
-| Stage | TOHO | AEON | 109 |
+このため、画面サイズを変えて無理に続行したり、座席選択を繰り返したりせず安全側に停止します。
+
+### イオンシネマ
+
+公式e席リザーブの案内では、選択した座席をもう一度押して解除できること、座席選択後に券種・支払い・確認へ進むことが分かります。
+
+ただし、画面上で解除できることは「サーバー側で一時確保されていない」証拠にはなりません。
+
+公開情報だけでは、次がまだ確定していません。
+
+- 座席確保が始まる正確な操作
+- 確保時間
+- 解除条件
+
+そのため `seatSelection=false` を維持します。
+
+#### 現行UIの再確認
+
+Phase 4開始時、上映スケジュールのDOM構造がPhase 3時点から変化し、既存実装は推測して続けず `UI_STATE_CHANGED` で停止しました。
+
+#59では現在の表示を改めて狭く確認し、次だけを採用するよう修正しています。
+
+- T360 Cookie表示では `全て拒否` だけを操作
+- 作品を開く場合は表示中の `上映時間を見る` だけ
+- 同じ作品カード内で表示中の `.p-schedule__ticket` だけを上映回として採用
+- 非表示のticket DOMは結果へ含めない
+
+#60では `予約購入` の操作位置も、対象のBUTTONそのものへ当たっていることを再確認するよう強化しました。
+
+一方、修正後に予定していた「新規プロファイル2本での座席表再証明」はまだ完了していません。
+
+現在画面では、対象上映回の完全一致、`about:blank` を含む新規targetの採用条件、Smart Theater側の劇場・作品・日時・screen一致などで安全停止するケースが残っています。
+
+座席選択、代替座席の試行、券種、同意、個人情報、支払い、購入は行っていません。
+
+#51はGate 0前のままです。
+
+### 109シネマズ
+
+109の公式購入案内には、座席を10分間確保することが明示されています。
+
+Phase 3では、座席表へ入った時点から10分タイマーが始まる一方、選択席は0で、別セッションの空席状態にも変化がないことを確認しました。
+
+つまり次を分離して考えられます。
+
+- 座席表へ入る → 時間制限付き購入セッションは始まる
+- 座席を選ぶ → サーバー側の可逆・期限付き座席確保が始まる可能性が高い
+
+したがって `seatSelection=false` を維持します。
+
+#### 表示変更への対応
+
+座席表の0席選択表示が、以前の `選択座席 0／8席` から `選択座席：0／8席` へ変化していました。
+
+既存実装は安全側に停止したため、確認済みの同じラベルに限り、ASCIIまたは全角コロンを任意で許可するよう狭く修正しました。
+
+その後、新規プロファイル2本で同じ上映回を確認し、どちらも次で一致しました。
+
+- 10分の解放案内を表示
+- 選択席0
+- 全94席
+- 空席83
+- 利用不可11
+- universal属性2
+- context / layout / state fingerprint一致
+
+座席は1つも選択していません。
+
+この結果は「座席表へ入るだけでは座席確保が発生しない」ことの再確認にはなりますが、座席選択を許可する根拠にはなりません。#52で状態変更と解除条件を別途確認します。
+
+## 購入フローの比較
+
+| 段階 | TOHO | イオン | 109 |
 |---|---|---|---|
-| schedule/showtime | read-only | read-only | read-only |
-| seat-map entry | read-only | reviewed stateful navigation then read-only seat surface | timed session context; no hold observed by entry alone |
-| seat selection | possible hold; exact trigger unresolved | visual toggle; server hold unresolved | explicit 10-minute hold |
-| ticket type | checkout mutation candidate | checkout mutation candidate | checkout mutation candidate; voucher/PIN flows Human-only |
-| member / guest | guest path exists; login Human-only | reviewed guest path exists; login Human-only | guest path documented; login Human-only |
-| purchaser/contact info | Human-only for initial Phase 4 | Human-only for initial Phase 4 | Human-only for initial Phase 4 |
-| consent | Human-only | Human-only | Human-only |
-| payment | Human-only | Human-only | Human-only |
-| checkout summary | rendered facts may be normalized | rendered facts may be normalized | rendered facts may be normalized |
-| final purchase | Phase 5 only | Phase 5 only | Phase 5 only |
+| 上映回選択 | 読み取り中心 | 読み取り中心 | 読み取り中心 |
+| 座席表へ入る | 読み取り可能 | 状態付き画面遷移後に読み取り | 10分セッション開始、入場だけでは確保なし |
+| 座席選択 | 確保開始点を追加確認中 | サーバー側確保条件未確認 | 10分確保が公式明記 |
+| 券種 | 購入準備の状態変更候補 | 購入準備の状態変更候補 | 購入準備の状態変更候補 |
+| 会員・非会員 | 非会員導線あり。ログインはHuman | 非会員導線あり。ログインはHuman | 非会員導線あり。ログインはHuman |
+| 購入者情報 | Human | Human | Human |
+| 規約同意 | Human | Human | Human |
+| 決済 | Human | Human | Human |
+| 購入内容要約 | 表示中の事実だけ読み取り候補 | 同左 | 同左 |
+| 最終購入 | Phase 5以降 | Phase 5以降 | Phase 5以降 |
 
-## Human Handoff boundary
+## Human Handoffへ戻すもの
 
-The following remain Human-only:
+次は人間だけが扱います。
 
-- password / passcode;
-- OTP / MFA / verification code / 3-D Secure;
-- CAPTCHA / access challenge / waiting room;
-- payment card/credential or wallet approval;
-- member credential or PIN-like secret;
-- voucher/coupon/MovieTicket identifiers when they participate in authentication/PIN semantics;
-- legal or terms consent;
-- purchaser name, phone, email, and birth date in the initial Phase 4 design.
+- password / passcode
+- OTP / MFA / verification code / 3-D Secure
+- CAPTCHA / access challenge / waiting room
+- カード情報、決済credential、wallet承認
+- 会員認証情報、PIN相当のsecret
+- voucher / coupon / MovieTicket等で認証・PIN性を持つ値
+- 利用規約などへの法的同意
+- 初期Phase 4では購入者氏名、電話番号、メールアドレス、生年月日
 
-The last group is intentionally stricter than the existing secret deny-list. Phase 4 should not create a new PII ingress, logging, or result path just because a field is not a credential.
+最後の個人情報は、単なるsecret deny-listより厳しく扱います。「パスワードではないからMCPへ入力してよい」とはしません。
 
-Existing Execution Handoff invariants remain authoritative: exact owner/requestState binding, resource-epoch fencing, official provider/context revalidation after Human action, invalidation of prepared purchase confirmation, and no automatic replay for semantic mutation or transaction.
+Human Handoff後も、元の座席選択や購入操作を自動再実行しません。現在画面を読み直し、新しい意味操作として再発行する必要があります。
 
-## Ticket normalization proposal
+## 券種の共通モデル案
 
-Provider labels and restrictions remain authoritative. A provider-neutral representation may expose:
+映画館側の表示を正本とし、共通モデルでは必要な事実だけを保持します。
 
 ```ts
 interface CinemaTicketType {
@@ -98,80 +187,79 @@ interface CinemaTicketType {
   restrictionText?: string;
   minQuantity?: number;
   maxQuantity?: number;
-  providerData?: Record<string, string>;
 }
 ```
 
-Rules:
+原則:
 
-- read label, price, restrictions, and quantity constraints from the current rendered UI;
-- preserve the provider label even when a normalized category is available;
-- never infer age, student, disability, senior, or member eligibility;
-- stop for Human action when a discount path requires credential/identity/PIN semantics;
-- validate ticket quantity against the exact selected seat set and provider constraints.
+- 現在画面に表示されたラベル・価格・条件・数量制限を読む
+- 共通カテゴリへ変換しても元ラベルを保持する
+- 年齢、学生、シニア、障害、会員資格を推測しない
+- 資格確認やPINが必要な割引はHumanへ戻す
+- 券数と選択席数を一致させる
 
-## Checkout summary proposal
+## 購入内容要約
 
-A prepared summary must be re-read from the current provider UI. Caller input expresses intent and must never become transaction truth by itself.
+購入準備の要約は、呼び出し側の入力ではなく**現在の映画館画面を再読して作る**必要があります。
 
-Minimum facts when rendered:
+表示されている場合に対象とする事実:
 
-- provider;
-- theater;
-- movie;
-- date;
-- start time;
-- screen;
-- exact seats;
-- ticket types and quantities;
-- subtotal;
-- fees;
-- total;
-- currency;
-- current provider-visible stage/context;
-- observation time/context fingerprint.
+- 映画館
+- 劇場
+- 作品
+- 日付
+- 開始時刻
+- screen
+- 座席
+- 券種と枚数
+- 小計
+- 手数料
+- 合計
+- 通貨
+- 現在の購入段階
+- 観測時刻・状態fingerprint
 
-Missing provider facts remain missing; the core must not invent fees, totals, eligibility, or seat state.
+表示されていない金額や手数料を0として補完しません。
 
-## `prepare_checkout` responsibility
+## `prepare_checkout` が担う範囲
 
-The intended contract is:
+将来公開する場合の責務は次のとおりです。
 
-1. bind the exact user-intended showtime, seats, and ticket choices;
-2. re-read showtime and seat freshness before any mutation;
-3. delegate only to provider-specific reviewed mutation primitives;
-4. select exactly the intended seat set once, with no speculative substitute or automatic retry;
-5. verify the rendered selected/held state after mutation;
-6. normalize ticket choices without deciding eligibility;
-7. take only an explicitly reviewed guest path;
-8. stop at Human-only identity/contact/consent/payment/challenge surfaces;
-9. after Human intervention, require a fresh semantic action and revalidate provider/showtime/seat/hold state;
-10. return a provider-rendered pre-purchase summary when safely reachable;
-11. never submit the final purchase/payment action.
+1. ユーザーが指定した上映回・座席・券種を厳密に固定する
+2. 状態変更前に上映回と座席状態を再確認する
+3. 映画館ごとにレビュー済みの状態変更だけを呼び出す
+4. 指定席だけを1回操作し、代替席探索や自動再試行をしない
+5. 操作後に選択状態を画面から再確認する
+6. 券種を正規化しても利用資格を勝手に判断しない
+7. 確認済みの非会員導線だけを利用する
+8. 認証、個人情報、同意、決済、チャレンジではHumanへ戻す
+9. Human操作後は現在状態を再確認し、新しい意味操作を要求する
+10. 安全に到達できる場合だけ購入直前の要約を返す
+11. 最終購入・決済確定は行わない
 
-No provider-independent rollback is promised. A release/deselect action can be automated only after its provider semantics are separately reviewed. Otherwise the runtime fails closed and relies on the provider's documented expiry behavior.
+映画館共通の「必ず元に戻せる処理」は保証しません。解除操作を自動化する場合も、その映画館で解除条件を別途確認できた場合だけです。
 
-## Implementation split
+## 実装の分割
 
-- #49 — provider-neutral `prepare_checkout` contract/core; must be mergeable with all transaction capabilities still false.
-- #50 — TOHO conditional first vertical slice. Gate 0 must prove exact seat hold/release semantics before any capability flip.
-- #51 — AEON hold/release discovery and provider adapter; deferred independently of TOHO.
-- #52 — 109 explicit 10-minute hold review and provider adapter; deferred independently of TOHO.
+- #49 — 共通 `prepare_checkout` 契約と安全コア
+- #50 — TOHOの最初の縦切り。座席確保・解除条件のゲートを個別確認
+- #51 — イオンの座席確保・解除調査
+- #52 — 109の10分座席確保調査
 
-Provider parity is not a Phase 4 requirement.
+Phase 4では3社同時対応を必須にしません。
 
-## Release milestone direction
+## リリース候補
 
-`v0.4.0 — Checkout Preparation` is the candidate next release because `prepare_checkout` and any provider checkout capability are public-surface additions under the repository's `0.x` versioning policy.
+新しい公開機能として `prepare_checkout` を提供する場合、候補は `v0.4.0 — Checkout Preparation` です。
 
-The candidate release scope should initially contain the generic core and TOHO first slice only. AEON/109 belong in that milestone only after their independent safety reviews make the scope concrete. A milestone must not be treated as permission to enable a provider capability before its review gate passes.
+ただしMilestoneへ入っていることは、その映画館の機能を有効にしてよい根拠にはなりません。各映画館の安全ゲートを通過してから対応機能を変更します。
 
-No version bump, tag, GitHub Release, npm publication, or production deployment is part of Discovery.
+この調査自体には、バージョン変更、タグ、GitHub Release、npm公開、本番デプロイを含みません。
 
-## Official public references reviewed
+## 参照した公式公開資料
 
-- TOHO vit usage: https://www.tohotheater.jp/vit/vit_buy.html
-- TOHO vit guest availability: https://www.tohotheater.jp/vit/index.html
+- TOHO vit: https://www.tohotheater.jp/vit/vit_buy.html
+- TOHO 非会員購入: https://www.tohotheater.jp/vit/index.html
 - TOHO FAQ: https://help.tohotheater.jp/category/show/469?site_domain=default
-- AEON e-seat instructions: https://www.aeoncinema.com/service/onlineticket/instructions/?tab=tab3
-- 109 ticket purchase instructions: https://109cinemas.net/tickets/howto/
+- イオン e席リザーブ: https://www.aeoncinema.com/service/onlineticket/instructions/?tab=tab3
+- 109 チケット購入方法: https://109cinemas.net/tickets/howto/

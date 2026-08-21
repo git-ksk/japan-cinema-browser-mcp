@@ -1,61 +1,69 @@
 # japan-cinema-browser-mcp
 
-
 日本の映画館公式サイトを、ユーザー本人のブラウザ上で安全に操作するための Browser-first MCP です。
 
-本プロジェクトは、ユーザー本人の指示による個人利用のブラウザ操作を目的としており、映画館データの収集・集約・再配布を目的とするサービスではありません。
+映画館ごとに異なるWeb画面を、MCPから「劇場」「上映回」「座席」といった共通の概念で扱えるようにします。映画館データの収集・集約・再配布を目的としたサービスではなく、**ユーザーが依頼したときだけ公式Web画面を操作する**ことを基本にしています。
 
-This project is designed for user-directed, personal browser interaction and is not a cinema data aggregation or redistribution service.
-
-当面の対応対象は次の3社です。
+現在の主な対象は次の3社です。
 
 - TOHOシネマズ
 - イオンシネマ
 - 109シネマズ
 
-## このプロジェクトが目指すもの
+> [!IMPORTANT]
+> 本プロジェクトは各映画館・運営会社の非公式プロジェクトです。提携、後援、公認を受けているものではありません。
 
-映画館ごとに異なるWeb UIを、MCPから共通の概念で扱えるようにします。
+## できること
 
-最終的には、次のような一連の操作を対象にします。
+現在は、3社の公式公開画面を使った**読み取り中心の操作**を実装しています。
+
+| 機能 | TOHO | イオン | 109 |
+|---|---:|---:|---:|
+| 劇場一覧を読む | ✅ | ✅ | ✅ |
+| 上映情報を読む | ✅ | ✅ | ✅ |
+| 座席表を読む | ✅ | ✅ | ✅ |
+| 座席候補を提案する | ✅ | — | — |
+| 座席を選択する | ❌ | ❌ | ❌ |
+| 購入直前まで自動で進める | ❌ | ❌ | ❌ |
+| 購入を確定する | ❌ | ❌ | ❌ |
+
+実装上の識別子では、3社とも `seatMap=true`、`seatSelection=false`、`checkoutPreparation=false`、`purchaseSubmission=false` です。
+
+### 代表的な利用イメージ
 
 ```text
 上映を探す
   ↓
 劇場・日時・上映方式を比較する
   ↓
-座席を確認する
+座席表を確認する
   ↓
-座席を選ぶ
+空席から候補を提案する
   ↓
-購入直前まで進む
-  ↓
-ユーザーが内容を明示確認する
-  ↓
-購入を確定する
+必要に応じて人間へ操作を戻す
 ```
 
-ただし、これは映画館データを収集・再配布するサービスではありません。ユーザーの要求時に、公式サイト上で通常のブラウザ操作を行うことを基本とします。
+座席選択や購入のように状態を変える操作は、映画館ごとに安全性を確認できるまで有効にしません。
 
 ## 基本方針
 
-- 公式Web UIを優先し、非公開・内部APIを解析して直接利用しない
-- 定期クロールや全国上映データのDB化を行わない
-- 上映情報、座席表、HTML、画像、Cookie、決済情報を永続保存しない
-- CAPTCHA、MFA、OTP、3-D Secureなどを自動突破しない
-- パスワード、OTP/MFA、CAPTCHA answer、カード/銀行情報などの機密情報をMCP経由で入力しない
-- Human handoff完了を別actionのapprovalとして扱わない
-- Human interventionで中断したstateful/consequential actionを自動replayしない
-- 購入確定などの重大操作は通常のclick toolから分離する
-- 最終購入はデフォルト無効とし、明示確認を必須にする
-- UIが変わった、対象が曖昧、状態が不明な場合は推測せず停止する
-- 軽量・高速を維持し、ブラウザセッションを再利用する
+このリポジトリでは、便利さより先に次の境界を守ります。
 
-詳細は [`COMPLIANCE.md`](./COMPLIANCE.md) を正本とします。
+- 公式の公開Web画面だけを利用する
+- 非公開APIや内部APIを探索・直接利用しない
+- 定期クロールや全国上映データのDB化を行わない
+- HTML、座席表、Cookie、セッショントークン、決済情報を永続保存しない
+- CAPTCHA、MFA、OTP、3-D Secure、待機列、アクセス制御を自動突破しない
+- パスワード、OTP、カード情報などをMCPの引数として受け取らない
+- 画面や対象が曖昧なら推測せず安全側に停止する
+- 人間の操作完了を、別の操作の承認として扱わない
+- 状態を変える操作や購入操作を自動で再実行しない
+
+詳細な正本は [`COMPLIANCE.md`](./COMPLIANCE.md) と [`docs/SECURITY.md`](./docs/SECURITY.md) です。
 
 ## アーキテクチャ
 
-`maps-browser-mcp` と同じ思想で、Playwrightを使わずChrome DevTools Protocol（CDP）を直接利用します。
+Playwrightは使用せず、Chrome DevTools Protocol（CDP）を直接利用します。
 
 ```text
 MCPクライアント
@@ -66,63 +74,29 @@ japan-cinema-browser-mcp
       │
       │ CDP
       ▼
-専用ローカルChrome
+専用Chromeプロファイル
       │
       ├─ TOHOシネマズ
       ├─ イオンシネマ
       └─ 109シネマズ
 ```
 
-ランタイム依存は現在3つだけです。
+主な実行時依存は次のとおりです。
 
 - `@modelcontextprotocol/server`
 - `chrome-remote-interface`
-- `mcp-execution-handoff` v0.1.0（source release commitへimmutable pin）
+- `mcp-execution-handoff`
 - `zod`
 
-PlaywrightやChromium本体は同梱しません。
-
-## 現在の状態
-
-Public repositoryとして、次の安全基盤とread capabilityを実装済みです。
-
-- 専用Chromeプロファイルの起動・再利用
-- CDP接続
-- 3社公式ドメインのallow-list
-- 表示中ページのbounded read
-- 表示中コントロールの操作
-- 上映時刻候補の簡易抽出
-- 機密入力フィールドの拒否
-- 購入確定系コントロールの通常clickからの拒否
-- 短時間・one-shot・URL-boundの購入確認ゲート
-- provider capabilityの実行時強制
-- 最終購入のデフォルト無効化
-- TOHOシネマズの劇場一覧semantic read
-- TOHOシネマズの劇場・日付・作品・上映回semantic read
-- TOHOシネマズの日付切替後のselected-state再検証
-- TOHOシネマズ / イオンシネマ / 109シネマズのread-only `get_seat_availability`（seat identity / availability / rendered gap geometry、seat clickなし）
-- TOHOシネマズのread-only `recommend_seats`（2回のbounded readでcontext/layout/state freshnessを確認してから adjacent / center / rear / rear-middle / aisle候補を返す）
-- イオンシネマの公式「劇場を探す」UIからの劇場一覧semantic read
-- イオンシネマの公開 `theater.aeoncinema.com/theaters/{slug}` schedule route利用
-- イオンシネマの日付・作品・上映時間・screen・format/language semantic read
-- 109シネマズ公式トップの劇場ブロックからの劇場一覧semantic read
-- 109シネマズ各劇場ページに表示された公開日付linkからのschedule route discovery
-- 109シネマズの日付・作品・上映時間・screen・format/language/availability semantic read
-- TOHO / AEON / 109ともUI変更・曖昧状態・identity mismatchでfail closed
-
-TOHO / AEON / 109の3社showtime read adapterとread-only `seatMap=true` を有効化しています。109はseat-map entry時に10分session timerが開始しますが、座席を選択しません。AEONはreview済みのCookie拒否 → exact showtime → Watatheatre non-member → Smart Theater seat routeだけを通り、actual seat classをread-onlyで抽出します。`seatSelection / checkoutPreparation / purchaseSubmission` は全社falseのままです。
-
-自然発生したaccess challenge/CAPTCHA、sign-in/authentication、consentはgeneric Execution Handoffへ接続しています。Agent/Human authorityは排他で、resource epoch、exact invocation/requestState binding、post-Human replay policyを適用します。これによってtransaction capabilityが有効になることはありません。
-
-109は `https://109cinemas.net/` の表示中劇場linkと、各劇場ページに表示された `/[theater]/schedules/YYYYMMDD.html...` の明示hrefだけを利用します。slug・日付route・query値を推測して生成しません。`オンラインチケット購入` 等の購入導線はread contextとして表示されてもadapterからclickしません。
+Chromium本体は同梱しません。標準では端末にインストールされたChromeを、専用プロファイルで起動します。
 
 ## セットアップ
 
 必要環境:
 
-- Node.js 20+
+- Node.js 20以上
 - npm
-- Google Chrome
+- Google Chrome または Chromium
 
 ```bash
 npm ci --ignore-scripts
@@ -130,43 +104,21 @@ npm run build
 npm start
 ```
 
-MCPは標準ではstdioで動作し、ログはstderrに出します。
+標準ではstdioで動作し、ログはstderrへ出力します。
 
-### Single-user Cloud Run mode
+### 専用Chromeプロファイル
 
-`--http` と明示的なremote設定を組み合わせると、headless Chromiumを使うsingle-user向けStreamable HTTP deploymentも利用できます。これはlocal stdioの代替となる汎用multi-user hostingではありません。
-
-Cloud Run modeでは次を強制します。
-
-- MCP OAuth 2.1 resource-server / authorization-server boundary
-- RFC 9728 Protected Resource Metadata、CIMD、PKCE S256、refresh-token rotation
-- Human authorization時だけFirebase Authをidentity providerとして使用し、検証したUIDをlogical principalへbind
-- single-user Cloud Runでは許可UIDを明示allowlist
-- exact Host / Origin boundary
-- headless dedicated browser profile
-- external CDP禁止
-- purchase execution禁止
-- challenge / sign-in / consent時はHuman Handoffせずfail closed
-- browser operation timeout
-- usage accounting / rate limitingはOSS core外のauthenticated deployment boundaryで任意に構成
-
-このrepositoryのCloud Run profileではOAuth protocol stateの共有永続storeとしてFirestoreを採用していますが、Firestore自体がMCP OAuthの要件という意味ではありません。Usage accounting / rate limitingはCinema MCP coreの責務外とし、必要なoperatorがauthenticated deployment boundaryで任意の実装を組み合わせます。詳細は [`docs/CLOUD_RUN.md`](./docs/CLOUD_RUN.md) を参照してください。
-
-## Chromeの使い方
-
-### 標準: 専用Chromeプロファイル
-
-特別な設定は不要です。インストール済みChromeを起動し、次の専用プロファイルを再利用します。
+標準では次の専用プロファイルを使います。
 
 ```text
 ~/.japan-cinema-browser-mcp/chrome-profile
 ```
 
-映画館サイトのログイン状態を通常のChromeプロファイルから分離できます。
+通常利用しているChromeプロファイルと映画館サイトの状態を分離するためです。
 
-### 任意: 既存CDPポートへ接続
+### 既存のCDPポートへ接続する場合
 
-通常のChromeセッションへの接続はアクセス範囲が広がるため、明示的なopt-inが必要です。
+通常のChromeセッションへ接続するとアクセス範囲が広がるため、明示的な許可が必要です。
 
 ```bash
 CINEMA_ALLOW_EXTERNAL_CDP=true \
@@ -174,64 +126,83 @@ CINEMA_CDP_PORT=9222 \
 npm start
 ```
 
-## Execution Handoff
+## Cloud Run
 
-Execution Handoffのgeneric control planeはupstream `git-ksk/mcp-execution-handoff` v0.1.0のsource release commitをimmutable pinして利用します。Cinema側にはprovider policy、Human surface classification、postcondition verification、resume policyを残します。
+ローカルstdioが標準構成です。`--http` とリモート用設定を組み合わせると、**1ユーザー限定**のCloud Run構成も利用できます。
 
-| 操作class | core resume policy | MCP strategy |
-| --- | --- | --- |
-| bounded pure read | `replay_safe` | `retry_original` |
-| navigation/provider semantic flow | `revalidate` | `require_fresh_semantic_action` |
-| semantic mutation | `never_replay` | `require_fresh_semantic_action` |
-| transaction/payment action | `never_replay` | `require_fresh_semantic_action` |
+この構成では次を必須にしています。
 
-Human handoffが始まった時点でprepared purchase confirmationを破棄します。seat selection / checkout / purchase / payment系はhandoff完了後もautomatic replayせず、fresh semantic actionと必要なexplicit confirmationを要求します。credential、OTP/MFA、CAPTCHA answer、payment dataはMCPへ渡しません。
+- MCP OAuth 2.1
+- 許可するFirebase UIDは1件
+- 専用のheadless Chromium
+- 外部CDP接続は禁止
+- 購入実行は禁止
+- 映画館サイトで人間操作が必要になった場合は安全側に停止
+- 同じブラウザ状態を複数ユーザーで共有しない
 
-仕様は [`docs/EXECUTION_HANDOFF.md`](./docs/EXECUTION_HANDOFF.md) を参照してください。
+汎用的なマルチユーザーMCPホスティングとして使う構成ではありません。詳しくは [`docs/CLOUD_RUN.md`](./docs/CLOUD_RUN.md) を参照してください。
 
-## 購入機能
+## Human Handoff
 
-最終購入はデフォルトで無効です。
+ログイン、アクセスチャレンジ、同意画面など、人間が操作すべき場面では `mcp-execution-handoff` を利用して実行権限を人間へ移します。
 
-```bash
-CINEMA_ENABLE_PURCHASE=true npm start
+重要なのは、**人間が操作を終えたからといって、中断した操作をそのまま再実行しない**ことです。
+
+- 読み取りだけの操作は、検証後に再試行できる場合がある
+- 画面遷移は、現在状態を読み直してから新しい操作として扱う
+- 座席選択など状態を変える操作は自動再実行しない
+- 購入・決済操作は自動再実行しない
+- Human Handoffを開始した時点で、準備済みの購入確認は無効化する
+
+詳細は [`docs/EXECUTION_HANDOFF.md`](./docs/EXECUTION_HANDOFF.md) を参照してください。
+
+## 現在のMCPツール
+
+| ツール | 内容 |
+|---|---|
+| `list_cinema_providers` | 対応映画館と現在の対応機能を返す |
+| `browser_status` | Chrome / CDPの状態を確認する |
+| `open_cinema_provider` | 映画館の公式サイトを開く |
+| `navigate_cinema_official` | レビュー済みの公開画面だけへ移動する |
+| `read_cinema_page` | 表示中の情報を上限付きで読む |
+| `extract_showtime_candidates` | 表示中の上映時刻候補を抽出する |
+| `list_theaters` | 公式画面から劇場一覧を読む |
+| `get_showtimes` | 劇場・日付・作品・上映回を読む |
+| `get_seat_availability` | 指定上映回の座席表を読み取り専用で確認する |
+| `recommend_seats` | TOHOの座席表から候補を順位付けする |
+| `resolve_theater_targets` | 外部の場所候補を公式劇場一覧で再照合する |
+| `find_showtimes` | 最大3件の劇場を横断して上映情報を検索する |
+| `click_cinema_control` | レビュー済みの読み取り系操作だけを実行する |
+| `fill_cinema_field` | レビュー済みの検索・絞り込み欄だけへ入力する |
+| `prepare_purchase_confirmation` | 購入内容を短時間の確認対象として固定する |
+| `confirm_purchase_action` | 最終購入用。現在は全映画館で実行不可 |
+| `close_browser_session` | MCPが起動したChromeを閉じる |
+
+無効化された機能を、汎用クリックや曖昧な画面操作で迂回することはありません。
+
+## 3社横断検索
+
+`find_showtimes` は勝手に全国の映画館を巡回しません。呼び出し側が指定した最大3件の `{ provider, theater }` だけを、同じChrome/CDPセッションで順番に読みます。
+
+場所検索と組み合わせる場合は、Maps系MCPなどから得た候補を `resolve_theater_targets` で公式劇場一覧へ再照合してから利用します。
+
+```text
+場所検索
+  -> 劇場候補
+  -> resolve_theater_targets
+  -> 公式UIで一意に確認できた劇場だけ採用
+  -> find_showtimes
 ```
 
-この設定だけでは購入実行は有効になりません。providerごとの `purchaseSubmission` capabilityもtrueである必要があり、現在はTOHO/AEON/109すべてfalseです。購入確認ゲートも省略できません。
+一部の映画館で読み取りに失敗した場合は「上映なし」に置き換えず、部分結果であることを明示します。
 
-購入前には少なくとも以下を確認対象として固定します。
+## 座席表と座席提案
 
-- provider
-- 劇場
-- 作品
-- 日付
-- 上映時刻
-- 座席
-- 券種
-- 合計金額
-- 現在の購入ページ
+3社とも座席表の読み取りに対応していますが、座席をクリックして確保する機能は無効です。
 
-確認は短時間で失効し、1回しか使えません。画面や購入内容が変わった場合は再確認が必要です。
+TOHOの `recommend_seats` では、同じ座席表を2回読み、上映回・レイアウト・空席状態が一致した場合だけ候補を返します。状態が変わっていた場合は古い結果を使いません。
 
-## 現在のMCP Tools
-
-- `list_cinema_providers` — 対応provider一覧とcapability
-- `browser_status` — Chrome/CDP状態
-- `open_cinema_provider` — 公式サイトを開く
-- `navigate_cinema_official` — 明示レビュー済みのpublic read surfaceだけへ移動する。同一公式domain内でも任意path/subdomainは許可しない
-- `read_cinema_page` — 表示中情報を上限付きで読む
-- `extract_showtime_candidates` — 表示中の上映時刻候補を抽出する
-- `list_theaters` — providerの公式公開UIから劇場をsemanticに読む。TOHO / AEON / 109有効
-- `get_showtimes` — 劇場・日付・作品・上映回をsemanticに読む。TOHO / AEON / 109有効
-- `get_seat_availability` — exact theater/date/movie/startTime/screenにbindingしたTOHO / AEON / 109のlive seat mapをread-onlyで読む。109はrendered public hrefをそのまま採用して10分session semanticsを保持し、AEONはreview済みexternal target chainだけを採用する。いずれもseat click / hold生成なし
-- `recommend_seats` — 同一TOHO seat mapを2回readし、context/layout/state fingerprintが一致した時だけconfirmed availableの隣接候補を順位付けする。special seatは明示opt-in
-- `resolve_theater_targets` — Maps等のbounded external place labelsをprovider公式劇場UIで再照合し、最大3件のverified `{ provider, theater }` targetへ変換する
-- `find_showtimes` — 最大3件の明示provider/theater targetを同一request内で順次読み、共通contractでfilter・集約する。provider failureは`complete=false`と`failures`で明示
-- `click_cinema_control` — reviewed read surface内の明示的read操作だけを実行する。seat/checkout/purchase系はprovider capabilityで拒否
-- `fill_cinema_field` — reviewed read-only search/filter fieldだけ入力する。seat/checkout fieldと機密fieldは拒否
-- `prepare_purchase_confirmation` — 現在の購入内容を確認用に固定する
-- `confirm_purchase_action` — 最終購入操作。provider capabilityが必要で、現在全provider無効
-- `close_browser_session` — MCP所有Chromeを閉じる
+特別席や車椅子対応席は「空いているかどうか」と別の属性として扱い、標準の候補からは除外します。
 
 ## 開発時の確認
 
@@ -243,11 +214,7 @@ npm run build
 git diff --check
 ```
 
-`main` はGitHub rulesetで保護し、pull request + squash merge、required CI、linear history、force-push/delete禁止を適用しています。GitHub ActionsはGitHub-owned actionだけを許可し、workflow内のactionはfull commit SHAへ固定します。依存関係とGitHub ActionsはDependabotで週次確認します。
-
-providerの非購入live smokeは通常CIには含めず、低頻度で明示実行します。
-
-Generic navigation/click/fill と provider adapter内部のreviewed flowは別policyです。Generic toolはpositive allow-listのpublic read surfaceだけを扱い、adapterはrendered public UIから採用・検証したexplicit route/controlだけを内部primitiveで操作します。
+映画館公式サイトを使う確認は通常CIに含めず、必要な映画館だけ低頻度で明示実行します。
 
 ```bash
 npm run smoke:toho
@@ -255,41 +222,25 @@ npm run smoke:aeon
 npm run smoke:109
 ```
 
-これらのsmoke testは公式公開UIの劇場一覧・上映画面を読むだけで、座席選択や購入操作は行いません。2026-08-13にTOHO / AEON / 109の3社すべてでgreenを確認済みです。
-
-## 次の段階
-
-3社のread capabilityに加え、provider-neutral `CinemaTheater` / `CinemaShowtime` / `CinemaSeatMap` contractを `src/cinema.ts` に追加済みです。Phase 3のTOHO first vertical sliceではread-only seat extraction、freshness fingerprint、deterministic seat recommendationまで実装し、provider固有route・selector・seat DOM semanticはadapter側に残します。
-
-Phase 2.2では `resolve_theater_targets` と `find_showtimes` を分離しています。`find_showtimes` は最大3件の明示 `{ provider, theater }` targetだけを受け、同じChrome/CDP session上で順次実行します。`date` / `movie` / `after` / `before` / canonical `format` filterを適用し、開始時刻順 + target入力順でdeterministicに集約します。
-
-area検索はこのMCP自身が地理DBや全劇場scanを持つのではなく、外部resolverとのcompositionで行います。たとえば `maps-browser-mcp` のbounded visible resultを使う場合は、次のようにcaller側で接続します。
-
-```text
-maps_search({ query: "映画館 横浜駅" })
-  -> maps_read_place_summary()
-  -> resolve_theater_targets({ candidates: summary.items, sourceTruncated: summary.truncated })
-  -> find_showtimes({ targets: resolved.targets, ...filters })
-```
-
-`resolve_theater_targets` は外部labelを命令として扱わず、TOHO / イオンシネマ / 109シネマズ（およびムービル）の明示ブランドだけを分類します。その後、各providerのreviewed `list_theaters` で公式UIへ再照合し、1劇場に一意解決できてofficial provenanceも再検証できた候補だけをcanonical targetへ変換します。入力は最大8候補、出力は最大3targetで、unsupported / zero-match / ambiguous / provider failure / duplicate / limit reachedを明示します。外部summaryの`truncated`状態も保持するため、bounded結果を完全なarea inventoryとして誤認しません。
-
-一社のfail-closedは「上映なし」に変換せず、成功分を返す場合も必ず `complete=false` と `failures[]` を併記します。provider resultのprovider/date/theater/sourceUrl provenanceが共通contractに一致しない場合も `CONTRACT_VIOLATION` として集約対象から除外します。provider-wide全劇場scan・background crawl・巨大な地理DBは導入しません。
+これらは購入・決済を行うテストではありません。
 
 ## ドキュメント
 
-- [`docs/PROJECT.md`](./docs/PROJECT.md) — プロジェクト定義・非目標
-- [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) — 設計・状態境界
-- [`docs/EXECUTION_HANDOFF.md`](./docs/EXECUTION_HANDOFF.md) — Execution Handoff
-- [`docs/ROADMAP.md`](./docs/ROADMAP.md) — 開発ロードマップ
+最初に [`docs/README.md`](./docs/README.md) を読むと、目的別のドキュメントへ辿れます。
+
+主な文書:
+
+- [`docs/PROJECT.md`](./docs/PROJECT.md) — 目的・非目標・設計方針
+- [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) — アーキテクチャ
+- [`docs/DEVELOPMENT.md`](./docs/DEVELOPMENT.md) — 開発方針
 - [`docs/SECURITY.md`](./docs/SECURITY.md) — セキュリティモデル
-- [`docs/DEVELOPMENT.md`](./docs/DEVELOPMENT.md) — 実装ルール
-- [`docs/PROVIDERS.md`](./docs/PROVIDERS.md) — provider対応状況
-- [`COMPLIANCE.md`](./COMPLIANCE.md) — コンプライアンス方針
-- [`CONTRIBUTING.md`](./CONTRIBUTING.md) — contribution / safety / testルール
-- [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md) — community code of conduct
-- [`.github/SECURITY.md`](./.github/SECURITY.md) — vulnerability reporting policy
+- [`docs/PROVIDERS.md`](./docs/PROVIDERS.md) — 映画館ごとの対応状況
+- [`docs/ROADMAP.md`](./docs/ROADMAP.md) — ロードマップ
+- [`CONTRIBUTING.md`](./CONTRIBUTING.md) — コントリビューション方法
+- [`SUPPORT.md`](./SUPPORT.md) — サポート窓口
 
-## 非公式プロジェクトであることについて
+## 非公式プロジェクトについて
 
-本プロジェクトはTOHOシネマズ、イオンシネマ、109シネマズおよび各運営会社とは提携・後援・公認関係にありません。provider名は相互運用対象を示すためにのみ使用します。
+本プロジェクトはTOHOシネマズ、イオンシネマ、109シネマズおよび各運営会社とは提携・後援・公認関係にありません。
+
+各社名は、相互運用の対象となるWebサイトを識別するためにのみ使用しています。

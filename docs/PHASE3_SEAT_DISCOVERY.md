@@ -1,64 +1,110 @@
-# Phase 3 Seat Intelligence Discovery
+# Phase 3 座席情報調査
 
-Discovery date: 2026-08-17
-
-Parent issue: #30
-
+調査日: 2026-08-17  
+親Issue: #30  
 Milestone: `v0.3.0 — Seat Intelligence`
 
-## Purpose
+## 目的
 
-Phase 3 must understand a rendered seat map without creating unnecessary seat holds. This Discovery compares TOHO Cinemas, AEON Cinema, and 109 Cinemas before enabling any seat capability.
+Phase 3では、**不要な座席確保を発生させずに、表示中の座席表を理解できるか**を確認しました。
 
-The investigation remained inside the existing safety boundary:
+座席機能を有効にする前に、TOHOシネマズ、イオンシネマ、109シネマズの3社について、座席表へ入るまでの経路、座席状態の読み取り方、一時確保が始まる境界を比較しています。
 
-- public rendered official UI and official public documentation only
-- no private/internal API discovery or calls
-- no network interception
-- no guessed hidden routes, provider slugs, or query values
-- no CAPTCHA/challenge bypass
-- no login, checkout, payment, or purchase
-- no seat click
-- no intentional hold creation
-- `seatMap`, `seatSelection`, `checkoutPreparation`, and `purchaseSubmission` remained disabled for every provider
+調査中は次の安全境界を維持しました。
 
-Representative current schedule surfaces were read through the existing provider adapters for TOHO Cinemas Lalaport Yokohama, AEON Cinema Kohoku New Town, and 109 Cinemas Kohoku. During the initial comparison, the purchase/seat controls themselves were not activated. A bounded follow-up validation then entered seat-map surfaces without clicking any seat, as recorded below.
+- 公式の公開Web画面と公式公開資料だけを利用
+- 非公開API・内部APIを探索・直接利用しない
+- 通信内容を傍受しない
+- 隠しURL、映画館識別子、クエリ値を推測しない
+- CAPTCHAやアクセスチャレンジを回避しない
+- ログイン、決済、購入を行わない
+- 座席をクリックしない
+- 意図的な座席確保を発生させない
 
-## Provider comparison
+初期調査では3社とも `seatMap`、`seatSelection`、`checkoutPreparation`、`purchaseSubmission` を無効のまま進めました。
 
-| Provider | Seat-map entry | Hold / mutation boundary | Read-only seat semantics | Geometry | Auth / challenge | Discovery result |
-|---|---|---|---|---|---|---|
-| TOHO | Follow-up validation entered the live `座席指定` surface through the visible sellable showtime and visible non-member continuation. No seat was clicked. | No countdown was visible at entry, no selected-seat state was observed, and the official FAQ still places the documented 15-minute timeout after desired-seat decision. | Live legend exposes available, selected, and purchased/not-for-sale semantics. | Live seat-map surface is now reachable for semantic DOM review; extraction details belong to implementation #32. | Membership is optional; the reviewed path used the visible non-member continuation and no auth field. | **First provider gate passed** for read-only seat-map implementation. |
-| AEON | Initial probe confusion around `about:blank` was resolved in #36: a pre-existing startup tab was unrelated, while the real blocker was the T360 Cookie overlay. Exact `全て拒否` → exact showtime `予約購入` → Watatheatre non-member → Smart Theater seat route reaches the live map without seat click. | #36 clean-profile validation showed entry with active/selected=0 and identical seat-state fingerprint in two sessions. Hold start/time remains undocumented, so any seat activation is still treated as mutating. | Live DOM exposes actual `seat-[ROW]-[NUMBER]` identities, `default` / `disabled`, premier/special and wheelchair classes. #43 normalizes only reviewed public classes and fails on `active`. | #43 reads rendered rect geometry; no screen orientation is inferred unless an explicit marker is geometrically proven. | Purchase without membership is supported; login fields are not automated. | **Read-only gate passed** in #36; runtime adapter implemented in #43 with provider-specific target adoption. |
-| 109 | Follow-up validation entered the live seat-map surface by following one exact visible public showtime href; no route/query was synthesized and no seat was clicked. | Entry immediately starts a visible 10-minute purchase/session timer, but the page reports `選択座席 0／8席`. Two independent sessions showed identical per-seat state with 0 selected seats, strongly indicating entry alone does not hold seats or change availability. | Live DOM exposes row/seat identities plus available vs unavailable state; selected count remained zero. | Rendered rows expose stable seat identities suitable for semantic normalization. | Non-members can continue without joining. No challenge was observed. | **Read-only candidate after TOHO**; timed-session creation is acceptable only while seat selection remains zero. |
+## 結論
 
-## Hold-boundary conclusion
+調査と追加検証の結果、**座席表を読み取るだけの機能は3社とも有効化できる**と判断しました。一方、座席選択は別の状態変更として扱い、引き続き無効です。
 
-Discovery does **not** authorize a seat click for any provider.
+| 映画館 | 座席表への進入 | 読み取り | 座席選択 | 主な注意点 |
+|---|---|---:|---:|---|
+| TOHO | 公開上映回 → 非会員導線 → `座席指定` | ✅ | ❌ | 入場時点では選択席・カウントダウンを確認せず。座席決定後15分の公式説明あり |
+| イオン | `予約購入` → 非会員導線 → Smart Theater | ✅ | ❌ | 座席表表示時は選択席0。座席を有効化した時点のサーバー側確保条件は未確認 |
+| 109 | 公開上映回の明示リンク → 座席表 | ✅ | ❌ | 入場直後から10分タイマーが始まるが、選択席0で空席状態も別セッションと一致 |
 
-### TOHO
+現在の実装状態は次のとおりです。
 
-The strongest current evidence is TOHO's official FAQ: the purchase timeout begins after the user has decided the desired seat, and a temporarily held seat is released later. This places the documented hold boundary at or after seat decision rather than at ordinary schedule browsing.
+```text
+TOHO: seatMap=true, recommend_seats=true, seatSelection=false
+AEON: seatMap=true, recommend_seats=false, seatSelection=false
+109:  seatMap=true, recommend_seats=false, seatSelection=false
+```
 
-The bounded follow-up validation passed the implementation safety gate: the visible public non-member path reached `座席指定` with no visible countdown and no selected seat. The implementation criterion is **no seat hold, material reservation mutation, or availability impact caused by read-only entry**, not literal absence of all server-side session state. #32 has now implemented and tested the reviewed read-only adapter, so TOHO alone exposes `seatMap=true`; seat selection remains disabled.
+## 映画館ごとの確認結果
 
-### AEON
+### TOHOシネマズ
 
-The official instructions clearly separate showtime selection, seat selection, ticket type, payment, and final purchase. They also state that seat availability is continuously updated and an uncompleted reservation can result in seats becoming available again. They do not specify when a temporary hold starts or how long it lasts.
+公開されている上映回から、表示中の非会員向け導線を通って `座席指定` 画面まで進みました。座席自体はクリックしていません。
 
-The exact hold start/time remains undocumented, but #36 demonstrated in two independent clean profiles that normal rendered entry to the Smart Theater seat page produces active/selected=0 and a stable seat-state fingerprint without a material availability impact. #43 therefore implements only read-only target adoption and seat extraction; any `active` seat, stale transaction state, wrong context, or unexpected route fails closed. `seatMap=true`, while `seatSelection=false` and AEON recommendation remains disabled because screen orientation is not proven.
+座席表へ入った直後には、次を確認しました。
 
-### 109
+- 選択中の座席なし
+- 目立ったカウントダウン表示なし
+- 空席、選択中、販売済み・販売対象外を区別できる表示あり
 
-Live validation clarified the boundary: the 10-minute timer is already visible immediately after seat-map entry, while the page explicitly reports `選択座席 0／8席`. A second independent browser session for the same showtime exposed the same 223 seat identities and the same 11 unavailable seats, with zero selected seats and a zero-difference per-seat state fingerprint.
+公式FAQでは、希望座席を決定してから15分以内に購入を完了する必要があると説明されています。このため、通常の上映情報閲覧より後、少なくとも座席決定付近に時間制約のある状態が存在すると考えられます。
 
-This is strong evidence that 109 creates a timed purchase/session context on entry but does **not** create a seat hold or availability mutation until a seat is selected. Treat any seat activation as mutating. A future read-only adapter may enter the map while preserving zero selected seats; see #35.
+読み取り専用の実装では、座席表へ入ったこと自体で座席確保や空席変化を起こさないことを安全条件としました。#32で座席表読み取り、#33で鮮度確認と座席候補提案を実装し、`seatMap=true` へ変更しています。
 
-## Domain model direction
+`seatSelection=false` は維持します。
 
-Do not model `special` as an availability state. A D-BOX, Gold Class, Executive, Pair, wheelchair, or other special seat can independently be available or unavailable.
+### イオンシネマ
 
-The first shared contract should therefore separate state from attributes:
+初期調査では `about:blank` が残る挙動を座席遷移の問題と誤認しましたが、#36で原因を切り分けました。実際にはT360 Cookie表示が `予約購入` ボタンへの操作を遮っていました。
+
+確認済みの経路は次です。
+
+```text
+T360 Cookie表示
+  -> 「全て拒否」
+  -> 対象上映回の「予約購入」
+  -> Watatheatreの非会員購入
+  -> Smart Theater座席画面
+```
+
+この経路は、通常の表示中Web画面だけを使っています。
+
+独立した新規プロファイル2本で同じ上映回を確認し、座席表表示時に選択中の座席が0で、座席状態のfingerprintも一致しました。
+
+#43では次だけを読み取ります。
+
+- 実際の `seat-[ROW]-[NUMBER]` 座席識別子
+- `default` / `disabled` など確認済みの公開class
+- premium / special / wheelchair属性
+- 表示位置から得られる座席配置
+
+`active` な座席が存在する場合や、上映回・劇場・画面遷移の同一性を確認できない場合は安全側に停止します。
+
+スクリーン方向を示す明確な証拠が取れていないため、イオンでは `recommend_seats` をまだ有効にしていません。
+
+### 109シネマズ
+
+表示中の上映回にある**実際の公開リンク**をそのまま使って座席表へ進みました。URLやクエリは生成していません。
+
+座席表へ入ると10分の購入セッションタイマーがすぐ始まります。一方、画面上は `選択座席 0／8席` で、座席を1つも選んでいません。
+
+同じ上映回を独立した2つのブラウザセッションから確認したところ、座席識別子と利用不可座席の状態が一致し、選択席はどちらも0でした。
+
+この結果から、**座席表へ入ること自体は時間制限付きセッションを作るが、座席確保や空席変化は起こしていない**と判断しました。
+
+ただし座席を選択した後は、公式案内上も10分の一時確保を伴う状態変更です。したがって `seatSelection=false` を維持します。
+
+## 座席モデル
+
+特別席は「空いている・埋まっている」と同じ軸で扱いません。
+
+たとえばD-BOX、Gold Class、Executive、Pair、車椅子対応席などは、**座席属性**と**利用状態**を分離します。
 
 ```ts
 type CinemaSeatState =
@@ -85,104 +131,93 @@ interface CinemaSeat {
   y?: number;
   groupId?: string;
 }
-
-interface CinemaSeatMap {
-  provider: "toho" | "aeon" | "109";
-  theaterId: string;
-  screen?: string;
-  showtimeIdentity: string;
-  seats: CinemaSeat[];
-  screenEdge?: "top" | "bottom" | "left" | "right";
-  observedAt: string;
-  sourceUrl: string;
-}
 ```
 
-The final names may change during implementation. The invariants are more important:
+重要な原則:
 
-- do not invent `occupied`, `blocked`, or `not_for_sale` distinctions unless the rendered UI distinguishes them
-- preserve provider-visible seat identity
-- preserve special-seat attributes independently from availability
-- carry provenance and observation time
-- make unknown state explicit rather than treating it as available
+- 画面上で区別できない状態を勝手に細分化しない
+- 映画館側で表示される座席識別子を保持する
+- 特別席の属性と空席状態を分ける
+- 観測元URLと観測時刻を保持する
+- `unknown` を「空席」とみなさない
 
-## Provider-independent recommendation feasibility
+## 座席候補の共通化
 
-The following can be provider-independent once a provider adapter supplies normalized layout facts:
+映画館固有のアダプターが正規化済みの座席配置を返せれば、次の評価は共通処理にできます。
 
-- adjacent N-seat grouping: same row, consecutive layout neighbors, no explicit aisle/gap/group boundary between seats
-- center preference: normalized horizontal distance from the observed center line
-- rear preference: normalized row depth away from the screen edge
-- rear-middle: combined center distance and rear-depth score
-- aisle preference: adjacency to an observed aisle/gap boundary
-- pair/group handling: preserve provider-declared logical groups rather than splitting them accidentally
+- N席連続の判定
+- 中央寄り
+- 後方寄り
+- 後方中央
+- 通路寄り
+- ペア席・グループ席のまとまり
 
-Recommendation defaults to confirmed `available` seats. `unknown` is not a synonym for available. Special/accessibility seats remain independent attributes and are excluded from default recommendation unless the caller explicitly opts in.
+候補の対象は、明確に `available` と確認できた座席だけです。
 
-## State stability / freshness
+`unknown` は候補に含めません。特別席やアクセシビリティ対応席も標準候補から外し、呼び出し側が明示的に希望した場合だけ対象にします。
 
-Seat availability is mutable external state. The read-only contract needs:
+## 情報の鮮度
 
-1. exact provider / theater / showtime / screen context identity
-2. observation timestamp
-3. a deterministic fingerprint or equivalent over seat identities and states
-4. bounded re-read of the same reviewed seat-map context
-5. fail-closed behavior if the context, layout identity, or availability state changes unexpectedly
+座席状態は外部で変化するため、読み取った結果には鮮度確認が必要です。
 
-A recommendation is advisory only. It must never select a seat as part of refreshing or validating state.
+現在の設計では次を確認します。
 
-## v0.3.0 scope
+1. 映画館・劇場・上映回・スクリーンが同一であること
+2. 観測時刻
+3. 座席識別子と状態から作る決定的なfingerprint
+4. 同じ座席表を上限付きで再読する
+5. 上映回、配置、空席状態が変わっていたら古い結果を使わない
 
-First provider: **TOHO Cinemas**.
+`recommend_seats` は状態確認のために座席を選択しません。
 
-Implemented v0.3.0 seat-read scope:
+## v0.3.0で実装した範囲
 
-- provider-neutral seat intelligence model
-- TOHO / AEON / 109 `get_seat_availability`
-- TOHO #32 / 109 #35 / AEON #43 reviewed read-only `seatMap=true`
-- TOHO-only `recommend_seats` with exactly two bounded read-only observations
-- row / seat normalization + rendered gap boundaries
-- explicit SCREEN orientation proof from rendered public UI
-- adjacent seat grouping
-- center / rear / rear-middle / aisle scoring
-- context / layout / state freshness fingerprints and fail-closed stale detection
-- unit tests and isolated live smoke without seat click
+- 3社共通の座席モデル
+- TOHO / イオン / 109の `get_seat_availability`
+- 3社のread-only `seatMap=true`
+- TOHOの `recommend_seats`
+- 座席行・番号の正規化
+- 表示上の隙間・通路境界の抽出
+- TOHOでのスクリーン方向確認
+- 連席、中央、後方、後方中央、通路寄りの評価
+- context / layout / state fingerprintによる変更検知
+- 座席クリックを伴わないunit testと実サイト確認
 
-Explicitly excluded from v0.3.0 first scope:
+### 対象外
 
 - `select_seats`
 - `seatSelection=true`
-- seat click / hold creation
-- login automation
-- checkout preparation
-- payment / purchase
-- AEON / 109 `recommend_seats` until provider-specific screen orientation is explicitly proven
+- 座席クリックや一時確保
+- ログイン自動化
+- 購入準備
+- 決済・購入
+- スクリーン方向を明示確認できるまでのイオン / 109 `recommend_seats`
 
-## Follow-up issues
+## 関連Issue
 
-- #31 — provider-neutral seat intelligence model and recommendation core
-- #32 — TOHO read-only seat availability adapter, including the non-mutating-entry gate
-- #33 — seat freshness detection and `recommend_seats`
-- #35 — 109 read-only seat availability with explicit timed-session semantics — implemented 2026-08-17
-- #36 — AEON public seat-map entry / safety gate without hidden-route discovery — completed 2026-08-17
-- #43 — AEON reviewed target adoption + read-only seat availability adapter — implemented 2026-08-17
+- #31 — 共通座席モデルと座席候補評価
+- #32 — TOHO読み取り専用座席アダプター
+- #33 — 座席状態の鮮度確認と `recommend_seats`
+- #35 — 109読み取り専用座席アダプター
+- #36 — イオン座席表への公開導線と安全条件
+- #43 — イオン読み取り専用座席アダプター
 
-A `select_seats` issue should only be created after a separate provider-specific mutation/hold review. Discovery did not pass that boundary.
+`select_seats` を実装する場合は、映画館ごとに座席確保・解除の状態変更を別途レビューしてから着手します。この調査だけでは座席選択を許可していません。
 
-## Official public references
+## 参照した公式公開資料
 
-TOHO Cinemas:
+TOHOシネマズ:
 
 - https://www.tohotheater.jp/vit/vit_buy.html
 - https://help.tohotheater.jp/faq/show/2049
 - https://www.tohotheater.jp/theater/036/institution.html
 
-AEON Cinema:
+イオンシネマ:
 
 - https://www.aeoncinema.com/service/onlineticket/instructions/?tab=tab3
 - https://www.aeoncinema.com/kohoku/facility/
 
-109 Cinemas:
+109シネマズ:
 
 - https://109cinemas.net/tickets/howto/
 - https://109cinemas.net/kohoku/establishment.html

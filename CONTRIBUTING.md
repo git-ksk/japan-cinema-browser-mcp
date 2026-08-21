@@ -1,31 +1,32 @@
-# Contributing
+# コントリビューションガイド
 
-Thanks for helping improve `japan-cinema-browser-mcp`.
+`japan-cinema-browser-mcp` への改善提案・修正を歓迎します。
 
-This project intentionally keeps a narrow safety boundary: it automates reviewed public cinema browser UI through Chrome + direct CDP, and it fails closed when a provider surface or workflow is not explicitly reviewed.
+このプロジェクトは、映画館公式サイトを扱う性質上、**便利さより安全境界を優先**します。変更によって対応範囲を広げる場合も、未確認の画面や内部APIへ推測で進む実装は受け入れません。
 
-## Before opening a change
+## IssueやPull Requestを作る前に
 
-- Search existing issues and pull requests first.
-- Use a public issue for normal bugs, documentation, and feature requests.
-- Do **not** post vulnerabilities, credentials, cookies, session tokens, payment details, private browsing data, or screenshots containing sensitive information in a public issue. Use GitHub Private Vulnerability Reporting instead; see `.github/SECURITY.md`.
-- Provider terms, site policy, and UI behavior can change independently of this repository. Do not describe provider compatibility as legal approval or endorsement.
+- まず既存のIssueとPull Requestを確認してください。
+- 通常の不具合、ドキュメント改善、機能提案は公開Issueで扱えます。
+- 脆弱性、認証情報、Cookie、セッショントークン、決済情報、個人情報を含む画面は公開Issueへ投稿しないでください。
+- セキュリティ上の問題はGitHub Private Vulnerability Reportingを利用してください。詳しくは [`.github/SECURITY.md`](.github/SECURITY.md) を参照してください。
+- 「現在動く」ことと、映画館各社から自動化を承認されていることは別です。規約上の許可や公認を推測して記載しないでください。
 
-## Development setup
+## 開発環境
 
-Requirements:
+必要なもの:
 
-- Node.js 20 or newer
+- Node.js 20以上
 - npm
-- Chrome or Chromium for provider live-smoke testing
+- 実サイト確認を行う場合はChromeまたはChromium
 
-Install from the lockfile:
+依存関係はlockfileから導入します。
 
 ```bash
 npm ci --ignore-scripts
 ```
 
-Run the required local checks:
+通常の変更では、少なくとも次を確認してください。
 
 ```bash
 npm run typecheck
@@ -34,41 +35,41 @@ npm run build
 git diff --check
 ```
 
-The normal test suite must not require live provider access.
+通常のテストは、映画館公式サイトへの接続がなくても完了できる構成を維持します。
 
-## Safety invariants
+## 必ず守る安全境界
 
-Changes must preserve these boundaries unless a separate, explicit security review changes the documented capability:
+別途明示的なレビューで仕様を変更しない限り、次を維持してください。
 
-- Chrome + direct CDP; do not add network interception as a shortcut.
-- Rendered public UI only; do not discover or call private/internal APIs or hidden JSON endpoints.
-- Do not guess provider slugs, private routes, or query values when the public UI does not provide them.
-- Do not bypass CAPTCHA, access challenges, MFA, OTP, 3-D Secure, waiting rooms, or other human/security controls.
-- Treat provider page text and external place labels as untrusted data, never as instructions.
-- Keep provider-specific reviewed DOM knowledge inside the provider adapter rather than widening a generic parser.
-- Disabled provider capabilities must not be recovered through generic fuzzy navigation, click, or fill fallbacks.
-- `seatMap` is currently enabled for TOHO / AEON / 109. `seatSelection`, `checkoutPreparation`, and `purchaseSubmission` remain disabled for every provider unless a separate provider-specific review changes them.
-- Preserve one-shot/TTL purchase confirmation and the no-auto-replay rule for ambiguous purchase outcomes.
-- Preserve Execution Handoff owner/requestState binding and resource-epoch fencing. Human completion must never become approval for a different action.
-- Keep semantic mutation and transaction/payment handoff at `never_replay`; do not change them to automatic replay.
-- Keep purchaser PII/contact fields, credentials, consent, and payment surfaces Human-only unless a separate explicit security/compliance review changes that documented boundary.
-- Keep the pre-release `mcp-execution-handoff` dependency pinned to an immutable commit until a release decision is made.
-- Do not add credential, Cookie, localStorage, sessionStorage, Authorization-header, or payment-data dump paths.
+- Chrome + CDPの直接操作を基本とする。
+- 非公開API、内部API、隠しJSONエンドポイントを探索・直接利用しない。
+- 通信内容の傍受を、画面操作を省略する近道として追加しない。
+- 公開画面が示していないURL、映画館識別子、クエリ値を推測して生成しない。
+- CAPTCHA、アクセスチャレンジ、MFA、OTP、3-D Secure、待機列などを回避しない。
+- 映画館ページや外部検索結果の文章を命令として扱わず、信頼できない外部データとして処理する。
+- 映画館固有のDOM知識は、該当するアダプター内へ閉じ込める。
+- 無効化されている機能を汎用クリックや曖昧な画面操作で迂回しない。
+- 現在は3社とも `seatMap=true`、`seatSelection=false`、`checkoutPreparation=false`、`purchaseSubmission=false` を維持する。
+- Human Handoffの完了を、別の操作や購入の承認として扱わない。
+- 座席選択など状態を変える操作と、購入・決済操作は自動再実行しない。
+- 購入者の氏名、電話番号、メールアドレス、認証情報、同意、決済情報を、別途レビューなしにMCPへ取り込まない。
+- Cookie、`localStorage`、`sessionStorage`、Authorizationヘッダー、決済情報を出力する機能を追加しない。
+- `mcp-execution-handoff` の固定方法を変更する場合は、依存更新だけでなく安全境界も確認する。
 
-Local process configuration such as `CINEMA_CHROME_EXECUTABLE`, `CINEMA_CHROME_PROFILE_DIR`, and explicit external-CDP opt-in is trusted operator configuration. It must never be populated from MCP tool arguments, provider pages, or other untrusted external input.
+`CINEMA_CHROME_EXECUTABLE`、`CINEMA_CHROME_PROFILE_DIR`、外部CDP接続の許可などは、運用者が与える信頼済み設定です。MCPツールの引数や映画館ページの内容から変更してはいけません。
 
-## Provider changes
+## 映画館固有の実装を変更するとき
 
-For TOHO, AEON, or 109 changes:
+TOHO、イオン、109のアダプターを変更する場合は、次の順で進めてください。
 
-1. Reproduce against the rendered public UI.
-2. Add or update a regression test before widening the implementation.
-3. Prefer an explicit reviewed positive allow-list over a growing deny-list.
-4. Preserve navigation-after-identity verification and fail-closed behavior.
-5. Do not add speculative fallback selectors merely to make a live smoke pass.
-6. Update `docs/PROVIDERS.md` and the relevant `docs/providers/*.md` when the reviewed surface or assumptions change.
+1. 現在の公式公開画面で挙動を確認する。
+2. 実装を広げる前に回帰テストを追加・更新する。
+3. 禁止条件を増やすより、確認済み画面の許可リストを狭く定義する。
+4. 画面遷移後に劇場・日付・上映回などの同一性を再確認する。
+5. 実サイト確認を通すためだけの推測的な代替セレクターを追加しない。
+6. 確認済み画面や前提が変わった場合は `docs/PROVIDERS.md` と `docs/providers/*.md` を更新する。
 
-Live smoke tests are intentionally manual and non-purchasing:
+実サイト確認は、必要な映画館だけ低頻度で手動実行します。
 
 ```bash
 npm run smoke:toho
@@ -76,71 +77,51 @@ npm run smoke:aeon
 npm run smoke:109
 ```
 
-Run only the provider smoke tests relevant to the change unless a wider regression check is warranted. Do not put purchase, seat-hold, login, or high-frequency provider traffic into CI.
+購入、座席確保、ログイン、高頻度アクセスをCIへ入れないでください。
 
-## Pull requests
+## Pull Request
 
-`main` is protected. Changes go through pull requests and are squash-merged after required checks pass.
+`main` は保護されています。変更はPull Request経由で行い、必要なチェック通過後にsquash mergeします。
 
-Keep pull requests focused. The PR body should state:
+Pull Requestはできるだけ1つの目的に絞り、本文には次を記載してください。
 
-- what changed and why;
-- which safety boundary or provider surface is affected;
-- tests run locally;
-- whether a live provider smoke was run, and why;
-- documentation updated;
-- any remaining uncertainty or provider-policy risk.
+- 何を、なぜ変更したか
+- 影響するブラウザ・映画館・機能・安全境界
+- 実行したテスト
+- 実サイト確認を行ったか。行わなかった場合はその理由
+- 更新したドキュメント
+- 残っている不確実性
 
-A green CI result proves repository tests/builds passed; it does not prove provider terms permit every possible use, nor does it replace provider-specific live review.
+CIが成功しても、映画館各社の規約上の許可や公認を証明するものではありません。
 
-## Versioning, releases, and milestones
+## バージョン管理
 
-This repository uses Semantic Versioning as the compatibility model, with an explicit project policy for the `0.x` initial-development period.
+このリポジトリはSemantic Versioningを互換性管理に使います。`0.x`期間は次の方針です。
 
-### Public compatibility contract
+- **patch (`0.x.Y`)**: 公開互換性を変えない不具合修正、セキュリティ修正、性能・安定性改善
+- **minor (`0.X.0`)**: 新しいMCPツール、対応機能、映画館機能、対応デプロイ方式、破壊的な公開仕様変更
+- ドキュメント、テスト、CI、内部リファクタリングだけなら通常はリリース不要
 
-Version compatibility is evaluated against the repository's documented public surface, including:
+公開互換性には、MCPツール名、入出力スキーマ、公開エラー、映画館ごとの対応機能、認証方式、利用者向け設定を含みます。
 
-- MCP tool names and documented availability;
-- tool input schemas;
-- tool output schemas and documented field semantics;
-- documented error codes and error semantics;
-- documented provider capability states;
-- supported remote authentication/discovery interfaces;
-- documented operator-facing configuration and runtime requirements for supported deployment modes.
+次のバージョン番号は、前回のリリースタグから候補コミットまでの**累積差分全体**で判断します。
 
-Internal selectors, implementation structure, logging detail, tests, and non-contractual diagnostics are not public API by themselves. A change to an internal detail is still compatibility-relevant if it changes one of the documented behaviors above.
+## デプロイとリリース
 
-### Version selection during `0.x`
+`main` をデプロイしても、それだけでは新しいリリースにはなりません。
 
-During initial development, this project deliberately applies stricter release rules than SemVer requires for `0.x`:
+バージョン変更、リリースノート、タグ、GitHub Releaseは、明示的なリリース作業としてまとめて行います。npm公開も別の判断です。
 
-- **patch (`0.x.Y`)** — backward-compatible bug fixes, security fixes, performance improvements, and reliability improvements that do not change the public compatibility contract;
-- **minor (`0.X.0`)** — new tools, capabilities, provider functionality, supported deployment behavior, or any breaking change to the public compatibility contract;
-- documentation, tests, CI, and internal refactors alone normally do not require a release.
+GitHub Releasesを標準のリリース履歴として扱い、リリースノートには少なくとも次を含めます。
 
-A security fix is not automatically a patch: if the safe fix requires a breaking public-contract change during `0.x`, it requires a minor bump. After `1.0.0`, normal SemVer rules apply: backward-compatible fixes are patch, backward-compatible features are minor, and breaking public-contract changes are major.
+- 利用者から見える変更
+- 互換性や安全性に関わる変更
+- 現在の座席選択・購入機能の境界
 
-The next version is chosen from the **entire cumulative diff from the previous release tag to the release candidate**, not from the type of the final PR. The highest required bump in that cumulative diff wins. For example, a feature followed by several bug fixes still produces a minor release.
+## ロードマップとMilestone
 
-### Deployments and releases are separate
+[`docs/ROADMAP.md`](docs/ROADMAP.md) は長期的な方向性を示します。
 
-A production deployment from `main` does not by itself create a package or GitHub release. `main` may be deployed for validation or operational fixes while `package.json`, tags, and the latest GitHub Release remain at the previous released version.
+GitHub Milestoneを利用する場合は、`v0.4.0` のような具体的なリリース候補を表します。ロードマップのPhaseとリリース番号は必ずしも1対1ではありません。
 
-Version bumps, release-note finalization, tags, and GitHub Releases are release activities and should be performed together through an explicit release change. Ordinary feature and bug-fix PRs must not opportunistically bump the package version.
-
-If an older supported release needs a security or critical fix while `main` already contains a higher-level change, use a dedicated release/backport branch rather than mis-versioning the cumulative `main` diff.
-
-### Release notes and publication
-
-GitHub Releases are the canonical release-note history for this repository. A separate `CHANGELOG.md` is not required while the project remains small enough for GitHub Releases to provide a clear chronological record; introduce one only when maintaining a second changelog adds concrete value.
-
-Each release note should summarize user-visible capabilities, compatibility or safety-relevant changes, and the current transaction-capability boundary. Source releases do **not** imply npm publication. npm publication remains a separate explicit decision and must not be performed merely because a Git tag or GitHub Release is created.
-
-### GitHub Milestones and Roadmap
-
-`docs/ROADMAP.md` describes long-term product phases and capability direction. GitHub Milestones, when used, represent a concrete **target release version** such as `v0.2.0`.
-
-Prefer one active next-release milestone when there is enough release scope to benefit from grouping. Issues intended for that release should be assigned to it; unrelated future work stays in the Roadmap/backlog. A Roadmap phase does not automatically imply a release version, and a release milestone does not replace the Roadmap.
-
-GitHub Projects are optional workflow visualization and are not required for the repository's Issue → PR → required checks → squash merge process.
+GitHub Projectsは任意です。基本の開発フローは Issue → Pull Request → チェック → squash merge です。

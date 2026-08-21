@@ -1,127 +1,131 @@
-# TOHOシネマズ Providerメモ
+# TOHOシネマズ対応メモ
 
 Provider ID: `toho`
 
-公式root: `https://www.tohotheater.jp/`
+公式サイト: `https://www.tohotheater.jp/`
 
-初回Private MVPレビュー日: 2026-08-12  
-Phase 1 read adapterレビュー日: 2026-08-13  
-Phase 3 seat adapterレビュー日: 2026-08-17  
-Phase 4 checkout Discoveryレビュー日: 2026-08-17
+初回Private MVPレビュー: 2026-08-12  
+Phase 1 上映情報adapterレビュー: 2026-08-13  
+Phase 3 座席表adapterレビュー: 2026-08-17  
+Phase 4 チェックアウト調査: 2026-08-17
 
-## 現在のCapability
+## 現在の対応状況
 
-| Capability | 状態 | 備考 |
+| 機能 | 状態 | 備考 |
 |---|---|---|
-| 公式rootを開く | 有効 | domain allow-listあり |
-| Generic bounded read | 有効 | page内容は永続保存しない |
-| 劇場一覧/選択semantic | 有効 | 公式劇場一覧のvisible linkのみ |
-| 上映情報semantic | 有効 | 劇場・日付・作品・上映回をrendered UIから抽出 |
-| Seat map read | 有効 | #32 read-only adapter + #33 freshness/recommendation |
-| Seat selection | 無効 | Gate 0でindividual seat clickはlocal/session selectionと確認。post-consent hold trigger / release境界が未証明のためfalse維持 |
-| Checkout preparation | 無効 | #49 coreは完了。#50 internal TOHO sliceはHuman consent境界で停止し、tool/capabilityは未公開 |
-| Final purchase | 無効 | Phase 5で別途厳格レビューが必要 |
+| 公式サイトを開く | 有効 | 許可domainを限定 |
+| 限定的な画面読み取り | 有効 | ページ内容は永続保存しない |
+| 劇場一覧・劇場選択 | 有効 | 公式劇場一覧に表示されたlinkのみ |
+| 上映情報取得 | 有効 | 劇場・日付・作品・上映回を表示中のUIから抽出 |
+| 座席表の読み取り | 有効 | #32のread-only adapterと#33の鮮度確認・推薦 |
+| 座席選択 | 無効 | `seatSelection=false`。座席決定後のhold開始点と解放条件が未証明 |
+| チェックアウト準備 | 無効 | #49の共通基盤は完了。#50は内部実装のみで公開機能にはしていない |
+| 最終購入 | 無効 | Phase 5で別途厳格なレビューが必要 |
 
 ## Phase 1で確認した公式導線
 
-劇場一覧:
+### 劇場一覧
 
 ```text
 https://www.tohotheater.jp/theater/find.html
 ```
 
-劇場の上映スケジュールは、劇場一覧のvisible linkから同じallow-list対象である `*.tohotheater.jp` 配下へ遷移します。
+劇場一覧に表示されたlinkから、同じ許可domainである `*.tohotheater.jp` 配下の上映スケジュールへ進みます。
 
-2026-08-13時点で確認した例:
+2026-08-13に確認した例:
 
 ```text
 https://hlo.tohotheater.jp/net/schedule/036/TNPI2000J01.do
 ```
 
-`036` はTOHOシネマズ ららぽーと横浜のschedule識別子としてvisible theater linkから取得します。
+`036` はTOHOシネマズ ららぽーと横浜のスケジュール識別子として、画面に表示された劇場linkから取得します。
 
-また、1つのschedule routeを複数の劇場名が共有する公開UIもあります。確認済みの例では、TOHOシネマズ 日比谷 / TOHOシネマズ シャンテが同じschedule groupとして表示されます。このためadapterはschedule IDを単一劇場名と決め打ちせず、同じrouteに結び付くvisible theater nameを`aliases`として保持します。
+1つのスケジュール経路を複数劇場名が共有する公開UIも確認しています。たとえばTOHOシネマズ 日比谷とTOHOシネマズ シャンテは同じスケジュールgroupとして表示されます。
 
-adapterはこの公開Web UIのrendered DOMだけを読みます。network interception、XHR/fetchの解析、hidden JSON endpoint、private/internal APIの直接利用は行いません。
+そのためadapterはスケジュールIDを単一劇場名と決め打ちせず、同じ経路に結び付く表示上の劇場名を `aliases` として保持します。
 
-## Read Adapter実装
+このadapterが読むのは、ブラウザに表示された公開Web UIのDOMだけです。network interception、XHR/fetch解析、hidden JSON endpoint、private/internal APIの直接利用は行いません。
+
+## 上映情報adapter
 
 ### 劇場一覧
 
-`list_theaters` では、公式劇場一覧画面上のvisible anchorを対象にします。
+`list_theaters` は公式劇場一覧画面で実際に表示されているanchorだけを対象にします。
 
 採用条件:
 
-- HTTPS
-- `tohotheater.jp` またはそのsubdomainに厳密一致
-- visible theater link
-- `/net/schedule/{3桁}/TNPI2000J01.do` 形式の公開schedule route
-- `TOHOシネマズ ...` として読める劇場名
+- HTTPSであること
+- `tohotheater.jp` またはそのsubdomainへ厳密一致すること
+- 画面に表示されている劇場linkであること
+- `/net/schedule/{3桁}/TNPI2000J01.do` 形式の公開スケジュール経路であること
+- `TOHOシネマズ ...` として読める劇場名であること
 
-同じschedule ID / routeが設備別一覧などで重複していてもdeduplicateします。同じrouteに複数の劇場名が結び付く場合は、公開UIのgroupingとして`aliases`へまとめます。同一IDが異なるschedule routeを指すなど整合しない状態では `UI_STATE_CHANGED` で停止します。
+同じID・経路が設備別一覧などで重複している場合は重複排除します。同じ経路に複数の劇場名が結び付く場合は `aliases` にまとめます。
 
-劇場一覧の抽出数が極端に少ない場合も、UI変更とみなしてfail closedします。
+同じIDが異なる経路を指すなど、公開UIの情報に矛盾がある場合は `UI_STATE_CHANGED` で停止します。劇場一覧の取得件数がレビュー済み範囲から大きく外れた場合も、UI変更と判断して安全停止します。
 
 ### 日付
 
-`get_showtimes` はvisible date controlから日付を正規化します。
+`get_showtimes` は表示中の日付controlから日付を正規化します。
 
 - MCP inputは `YYYY-MM-DD`
-- UI上の `M/D` 等はAsia/Tokyoの現在日付を基準に年を補完
-- 年末年始のyear rolloverを考慮
-- selected stateは `aria-current` / `aria-selected` / active/current/selected系のvisible stateから確認
-- requested dateへ切り替えた後、同じ日付がselectedになったことを再読して確認
-- selected stateが0件または複数など曖昧なら停止
+- 画面上の `M/D` 等はAsia/Tokyoの現在日付を基準に年を補う
+- 年末年始の年またぎに対応する
+- 選択状態は `aria-current` / `aria-selected` やactive/current/selected系の表示状態から確認する
+- 日付を切り替えた後、要求した日付が実際に選択状態になったことを再読する
+- 選択状態が0件または複数など曖昧なら停止する
 
-公開されていない日付は推測せず、`dateAvailable=false` と現在visibleな `availableDates` を返します。
+公開されていない日付は推測せず、`dateAvailable=false` と現在表示されている `availableDates` を返します。
 
 ### 作品・上映回
 
-上映スケジュール領域だけを対象に、visible showtime controlを短いsemantic snapshotへ変換します。
+上映スケジュール領域だけを対象に、表示中の上映controlを短い構造化情報へ変換します。
 
-返却する主なfact:
+返却する主な項目:
 
 - provider
 - theater / theaterId
 - date
 - movie
-- startTime / endTime（visible control上で確認できる場合）
-- format（IMAX / IMAX LASER / MX4D / DOLBY CINEMA / SCREENX / TCX等。visible `SCREEN X` 表記もcanonical `SCREENX` へ正規化）
-- subtitle / dub表示
-- screen表示（明示されている場合）
-- availability表示（明示されている場合のみ）
+- startTime / endTime
+- format
+- 字幕・吹替
+- screen
+- availability
 - sourceUrl
 
-movie titleを1件に結び付けられない上映回が1つでもある場合、部分的に推測して返さず `UI_STATE_CHANGED` で全体を停止します。
+formatは、画面に表示されたIMAX / IMAX LASER / MX4D / DOLBY CINEMA / SCREENX / TCXなどを正規化します。`SCREEN X` のような表示はcanonicalな `SCREENX` に変換します。
 
-raw HTML、DOM dump、showtime datasetをMCP resultへ返したり永続保存したりしません。
+上映回を作品名へ一意に結び付けられないものが1件でもある場合、部分的に推測して返さず `UI_STATE_CHANGED` で全体を停止します。
 
-## Safety Boundary
+raw HTML、DOM dump、上映データ一式をMCP結果へ返したり永続保存したりしません。
 
-Phase 1 adapterで有効化するのはread-only上映取得だけです。Phase 3で追加したseat surfaceもread-onlyです。
+## 安全境界
 
-変更していないInvariant:
+Phase 1で有効にしたのは読み取り中心の上映情報取得です。Phase 3で追加した座席表も読み取り専用です。
 
-- domain allow-list
-- sensitive field拒否
-- generic clickのfinal purchase拒否
-- CAPTCHA/anti-bot challengeで停止
-- purchase confirmation TTL / one-shot / URL binding
-- final purchaseのruntime default無効
-- seat / checkout mutationのautomatic replay禁止
+維持している不変条件:
 
-`get_showtimes` は日付タブのような可逆な表示切替のみ行います。Phase 3のseat adapterはseat DOMを読みますがseat activationを実行しません。
+- 許可domainを限定する
+- sensitive fieldへの操作を拒否する
+- 汎用clickから最終購入へ進めない
+- CAPTCHA / anti-bot challengeでは停止する
+- purchase confirmationのTTL / one-shot / URL bindingを維持する
+- 最終購入はruntime既定で無効
+- 座席・checkoutの意味変更操作を自動再実行しない
+
+`get_showtimes` が行う変更は、日付タブのような可逆な表示切替だけです。座席表adapterは座席DOMを読みますが、座席を選択する操作は行いません。
 
 ## テスト
 
-Unit test:
+単体テスト:
 
-- TOHO日付正規化
-- 年末年始year rollover
-- official domain / lookalike domain判定
-- duplicate theater dedupe
+- TOHOの日付正規化
+- 年末年始の年またぎ
+- 公式domainとlookalike domainの判定
+- 重複劇場の排除
 - shared schedule routeのalias grouping
-- theater list構造崩れのfail-closed
+- 劇場一覧構造変更時の安全停止
 
 非購入live smoke:
 
@@ -129,60 +133,76 @@ Unit test:
 npm run smoke:toho
 ```
 
-smokeは低頻度・明示実行とし、CIの通常testには含めません。2026-08-13の実ブラウザ確認ではTOHOシネマズ ららぽーと横浜（id `036`）を使用し、official redirect後もreviewed schedule pathnameを維持、date identity一致、showtimes > 0を確認しました。staticな「販売期間外」rowもrendered public UIから取得し、availabilityを`unavailable`へ正規化できています。
+live smokeは低頻度で明示的に実行し、通常CIには含めません。
 
-確認対象:
+2026-08-13の実ブラウザ確認ではTOHOシネマズ ららぽーと横浜（id `036`）を使用し、公式redirect後もレビュー済みのpathnameを維持していること、日付identityが一致すること、上映回を1件以上取得できることを確認しました。
 
-1. 公式劇場一覧へ到達
-2. ららぽーと横浜をvisible theater linkとして1件に解決
-3. 上映スケジュール画面へ到達
-4. selected dateとavailable datesをsemanticに読む
-5. showtime resultがofficial `tohotheater.jp` source URLに紐づく
-6. seat selection / purchaseを実行しない
+「販売期間外」の行も公開画面から取得し、availabilityを `unavailable` に正規化できています。
 
-CAPTCHA/anti-bot等が表示された環境では突破せずsmokeを失敗させます。
+確認項目:
 
-## Phase 3 Seat Intelligence Discovery — 2026-08-17
+1. 公式劇場一覧へ到達する
+2. ららぽーと横浜を表示中の劇場linkとして一意に解決する
+3. 上映スケジュールへ到達する
+4. 選択日付と利用可能日付を意味的に読む
+5. 上映結果が公式 `tohotheater.jp` のsource URLに結び付く
+6. 座席選択や購入を行わない
 
-Phase 3 Discoveryでは、ららぽーと横浜の現行schedule surfaceを確認した後、追加のbounded validationでvisible showtimeとvisible non-member continuationを通り、live `座席指定` surfaceまで到達しました。座席自体は一切クリックしていません。
+CAPTCHAやanti-bot画面が表示された場合は突破せず、smokeを失敗として終了します。
 
-公式公開情報から確認できた境界:
+## Phase 3 座席情報調査 — 2026-08-17
+
+ららぽーと横浜の現行スケジュールから、表示中の販売可能な上映回と非会員継続導線を使い、実際の `座席指定` 画面まで到達しました。初期調査では座席自体をクリックしていません。
+
+公式公開情報から確認できたこと:
 
 - vitの購入手順は「作品と日時を選択」→「座席を選ぶ」の順
-- selected seatは赤、販売済みseatは黒と明記
-- 車椅子スペースもvitの座席選択画面から購入可能
-- TOHO-ONE会員登録なしでも購入可能
-- FAQでは「希望座席を決定してから15分以内」に購入完了しないとtimeout
-- 仮押さえしたseatは一定時間後に再解放
+- 選択中の座席は赤、販売済み座席は黒と明記されている
+- 車いすスペースもvitの座席選択画面から購入できる
+- TOHO-ONE会員登録なしでも購入できる
+- FAQでは「希望座席を決定してから15分以内」に購入完了する必要がある
+- 仮押さえした座席は一定時間後に再解放される
 
-このためTOHOをv0.3.0のfirst providerに選定しました。追加validationではseat-map entry時にvisible countdownもselected-seat stateもなく、read-only entryの安全ゲートを通過しました。ここでの基準は「全server-side stateがゼロ」ではなく、seat hold / material reservation mutation / availability impactを起こさないことです。#32でadapter / fail-closed test / isolated live smokeまで完了し、TOHO `seatMap=true` へ昇格しました。`seatSelection=false` は維持します。
+この根拠からTOHOをv0.3.0の最初の対象にしました。
 
-v0.3.0 scope:
+座席表へ入った直後にはcountdownも選択済み座席もなく、**画面へ入るだけでは座席holdや他利用者への空席影響を起こさない**という読み取り専用の安全ゲートを通過しました。
 
-- read-only `get_seat_availability`
+#32でadapter、安全停止test、isolated live smokeまで完了し、TOHOは `seatMap=true` になっています。`seatSelection=false` は維持します。
+
+v0.3.0で有効にした範囲:
+
+- 読み取り専用の `get_seat_availability`
 - `recommend_seats`
-- row / seat normalization + rendered gap boundaries
-- rendered SCREEN markerによるfront/rear orientation
-- adjacent / center / rear / rear-middle / aisle scoring
-- context / layout / stateの3 fingerprintによるstale detection
+- 行・座席の正規化と表示上の隙間境界
+- 画面上のSCREEN markerによる前後方向の判定
+- 隣席・中央・後方・後方中央・通路寄りのscore
+- context / layout / stateの3 fingerprintによる鮮度確認
 
-`select_seats` / seat click / hold生成は対象外です。
+`select_seats`、座席click、hold生成は対象外です。
 
-#32実装ではexact theater/date/movie/startTime/screenを1上映にbindingし、visible `販売中` controlからのみ進入します。会員促進面は観測済みJ03/J04 routeとexact `ログインせずに購入する` controlだけをprovider-specific intermediate allow-listで扱い、generic click policyは緩和していません。live seat DOMはprovider-visible `A-6` / `HC-1` 等のidentity、clickable `seatSelect(...)` attributeの**存在だけ**、non-clickable状態、rendered grid slotを読みます。`seatSelect(...)` 自体は実行しません。
+#32ではtheater / date / movie / startTime / screenを1上映へ厳密に結び付け、表示中の `販売中` controlからだけ座席画面へ進みます。
 
-#33ではrendered `#screen-defimg.screen-map` のofficial `screen.gif`とseat位置関係を検証できた場合だけ`screenEdge=top`を付与します。`recommend_seats`は同一seat mapを2回readし、context/layout/stateのSHA-256 fingerprintが全一致した時だけ2回目の状態をscoreします。special seatはdefault候補から除外し、明示opt-inが必要です。
+会員促進画面は、観測済みのJ03/J04 routeと `ログインせずに購入する` controlだけをTOHO固有の中間許可対象として扱います。汎用clickの許可範囲は広げません。
 
-Discovery詳細: [`../PHASE3_SEAT_DISCOVERY.md`](../PHASE3_SEAT_DISCOVERY.md)
+座席DOMでは、`A-6` / `HC-1` 等の表示上のidentity、`seatSelect(...)` attributeの**存在**、非clickable状態、表示上のgrid slotを読みます。`seatSelect(...)` 自体は実行しません。
 
-## Phase 4 Checkout Preparation Discovery — 2026-08-17
+#33では `#screen-defimg.screen-map` の公式 `screen.gif` と座席位置の関係を画面上で確認できた場合だけ `screenEdge=top` を付与します。
 
-Phase 4 Discoveryではseat clickを行わず、公式公開手順・FAQ・既存Phase 3実測からcheckout boundaryを再整理しました。全体のmatrixは [`../PHASE4_CHECKOUT_DISCOVERY.md`](../PHASE4_CHECKOUT_DISCOVERY.md)、trackingは#48、first-provider implementation gateは#50です。
+`recommend_seats` は同じ座席表を2回読み、context / layout / stateのSHA-256 fingerprintがすべて一致した場合だけ2回目の状態をscoreします。special seatは既定候補から除外し、明示的なopt-inが必要です。
 
-### Checkout stage
+詳細: [`../PHASE3_SEAT_DISCOVERY.md`](../PHASE3_SEAT_DISCOVERY.md)
 
-公式公開情報から確認できる大枠は:
+## Phase 4 チェックアウト調査 — 2026-08-17
 
-1. 作品 / 日時
+Phase 4では、公式購入手順、FAQ、Phase 3の実測からcheckout境界を再整理しました。
+
+全体整理: [`../PHASE4_CHECKOUT_DISCOVERY.md`](../PHASE4_CHECKOUT_DISCOVERY.md)  
+追跡: #48  
+TOHO実装ゲート: #50
+
+### 公開手順上の段階
+
+1. 作品・日時
 2. 座席
 3. チケット種別
 4. 購入者情報
@@ -190,83 +210,106 @@ Phase 4 Discoveryではseat clickを行わず、公式公開手順・FAQ・既�
 6. 購入内容確認
 7. 購入完了
 
-TOHO-ONEへログインせず購入できるguest pathは既存review済みです。ただしmember authentication、購入者情報、payment、consent/final purchaseはPhase 4で自動化しません。
+TOHO-ONEへログインせず購入できるguest pathはレビュー済みです。ただし、会員認証、購入者情報、支払い、利用規約同意、最終購入はPhase 4で自動化しません。
 
-### Seat hold Gate 0
+### 座席hold Gate 0
 
-公式FAQの15分timeoutはhold/sessionがmaterialな時間制約を持つことを示します。#50ではDiscovery後に、fresh temporary profileと1上映・1通常席だけを使ったbounded validationを実施しました。
+#50では、fresh temporary profileと1上映・通常席1席だけを使った限定検証を行いました。
 
-2026-08-17 Gate 0で確認できた事実:
+対象:
 
-- 対象はTOHOシネマズ ららぽーと横浜、2026-08-18 21:50 `隣人たち（字幕版）` Screen 4、通常席 `A-2` の1席だけ
-- mutation前に2回のread-only observationでcontext / layout / state fingerprintが一致
-- exact `#A-2` がviewport内のpointer hit targetであることを再確認した後、実seat activationは1回だけ実施
-- rendered stateは `A-2 空席(選択可)` / `seat_1.gif` から `A-2 選択中` / `seat_3.gif` へ変化
-- 直後に別fresh profileで同じ上映を再読しても `A-2` は `available` のままで、pre-clickとseat-state fingerprintも一致
-- したがって**individual seat activation自体はcross-session/server-side seat holdを開始しない**。documented hold triggerはseat clickより後段
-- 後続B1 preflightで、公式rendered instructionがseat selection後に `確認する` を要求することを再確認。live isolated sessionでもseat imageが `選択中` になっただけではselected-seat summaryがadvanceせず、`確認する` はinteractiveにならなかった
-- このためdirect seat-image activationを「seat決定」と同一視しない。FAQの15分起点である「希望座席を決定」と最も近いcandidate boundaryとして `確認する` を別Gate 0bでreviewする
-- `確認する` のhold semanticsが未証明の間はagent/Humanどちらにも自動continuationを促さずfail closedする
-- legal consent `利用規約に同意して次へ` はその後のHuman-only boundary。post-confirm/post-consent hold/release semanticsは未証明
-- B1/Gate 0bの追加isolated validationは同じshowtime / ordinary seat `A-2`だけをsetupに使用し、alternate seat probingは行っていない。default headless viewport `756x469`ではseat image selection後にrendered horizontal-orientation blockerが出て `確認する` は0x0/non-interactiveだった
-- temporary desktop launch `1280x900`（rendered inner viewport `1280x813`）でも、seat imageを`選択中`へしただけでは `#fooder_menu_conf_bt` / `確認する` は0x0/non-interactiveのままだった。したがってorientationだけを原因と断定せず、direct seat-image activationがproviderのcomplete seat-decision sequenceを満たしていない可能性を含めてGate 0bで扱う
-- これら追加validationで `確認する`、terms checkbox、`利用規約に同意して次へ` は一度もclickしていない
+- TOHOシネマズ ららぽーと横浜
+- 2026-08-18 21:50
+- `隣人たち（字幕版）`
+- Screen 4
+- 通常席 `A-2`
 
-同じGate 0で現行rendered UI driftも確認しました。車いす席は旧来想定の `HC-*` IDに限られず、Screen 4ではvisible `113席 + 2車いす席` とexactly two `seat_4.gif` (`A-10`, `A-11`) が対応し、別Screenでも同じ構造を確認しました。このためwheelchair attributeはprovider-visible `seat_4.gif` とvisible capacityを相互検証して付与します。またselected-seat signalは旧 `#seatList1` だけでは不十分で、現行UIの `seat_3.gif` + exact `<seatId> 選択中` も明示的に検出し、read-only adapterでは1席でもselectedならfail closedします。
+確認した事実:
 
-#50 internal sliceでは、capabilityを上げずに次のprimitiveを実装します:
+- 変更前に読み取り専用観測を2回行い、context / layout / state fingerprintが一致
+- `#A-2` がviewport内の正確なpointer対象であることを再確認してから、座席activationを1回だけ実施
+- 表示状態は `A-2 空席(選択可)` / `seat_1.gif` から `A-2 選択中` / `seat_3.gif` へ変化
+- 直後に別fresh profileから同じ上映を読むと `A-2` は引き続き `available`
+- pre-clickと別profileの座席状態fingerprintも一致
 
-- exact ordinary seatだけを対象にする
-- `elementFromPoint` がexact seat ID / `IMG`に一致してからpointer dispatch
-- alternate seat / retry / speculative selectionなし
-- 複数intentの場合も1席ごとにbaselineからexpected state fingerprintを再構成し、自分が選択したseat以外のstate変化があれば次のclick前に停止
-- special/accessibility seatはfirst sliceではmutation前に拒否
-- exact selected setを確認後も、rendered `確認する` が存在する現行flowでは`UNREVIEWED_INTERACTION`で停止。`確認する`を自動clickしない
-- `確認する` Gate 0bを通過したprovider stateだけが、後続 `利用規約に同意して次へ` Human Handoff候補になれる
+したがって、**個別座席を画面上で選択しただけでは、他sessionから見えるserver-side holdは開始しない**ことが確認できました。
+
+その後のB1事前確認で、TOHO画面には座席選択後に `確認する` という別の座席決定段階があることが分かりました。
+
+座席画像が `選択中` になっただけでは選択座席summaryが先へ進まず、`確認する` も操作可能になりませんでした。そのため、直接seat imageを選んだことをFAQ上の「希望座席を決定」と同一視しません。
+
+`確認する` を15分hold開始点の有力候補としてGate 0bで別途レビューします。
+
+Gate 0bが未完了の間は:
+
+- `確認する` を自動操作しない
+- 利用規約同意へ自動継続しない
+- 別座席を試さない
+- 推測によるretryをしない
+- `seatSelection=false`
+- `checkoutPreparation=false`
+
+を維持します。
+
+### 現行UIの追加確認
+
+現行UIでは車いす席が必ずしも旧想定の `HC-*` IDではありません。
+
+Screen 4では画面表示の `113席 + 2車いす席` と、ちょうど2つの `seat_4.gif`（`A-10`, `A-11`）が対応していました。別Screenでも同様の構造を確認したため、wheelchair属性はprovider-visibleな `seat_4.gif` と表示上の収容数を相互検証して付与します。
+
+また、選択済み座席の検出は旧 `#seatList1` だけに依存せず、現行UIの `seat_3.gif` と `<seatId> 選択中` も確認します。読み取り専用adapterでは、1席でも選択済みなら安全停止します。
+
+### #50内部実装の境界
+
+- 指定された通常席だけを対象にする
+- `elementFromPoint` が正確なseat ID / `IMG`へ一致してからpointerを送る
+- 別座席・再試行・推測選択を行わない
+- 複数座席でも、1席ごとにbaselineから期待状態を再構成し、自分が選択した座席以外に変化があれば次のclick前に停止する
+- special / accessibility seatは初期sliceでは変更前に拒否する
+- 正確な選択済みseat setを確認しても、`確認する` が未レビューなら `UNREVIEWED_INTERACTION` で停止する
+- `確認する` Gate 0b通過後だけ `利用規約に同意して次へ` のHuman Handoff候補になれる
 - consent / ticket / purchaser PII / payment / final purchaseは操作しない
-- Human Handoff後にseat mutationをautomatic replayしない
+- Human Handoff後に座席変更を自動再実行しない
 
-Gate 0は**部分的に通過**していますが、post-consent hold/release境界が未証明なので `seatSelection=false` / `checkoutPreparation=false` を維持します。internal adapterやmilestoneの存在をcapability approvalとして扱いません。
+Gate 0は一部だけ確認済みですが、hold開始・解放境界が未証明なので対応機能は有効化していません。
 
-Post-consent continuationは、同じinvocationを再開してseat mutationをreplayする方式ではなく、explicit reviewed Human Handoff後に**fresh semantic action**がcurrent rendered stageを再検証してintentへre-bindする方式です。A1/A2ではこのplumbingを実装済みで、handoff actionはprovider/boundary/continuation digestだけ、material bindingは短命・process-local・one-shotです。PII/credential/payment data、cookie、opaque URL query/tokenは保持しません。bindingはexact browser target / provider / intent / showtime / selected seats / pre-Human fingerprintsへbindし、cancel/browser reset/TTL/owned context mismatchで破棄します。Human完了時もpre-consent `利用規約に同意して次へ` が残っていればHumanへ戻し、元seat mutationはreplayしません。provider Gate 1ではHuman consent直後のrendered stage / hold timer / fresh-session availabilityをread-onlyで観測し、holdが確認できた場合の最初のrelease proofはguessed cancel操作ではなく自然timeoutによる解放を優先します。詳細: [`../PHASE4_TOHO_CONTINUATION_DESIGN.md`](../PHASE4_TOHO_CONTINUATION_DESIGN.md)。
+同意後の継続処理は、同じ呼び出しを再開して座席操作を繰り返す方式ではありません。明示的なHuman Handoffの後に、**新しい意味操作**として現在の画面を再検証し、元の購入意図へ結び直します。
 
-### Human-only boundary
+詳細: [`../PHASE4_TOHO_CONTINUATION_DESIGN.md`](../PHASE4_TOHO_CONTINUATION_DESIGN.md)
 
-初期Phase 4では以下をHumanへ戻します:
+### 人間だけが扱う境界
+
+初期Phase 4では次をHuman Handoffへ戻します。
 
 - password / member credential
 - OTP / MFA / challenge
-- purchaser name / phone / email / birth date
-- legal/terms consent
+- 購入者の氏名 / 電話番号 / メールアドレス / 生年月日
+- 利用規約への同意
 - payment credential / wallet approval
-- final purchase
+- 最終購入
 
-これは単なるsecret deny-listではなく、新しいPII ingress / logging / result pathを作らないためのPhase 4 product boundaryです。
+これは単なるsecret deny-listではなく、新しいPII入力経路・ログ・結果経路を作らないためのPhase 4の製品境界です。
 
-### TOHO first vertical slice decision
+### TOHOを最初の候補としている理由
 
-TOHOをconditional first providerとして維持します。理由はPhase 3のseat identity/freshness infrastructure、review済みguest continuation、公開されたcheckout stage/15分timeout情報が3社の中で最も揃っているためです。
+TOHOは、Phase 3の座席identity・鮮度確認基盤、レビュー済みguest continuation、公開されたcheckout手順・15分timeout情報が3社の中で最も揃っています。
 
-ただしfirst providerという位置付けはcapability approvalではありません。Gate 0でhold/release semanticsを安全に証明できない場合、TOHOはblockedのままにし、`seatSelection` / `checkoutPreparation` をfalseで維持します。
+ただし「最初の候補」であることはcapability approvalを意味しません。Gate 0b / Gate 1でholdと解放の意味を安全に証明できない場合は、引き続きblockedのままにします。
 
 ## 今後
 
 Phase 4:
 
-- #49 provider-neutral `prepare_checkout` contract/core
-- #50 TOHO Gate 0 + first adapter
-- transaction truthはcaller inputでなくcurrent rendered UIから再取得
-- ticket eligibilityをMCPが推測しない
-- checkout preparationとPhase 5 final purchaseを分離
+- #49 — provider共通 `prepare_checkout` contract/core
+- #50 — TOHO Gate 0b / Gate 1と最初のprovider adapter
+- 取引上の真実はcaller inputではなく現在の画面から再取得する
+- 券種資格をMCPが推測しない
+- checkout preparationとPhase 5の最終購入を分離する
 
-Final purchase前:
-
-- 現行規約/サイトポリシーを再確認
-- exact final controlを確認
-- duplicate submission防止
-- `PURCHASE_UNKNOWN` handling
-- timeout/disconnect後の自動replay禁止
+最終購入を検討する前には、現行規約・サイトポリシー、正確な最終control、重複送信防止、`PURCHASE_UNKNOWN`、timeout/disconnect後の再実行禁止を改めて確認します。
 
 ## 方針
 
-TOHOはPhase 1 read-only上映取得とPhase 3 read-only seat intelligenceを有効化済みです。Phase 4ではseat selection / checkout preparationを別capabilityとして個別reviewし、Gate 0を通過した範囲だけ段階的に昇格させます。final purchaseはPhase 5まで無効のままです。
+TOHOではPhase 1の上映情報取得とPhase 3の読み取り専用座席情報を有効化済みです。
+
+Phase 4の座席選択・チェックアウト準備は別機能として個別にレビューし、安全ゲートを通過した範囲だけ段階的に有効化します。最終購入はPhase 5まで無効のままです。

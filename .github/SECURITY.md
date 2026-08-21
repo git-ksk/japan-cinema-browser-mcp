@@ -1,23 +1,55 @@
-# Security Policy
+# セキュリティポリシー
 
-## Supported versions
+## 対応バージョン
 
-Security fixes are currently made on the latest `main` branch. There is no separate long-term-support release line yet.
+現在、セキュリティ修正は最新の `main` を対象に行います。長期サポート用の別リリース系列はまだ設けていません。
 
-## Reporting a vulnerability
+## 脆弱性を報告する方法
 
-Please do not publish exploit details, credentials, private browsing data, or other sensitive material in a public issue.
+脆弱性の詳細、攻撃手順、認証情報、Cookie、セッショントークン、個人情報、決済情報、機密性のある閲覧内容を公開Issueへ投稿しないでください。
 
-For vulnerabilities in this repository, use GitHub Private Vulnerability Reporting. From the repository's **Security** tab, choose **Advisories** and **Report a vulnerability**. Do not use a public issue for vulnerability details.
+このリポジトリの脆弱性は、GitHubの **Private Vulnerability Reporting** から報告してください。
 
-If GitHub's private reporting UI is temporarily unavailable, contact the maintainer through the GitHub account associated with this repository and ask for a private reporting channel before sending sensitive details. A public issue may be used only to request contact, without vulnerability details.
+1. リポジトリの **Security** タブを開く
+2. **Advisories** を開く
+3. **Report a vulnerability** を選ぶ
 
-A useful report includes the affected commit/version, the impacted MCP tool or provider flow, reproduction steps, expected versus observed behavior, and whether the issue can cross the documented browser, provider, capability, secret, or purchase-confirmation boundaries.
+GitHubの非公開報告画面を一時的に利用できない場合は、リポジトリ管理者のGitHubアカウントへ、まず「非公開の連絡手段が必要」とだけ連絡してください。公開の場所へ脆弱性の内容を書かないでください。
 
-## Security boundaries
+## 報告に含めてほしい情報
 
-The project intentionally uses rendered public cinema web UI through Chrome + direct CDP. It does not rely on private/internal APIs, hidden JSON endpoints, network interception, Cookie/token dumps, or CAPTCHA/challenge bypasses.
+可能な範囲で次を含めてください。
 
-Provider capabilities are fail-closed. Seat map, seat selection, checkout preparation, and purchase submission are currently disabled for all providers. Generic navigation is limited to reviewed public read surfaces; generic click/fill must not bypass disabled provider capabilities. Final purchase, if enabled in a future reviewed implementation, remains behind the separate one-shot, short-TTL confirmation flow. Human-only browser state uses Execution Handoff with exclusive Agent/Human authority, exact invocation/request-state binding, resource-epoch fencing, and consumer-defined replay policy. Human completion is not transaction approval, and any new Human intervention invalidates prepared purchase confirmation state.
+- 影響するコミットまたはバージョン
+- 影響するMCPツール、映画館、処理経路
+- 安全な再現手順
+- 期待した挙動と実際の挙動
+- ブラウザ境界、映画館の許可範囲、機能制限、認証情報、購入確認のいずれを越えられる可能性があるか
 
-See `docs/SECURITY.md`, `COMPLIANCE.md`, and `docs/PROVIDERS.md` for the detailed threat model and provider-specific review boundaries.
+機密情報を再現データとして含める必要はありません。
+
+## 主なセキュリティ境界
+
+このプロジェクトは、Chrome + CDPを使って映画館の**公開Web画面**を操作します。
+
+次の方法には依存しません。
+
+- 非公開API・内部API
+- 隠しJSONエンドポイント
+- 通信内容の傍受による内部API探索
+- Cookieやトークンのダンプ
+- CAPTCHAやアクセスチャレンジの回避
+
+映画館ごとの機能は安全側に閉じます。現在は3社とも座席表の読み取りまで有効ですが、座席選択、購入準備、最終購入は無効です。
+
+汎用的な画面遷移・クリック・入力によって、この制限を迂回してはいけません。
+
+将来購入機能を有効にする場合も、短時間・1回限りの購入確認、現在画面の再検証、購入結果不明時の再実行禁止を維持します。
+
+Human Handoffでは、AgentとHumanの実行権限を同時に持たせず、対象の呼び出しと状態を厳密に結び付けます。人間操作の完了は購入承認ではありません。また、新しいHuman Handoffを開始した時点で準備済みの購入確認を無効化します。
+
+詳しい脅威モデルと映画館ごとの境界は次を参照してください。
+
+- [`../docs/SECURITY.md`](../docs/SECURITY.md)
+- [`../COMPLIANCE.md`](../COMPLIANCE.md)
+- [`../docs/PROVIDERS.md`](../docs/PROVIDERS.md)
