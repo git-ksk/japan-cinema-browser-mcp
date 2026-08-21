@@ -1,27 +1,36 @@
-# Cloud Run deployment
+# Cloud Runへのデプロイ
 
-This document defines the bounded single-user remote runtime. Local stdio remains the default deployment model.
+この文書では、`japan-cinema-browser-mcp` をCloud Runで動かす場合の、**1ユーザー限定のリモート実行構成**を説明します。
 
-## Scope
+標準の実行方式は引き続きローカルstdioです。Cloud Run構成は、複数ユーザー向けの汎用MCPホスティングを提供するものではありません。
 
-The Cloud Run profile is intentionally narrow:
+## 対象範囲
 
-- single logical user / one allowlisted Firebase UID
-- MCP OAuth 2.1 boundary for remote clients
-- Firebase Authentication only for the Human authorization step
-- headless dedicated Chromium
-- read/navigation cinema workflows
-- no external CDP attachment
-- no purchase execution
-- no remote Human Handoff
-- no CAPTCHA, MFA, challenge, or anti-bot bypass
-- no multi-user browser sharing
+Cloud Run構成は意図的に狭くしています。
 
-A cinema-site sign-in, consent, or access challenge fails closed. Use the local headed stdio runtime when manual cinema-site handoff is required.
+- 論理ユーザーは1人だけ
+- 許可するFirebase UIDは1件だけ
+- リモートMCPクライアントとの認証境界はMCP OAuth 2.1
+- Firebase Authenticationは、人間が認可するときの本人確認にのみ使用
+- 専用のheadless Chromiumを使用
+- 映画館サイトの読み取り・画面遷移だけを対象にする
+- 外部CDP接続は禁止
+- 購入実行は禁止
+- リモートでHuman Handoffは行わない
+- CAPTCHA、MFA、アクセスチャレンジ、anti-bot機構を回避しない
+- 複数ユーザーで同じブラウザ状態を共有しない
 
-## Runtime contract
+映画館サイト側でログイン、同意、アクセスチャレンジなど人間の操作が必要になった場合は安全側に停止します。手動操作が必要な利用には、ローカルの画面ありstdio構成を使ってください。
 
-Run the container with `node dist/index.js --http` and configure:
+## 起動設定
+
+コンテナは次で起動します。
+
+```bash
+node dist/index.js --http
+```
+
+少なくとも次の環境変数を設定します。
 
 ```text
 CINEMA_REMOTE_MODE=true
@@ -39,7 +48,7 @@ MCP_FIREBASE_LOOKUP_TIMEOUT_MS=5000
 CINEMA_OPERATION_TIMEOUT_MS=90000
 ```
 
-Optional OAuth lifetime controls default to:
+OAuth関連の有効期限は、未指定時に次を使います。
 
 ```text
 MCP_OAUTH_AUTHORIZATION_TTL_SECONDS=600
@@ -49,62 +58,112 @@ MCP_OAUTH_REFRESH_TTL_DAYS=30
 MCP_OAUTH_CLIENT_METADATA_TIMEOUT_MS=5000
 ```
 
-Do not commit live project-specific configuration into this public repository. The Firebase Web API key identifies the Firebase project; it is not accepted as caller authorization by itself. OAuth access/refresh tokens, authorization codes, Firebase ID/refresh tokens, and passwords are credentials and must never be logged or committed.
+本番環境固有の値をこの公開リポジトリへコミットしないでください。
 
-## Remote authentication flow
+Firebase Web API keyはFirebaseプロジェクトを識別する値であり、それだけで呼び出しを許可する認証情報ではありません。一方、OAuth access token、refresh token、authorization code、Firebase ID token、Firebase refresh token、passwordは認証情報です。ログやリポジトリへ残してはいけません。
 
-The remote MCP endpoint is an OAuth Resource Server and the same origin exposes the bounded Authorization Server needed by supported MCP clients:
+## リモート認証の流れ
+
+リモートMCPエンドポイントはOAuth Resource Serverとして動作し、同じオリジンから対応クライアント向けの限定的なAuthorization Serverも提供します。
 
 ```text
 MCP client
   -> Protected Resource Metadata
   -> Authorization Server metadata
   -> CIMD client metadata validation
-  -> /authorize with PKCE S256 + exact resource
-  -> Human enters existing Firebase email/password in browser
-  -> browser sends password directly to Firebase Authentication
-  -> browser sends only the resulting Firebase ID Token to /authorize/complete
-  -> Cinema verifies Firebase UID against the single-owner allowlist
-  -> one-shot authorization code
-  -> /token issues resource-bound OAuth access + rotating refresh token
-  -> /mcp validates scope/resource/expiry and restores the Firebase UID principal
+  -> /authorize + PKCE S256 + exact resource
+  -> 人間がブラウザ上でFirebaseへログイン
+  -> passwordはブラウザからFirebase Authenticationへ直接送信
+  -> Firebase ID Tokenだけを /authorize/complete へ送信
+  -> CinemaがFirebase UIDを1ユーザー許可リストと照合
+  -> 1回限りのauthorization codeを発行
+  -> /token でresource-bound access token + rotating refresh tokenを発行
+  -> /mcp がscope/resource/expiryを検証
 ```
 
-The Cinema server never receives the Firebase password. It receives a short-lived Firebase ID Token only at authorization completion and does not persist it.
+Cinema serverはFirebase passwordを受け取りません。認可完了時に短命なFirebase ID Tokenだけを受け取り、永続保存しません。
 
-CIMD client identifiers are accepted only from the explicitly configured HTTPS host allowlist. The fetched metadata must contain the exact `client_id`, and the requested `redirect_uri` must exactly match one of the metadata document's registered redirect URIs. Redirect following is disabled for the metadata fetch.
+### CIMDとredirect URI
 
-Dynamic Client Registration is not exposed by this profile. The advertised public-client token endpoint authentication method is `none`, with PKCE S256 mandatory for authorization-code exchange.
+CIMD client identifierは、設定で明示したHTTPS hostの許可リストに含まれるものだけを許可します。
 
-OAuth control-plane records in this Cloud Run profile use Firestore. Random authorization-request handles, codes, access tokens, and refresh tokens are never stored raw: their SHA-256 values are used as document identities. Authorization requests/codes are one-shot, refresh tokens rotate on use, and expired records are removed best-effort.
+取得したmetadataについて次を厳密に確認します。
 
-Firestore is a deployment choice here, not an OAuth protocol requirement. A different shared durable store can be used if it preserves the same security semantics: atomic one-shot consumption where required, refresh-token rotation/revocation, TTL/expiry handling, resource/client/principal binding, and safe behavior across restarts or multiple instances. The current repository implementation ships only the Firestore-backed OAuth store, so another backend requires a compatible `CinemaOAuthStore` implementation rather than a configuration-only switch.
+- `client_id` が完全一致する
+- `redirect_uri` がmetadataに登録されたURIと完全一致する
+- metadata取得時にredirectを追従しない
 
-## Endpoints
+この構成ではDynamic Client Registrationを公開しません。
 
-- `GET /health` — passive unauthenticated liveness; does not start Chromium
-- `GET /.well-known/oauth-protected-resource/mcp` — Protected Resource Metadata
-- `GET /.well-known/oauth-authorization-server` — Authorization Server Metadata
-- `GET /authorize` — starts OAuth authorization after CIMD/resource/PKCE validation
-- `POST /authorize/complete` — consumes a verified Firebase identity and creates a one-shot authorization code
-- `POST /token` — authorization-code or refresh-token exchange
-- `POST /revoke` — token revocation
-- `GET /ready` — OAuth-authenticated browser readiness
-- `POST /mcp` — OAuth-authenticated Streamable HTTP MCP endpoint
+public clientのtoken endpoint authentication methodは `none` とし、authorization-code交換ではPKCE S256を必須とします。
 
-`/mcp` and `/ready` require the `mcp:tools` scope. `offline_access` is advertised by the Authorization Server for refresh-capable sessions but is not advertised by the Protected Resource Metadata as a resource scope.
+## OAuth状態の保存
 
-Cloud Run reserves some paths ending in `z`; the deployment therefore uses `/health` and `/ready`, not `healthz` / `readyz`.
+現在のCloud Run実装では、OAuthの共有状態をFirestoreへ保存します。
 
-## Usage accounting and rate limiting
+次の値はraw値のまま保存しません。
 
-Cinema MCP does not define, bundle, or configure a usage-accounting or quota provider. Operators that need quotas, billing guards, or rate limiting should compose them at the authenticated deployment boundary (for example, a gateway or sidecar) using the implementation and storage backend appropriate to their environment.
+- authorization request handle
+- authorization code
+- access token
+- refresh token
 
-That external layer must not receive browser page payloads, credentials, cookies, OAuth bearer material, payment/auth data, or become an alternate execution/replay authority. Cinema MCP remains responsible for its browser, provider-policy, Human Handoff, and purchase-safety boundaries.
+SHA-256値をdocument identityとして利用し、次の性質を維持します。
 
-## Free-tier-oriented deployment profile
+- authorization request / codeは1回限り
+- refresh tokenは利用時にローテーション
+- 期限切れrecordは可能な範囲で削除
+- resource / client / principalへ結び付ける
 
-The recommended low-traffic profile is:
+Firestoreは現在の実装上の選択であり、OAuthプロトコル自体の必須要件ではありません。
+
+別の保存先へ置き換える場合も、次を維持する必要があります。
+
+- 必要箇所での原子的な1回限りの消費
+- refresh tokenのローテーションと失効
+- TTLと期限管理
+- resource / client / principalへの結び付け
+- 再起動や複数instanceが存在しても安全に扱えること
+
+現時点でリポジトリに含まれるのはFirestore版 `CinemaOAuthStore` だけです。
+
+## HTTPエンドポイント
+
+| エンドポイント | 用途 |
+|---|---|
+| `GET /health` | 認証不要の生存確認。Chromiumは起動しない |
+| `GET /.well-known/oauth-protected-resource/mcp` | Protected Resource Metadata |
+| `GET /.well-known/oauth-authorization-server` | Authorization Server Metadata |
+| `GET /authorize` | CIMD / resource / PKCE検証後に認可開始 |
+| `POST /authorize/complete` | 検証済みFirebase identityから1回限りのauthorization codeを作成 |
+| `POST /token` | authorization code / refresh token交換 |
+| `POST /revoke` | tokenの失効 |
+| `GET /ready` | OAuth認証済みのブラウザ準備確認 |
+| `POST /mcp` | OAuth認証済みのStreamable HTTP MCP |
+
+`/mcp` と `/ready` は `mcp:tools` scopeを必須とします。
+
+Cloud Runでは末尾が `z` の一部パスに予約上の制約があるため、`healthz` / `readyz` ではなく `/health` / `/ready` を使います。
+
+## 利用量制御とレート制限
+
+Cinema MCP本体は、利用量集計、quota、課金防止、レート制限を内包しません。
+
+必要な場合は、認証済みのデプロイ境界にgatewayやsidecarを組み合わせてください。
+
+その外部層へ次を渡してはいけません。
+
+- ブラウザページ本文
+- 認証情報
+- Cookie
+- OAuth bearer material
+- 決済・認証データ
+
+また、外部の利用量制御層を、Cinema MCPとは別の実行権限・再実行権限として扱わないでください。
+
+ブラウザ操作、映画館ごとの許可範囲、Human Handoff、購入安全性はCinema MCP側の責務です。
+
+## 低トラフィック向け推奨構成
 
 ```text
 region: us-central1
@@ -120,24 +179,50 @@ browser operation timeout: 90 seconds per explicit provider target
 find_showtimes aggregate timeout: 275 seconds for three targets
 ```
 
-`4 GiB` is intentional. Live Cloud Run validation on 2026-08-16 first observed Chromium crossing the previous 1 GiB limit (1047 MiB used), then reproduced the same failure at the 2 GiB limit (2054 MiB used) during sequential provider reads. The 4 GiB profile preserves headroom for the controlled Chromium session while concurrency remains 1. Do not reduce memory without measuring browser reliability under the three-provider workflow.
+### メモリを4 GiBにしている理由
 
-The remote provider timeout is set to `90000` ms because live AEON validation from Cloud Run still exceeded 60 seconds after the memory OOM was removed. This does not bypass the public-UI safety path: AEON still re-resolves the theater from the rendered theater list and follows reviewed public navigation before reading the rendered schedule.
+2026-08-16の実環境確認では、Chromiumが1 GiB構成の上限を超え、その後2 GiB構成でも複数映画館を順番に読む処理で上限へ到達しました。
 
-The longer HTTP request envelope does **not** make provider reads unbounded. `CINEMA_OPERATION_TIMEOUT_MS` remains the per-provider semantic budget. `find_showtimes` runs at most three explicit targets sequentially, isolates a timed-out target, and gives each target its full bounded provider budget before the aggregate envelope can fire. With the recommended 90-second provider budget, three targets are bounded to 275 seconds of browser work. The 360-second HTTP timeout leaves room for cold Chromium startup plus authentication/proxy overhead so a structured partial result can reach the MCP client instead of being cut off by transport cancellation.
+そのため、同時実行数を1に固定したうえで4 GiBを標準構成としています。メモリを下げる場合は、3社を読む処理でブラウザの安定性を実測してください。
 
-Usage quotas and billing guards, when desired, belong to the external authenticated deployment boundary. Cloud Run billing alerts remain recommended regardless of whether such an external control is present.
+### タイムアウト
 
-Keep only the actively deployed container image where practical. Chromium makes the image materially larger than an API-only service.
+`CINEMA_OPERATION_TIMEOUT_MS=90000` は、1映画館あたりの意味解析処理の上限です。
 
-## Identity boundary
+`find_showtimes` は最大3件を順番に処理します。90秒 × 3件を基準にブラウザ処理を275秒以内へ収め、HTTP側は360秒としてcold startや認証処理の余白を確保します。
 
-Firebase Authentication remains the source of Human identity. During `/authorize`, the browser authenticates directly with Firebase; Cinema validates the resulting ID Token through the Firebase Auth backend, re-checks project/issuer/subject/time claims and the user's `validSince` boundary, and allows only the configured owner UID.
+1件がタイムアウトしても、他の成功結果を「完全な結果」とは扱わず、失敗情報を含む部分結果として返します。
 
-After OAuth exchange, the Resource Server accepts only Cinema-issued OAuth access tokens. The token record remains bound to the originating Firebase UID, OAuth client ID, exact MCP resource, scope set, and expiration. The UID is then used to derive the logical principal used by Cinema request and handoff ownership.
+Cloud Runのbilling alertは、外部quotaを使うかどうかにかかわらず設定を推奨します。
 
-This is **not** multi-user browser isolation. Adding more allowed UIDs without principal-specific browser/profile/runtime isolation is prohibited. A future multi-user deployment must isolate browser/profile state per authenticated principal before expanding the allowlist.
+## 本人確認の境界
+
+人間の本人確認元はFirebase Authenticationです。
+
+`/authorize` ではブラウザがFirebaseへ直接認証し、Cinemaは返されたID Tokenを検証します。その後、project / issuer / subject / time claimとuserの `validSince` を再確認し、設定されたowner UIDだけを許可します。
+
+OAuth交換後、MCP Resource Serverが認証情報として受け付けるのはCinemaが発行したOAuth access tokenだけです。Firebase ID TokenをMCP呼び出し用credentialとして直接利用しません。
+
+OAuth token recordは次へ結び付けます。
+
+- Firebase UID
+- OAuth client ID
+- 対象MCP resource
+- scope
+- 有効期限
+
+## 複数ユーザー化は禁止
+
+この構成には、ユーザーごとのブラウザ・プロファイル分離がありません。
+
+`MCP_ALLOWED_FIREBASE_UIDS` に複数UIDを追加するだけの拡張は禁止です。
+
+将来複数ユーザーへ対応する場合は、ブラウザ、プロファイル、実行状態を認証済みユーザーごとに分離してから許可範囲を広げる必要があります。
 
 ## Chromium sandbox
 
-The container installs `chromium-sandbox` and keeps Chromium sandboxing enabled by default. If a verified Cloud Run runtime incompatibility prevents startup, `CINEMA_ALLOW_UNSANDBOXED_CHROMIUM=true` exists as an explicit compatibility fallback. Do not enable it pre-emptively.
+コンテナには `chromium-sandbox` を導入し、Chromium sandboxを標準で有効にします。
+
+Cloud Runとの互換性問題が実際に確認され、sandbox有効では起動できない場合に限り、`CINEMA_ALLOW_UNSANDBOXED_CHROMIUM=true` を明示的な互換モードとして利用できます。
+
+事前に有効化しないでください。
