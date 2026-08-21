@@ -1,5 +1,5 @@
-name: Feature request
-description: Propose a bounded feature that fits the project's browser-first and fail-closed safety model.
+name: 機能提案
+description: Browser-first / fail-closedの安全モデルに収まる、範囲の明確な機能を提案します。
 title: "feat: "
 labels:
   - enhancement
@@ -7,45 +7,45 @@ body:
   - type: markdown
     attributes:
       value: |
-        Feature proposals are welcome, but provider automation must remain within reviewed public UI surfaces. Seat, checkout, purchase, private/internal APIs, challenge bypass, and high-frequency crawling require separate review and are not implied by a feature request.
+        機能提案は歓迎です。ただしprovider automationは、レビュー済みのpublic UI surface内に限定します。座席操作、checkout、購入、private/internal API、challenge回避、高頻度crawlは別途レビューが必要であり、機能提案を出しただけで自動的に許可されるものではありません。
   - type: textarea
     id: problem
     attributes:
-      label: Problem or use case
-      description: What user problem would this solve?
+      label: 解決したい課題・ユースケース
+      description: どのようなユーザー課題を解決したいですか？
     validations:
       required: true
   - type: textarea
     id: proposal
     attributes:
-      label: Proposed behavior
-      description: Describe the smallest useful capability and its expected MCP interface.
+      label: 提案する挙動
+      description: 価値が出る最小限のcapabilityと、想定するMCP interfaceを説明してください。
     validations:
       required: true
   - type: dropdown
     id: provider
     attributes:
-      label: Provider scope
+      label: 対象provider
       options:
         - Provider-neutral
-        - TOHO Cinemas
-        - AEON Cinema
-        - 109 Cinemas
-        - Multiple providers
-        - Not sure
+        - TOHOシネマズ
+        - イオンシネマ
+        - 109シネマズ
+        - 複数provider
+        - 未定
     validations:
       required: true
   - type: textarea
     id: safety
     attributes:
-      label: Safety / compliance considerations
-      description: Note any navigation, transaction, personal-data, rate, challenge, or provider-policy implications you can identify.
+      label: 安全性・コンプライアンス上の考慮事項
+      description: navigation、transaction、個人情報、アクセス頻度、challenge、provider policyへの影響など、分かる範囲で記載してください。
     validations:
       required: true
   - type: checkboxes
     id: boundary
     attributes:
-      label: Boundary acknowledgement
+      label: 安全境界の確認
       options:
-        - label: I am not assuming that a same-domain URL, hidden endpoint, or purchase UI is automatically an approved automation surface.
+        - label: 同一domainのURL、hidden endpoint、purchase UIであることだけを理由に、自動化可能なsurfaceとみなしていません。
           required: true

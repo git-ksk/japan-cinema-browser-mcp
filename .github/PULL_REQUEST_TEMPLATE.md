@@ -1,31 +1,31 @@
-## Summary
+## 変更概要
 
-<!-- What changed, and why? -->
+<!-- 何を、なぜ変更しましたか？ -->
 
-## Safety / provider impact
+## 安全性・providerへの影響
 
-<!-- Which browser, provider, capability, or security boundary is affected? Use "none" when not applicable. -->
+<!-- 影響するbrowser / provider / capability / security boundaryを記載してください。該当しない場合は「なし」で構いません。 -->
 
-- [ ] No private/internal API, hidden endpoint, network interception, or route/query guessing was introduced.
-- [ ] Disabled seat/checkout/purchase capabilities are not bypassed through generic automation.
-- [ ] Sensitive data handling and challenge/CAPTCHA human-handoff behavior are unchanged or explicitly reviewed.
-- [ ] Provider-specific DOM knowledge remains scoped to the relevant adapter.
+- [ ] private/internal API、hidden endpoint、network interception、route/queryの推測を追加していません。
+- [ ] 無効化されているseat / checkout / purchase capabilityをgeneric automationで迂回していません。
+- [ ] 機密データの取扱いとchallenge/CAPTCHAのHuman Handoff挙動は変更していない、または明示的にレビュー済みです。
+- [ ] provider固有のDOM知識は該当adapter内に閉じています。
 
-## Verification
+## 確認内容
 
 - [ ] `npm run typecheck`
 - [ ] `npm test`
 - [ ] `npm run build`
 - [ ] `git diff --check`
-- [ ] Relevant documentation updated, or no documentation change is needed.
+- [ ] 関連ドキュメントを更新しました。またはドキュメント変更が不要であることを確認しました。
 
 ### Live smoke
 
-<!-- Optional and provider-specific. Do not run purchasing, seat-hold, login, or high-frequency automation. -->
+<!-- 任意・provider別です。購入、seat hold、login、高頻度automationは実行しないでください。 -->
 
-- Provider(s):
-- Result / not run reason:
+- Provider:
+- 結果 / 未実施の理由:
 
-## Remaining risk / uncertainty
+## 残っているリスク・不確実性
 
-<!-- Include UI drift, provider-policy, compatibility, or rollout uncertainty. Do not claim legal approval. -->
+<!-- UI drift、provider policy、互換性、rollout上の不確実性などを記載してください。法的な承認を得たかのような表現は避けてください。 -->
