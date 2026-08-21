@@ -1,5 +1,5 @@
-name: Bug report
-description: Report a reproducible problem in the MCP server or a reviewed provider read workflow.
+name: バグ報告
+description: MCPサーバーまたはレビュー済みprovider read workflowで再現できる不具合を報告します。
 title: "bug: "
 labels:
   - bug
@@ -7,56 +7,56 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for reporting a bug. Do not include credentials, cookies, session tokens, payment details, private browsing data, or sensitive screenshots. Security vulnerabilities must use Private Vulnerability Reporting instead of this form.
+        バグ報告ありがとうございます。credential、Cookie、session token、決済情報、private browsing data、機密情報を含むスクリーンショットは添付しないでください。セキュリティ脆弱性はこのフォームではなく、GitHub Private Vulnerability Reportingから報告してください。
   - type: checkboxes
     id: preflight
     attributes:
-      label: Preflight
+      label: 事前確認
       options:
-        - label: I searched existing issues and pull requests for this problem.
+        - label: 同じ問題が既存のIssueやPull Requestにないことを確認しました。
           required: true
-        - label: This report does not contain credentials, session data, payment data, or vulnerability details.
+        - label: この報告にcredential、session data、決済情報、脆弱性の詳細を含めていません。
           required: true
   - type: dropdown
     id: area
     attributes:
-      label: Affected area
+      label: 影響する範囲
       options:
         - Core / MCP protocol
         - Chrome / CDP runtime
-        - TOHO Cinemas read workflow
-        - AEON Cinema read workflow
-        - 109 Cinemas read workflow
-        - Cross-provider showtime composition
-        - Documentation / installation
-        - Other
+        - TOHOシネマズ read workflow
+        - イオンシネマ read workflow
+        - 109シネマズ read workflow
+        - 複数providerの上映検索・composition
+        - ドキュメント / インストール
+        - その他
     validations:
       required: true
   - type: textarea
     id: behavior
     attributes:
-      label: Observed behavior
-      description: Describe what happened. Redact any personal or session-specific data.
+      label: 実際に起きたこと
+      description: 発生した挙動を説明してください。個人情報やsession固有の情報は削除・マスクしてください。
     validations:
       required: true
   - type: textarea
     id: expected
     attributes:
-      label: Expected behavior
+      label: 期待していた挙動
     validations:
       required: true
   - type: textarea
     id: reproduce
     attributes:
-      label: Reproduction steps
-      description: Include the smallest safe reproduction. Do not include purchase, payment, credentials, or challenge-bypass steps.
+      label: 再現手順
+      description: 安全に再現できる最小限の手順を書いてください。購入、決済、credential入力、challenge回避の手順は含めないでください。
     validations:
       required: true
   - type: textarea
     id: environment
     attributes:
-      label: Environment
-      description: OS, Node.js version, npm version, Chrome/Chromium version, MCP client, and relevant non-secret configuration.
+      label: 実行環境
+      description: OS、Node.js、npm、Chrome/Chromium、MCP client、関連するnon-secret設定を記載してください。
       placeholder: |
         OS:
         Node:
@@ -68,5 +68,5 @@ body:
   - type: textarea
     id: notes
     attributes:
-      label: Additional context
-      description: Logs or screenshots are optional. Redact paths/usernames if unnecessary and remove all sensitive data.
+      label: 補足情報
+      description: ログやスクリーンショットは任意です。不要なpath/usernameをマスクし、機密情報はすべて削除してください。
