@@ -238,7 +238,7 @@ Discovery: [`PHASE4_CHECKOUT_DISCOVERY.md`](./PHASE4_CHECKOUT_DISCOVERY.md) / #4
 Implementation split:
 
 - ✅ #49 — provider-neutral checkout contract/core。strict intent、2-read seat freshness、exact-seat validation、ticket normalization、rendered summary/material fingerprintまで実装。`prepare_checkout` tool自体は未登録でtransaction capabilityは全社false
-- 🟡 #50 — TOHO first vertical slice。individual seat image activationはlocal/session selectionでcross-session holdを作らないことを実証。A1 explicit reviewed Human Handoff + A2 ephemeral one-shot continuation bindingは実装済み。ただしB1 preflightでrendered `確認する` seat-decision stepの見落としを発見したため、current adapterはそこを`UNREVIEWED_INTERACTION`として停止。次はGate 0bで`確認する`のhold semantics / exact interaction sequenceをreviewし、その後にB1 post-consent Gate 1。capability false維持
+- 🟡 #50 — TOHO first vertical slice。individual seat image activationはlocal/session selectionでcross-session holdを作らないことを実証。A1 explicit reviewed Human Handoff + A2 ephemeral one-shot continuation bindingに加え、Gate 0b用のHuman-only `seat_decision` interventionとHandoff first-class `BrowserHandoffAdapter` wiringを実装。Cinemaはexact seat intent / postconditionだけを所有し、WebRTC transportはHandoffへ委譲。Gate 0bはpointer/scroll-only、headed owned Chrome限定、semantic mutationはnever-replay。次はphysical iPhone/Safariでexact seat → `確認する` 1回 → post-seat-decision terms boundaryを検証し、hold/release semanticsを記録する。capability false維持
 - ⬜ #51 — AEON hold/release review + provider adapter。TOHO parityを強制しない
 - ⬜ #52 — 109 explicit 10-minute hold review + provider adapter。TOHO parityを強制しない
 
@@ -251,6 +251,7 @@ Implementation split:
 - ✅ Human操作後のofficial provider / challenge state再検証
 - ✅ semantic mutation / transactionのautomatic replay禁止
 - ✅ Human intervention開始時のprepared purchase confirmation破棄
+- ✅ TOHO Gate 0bのWebRTC Browser Handoffをconsumer-local transport実装なしでHandoff first-class adapterへ接続。pointer/scroll-only、text/key server-block、exact managed Chrome PID binding、Done後fresh verification
 
 TOHO / AEON / 109のread-only `seatMap` はtrueです。`seatSelection` / `checkoutPreparation` / `purchaseSubmission` は引き続き全providerでfalseです。Human Handoff実装はtransaction capabilityの解禁を意味しません。
 

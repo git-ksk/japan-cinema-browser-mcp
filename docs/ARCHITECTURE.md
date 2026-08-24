@@ -199,7 +199,7 @@ Northbound generic toolとadapter内部primitiveはpolicyを分離します。`n
 
 ### Execution Handoff
 
-Generic control planeはupstream `git-ksk/mcp-execution-handoff` v0.1.0のsource release commitをimmutable pinしてconsumeします。upstreamはAgent/Human authority、resource epoch、resume policy、adapter contract、MRTR requestState/owner bindingを担当し、Cinema固有のprovider URL/capability policy、Human surface classification、verification、replay policyはこのrepositoryへ残します。
+Generic control planeとBrowser Handoffはupstream `git-ksk/mcp-execution-handoff` のreview済みimmutable commitをpinしてconsumeします。upstreamはAgent/Human authority、resource epoch、resume policy、adapter contract、MRTR requestState/owner bindingに加え、first-class `BrowserHandoffAdapter` のWebRTC runtime / route ownership / exact-window binding / reconnect / revokeを担当します。Cinema固有のprovider URL/capability policy、seat intent、Human surface classification、postcondition verification、replay policyはこのrepositoryへ残します。CinemaはWebRTC用のCDP screenshot/input brokerを持ちません。
 
 Cinema policyはpure readのみ `replay_safe` とし、navigationは `revalidate`、semantic mutationとtransaction/payment actionは `never_replay` です。navigation/mutation/transactionはMCP側でも `require_fresh_semantic_action` を要求するため、Human完了後にautomatic replayしません。Human intervention開始時にはprepared purchase confirmationも破棄します。
 
@@ -403,7 +403,7 @@ Phase 1 read adaptersはこのtransaction flowへ入らず、上映回のpurchas
 
 標準runtimeは引き続きlocal stdioです。加えて、Phase 3ではsingle-user向けのbounded Cloud Run runtimeを実装しています。Streamable HTTP entryはMCP OAuth 2.1で保護し、Protected Resource Metadata、CIMD、PKCE S256、resource-bound opaque access/refresh tokenを扱います。Human authorization時だけFirebase Authでowner UIDを検証し、そのUIDからnon-secret logical principal bindingを作ります。これをheadless dedicated browser、exact Host/Origin boundary、bounded request body、browser operation timeoutと組み合わせます。Cloud Run profileではOAuth protocol stateの共有永続化にFirestoreを採用していますが、これはOAuth自体の要件ではなくdeployment choiceです。Usage accounting / rate limitingはCinema MCP coreの責務外であり、必要なdeploymentが認証済み境界の外側で任意の実装を組み合わせます。
 
-Cloud Run runtimeではHuman Handoffとpurchase executionを意図的に無効化します。challenge、sign-in、consentが必要になった場合は回避せずfail closedし、必要ならlocal headed stdioへ戻します。
+Cloud Run runtimeではHuman Handoffとpurchase executionを意図的に無効化します。challenge、sign-in、consentが必要になった場合は回避せずfail closedし、必要ならlocal headed stdioへ戻します。Phase 4 Gate 0bのopt-in Browser Handoffはheaded owned Chrome + visible OS windowを必須とする別runtime shapeで、`CINEMA_REMOTE_MODE=true` のheadless Cloud Run profileとは同時有効化できません。
 
 **Multi-user hostingは依然として対象外です。** 将来multi-user化する場合はprincipalごとのbrowser/profile isolation、durable operation ownership、generation fencing、secure human takeover、credential lifecycle、ambiguous payment handlingを別設計として追加する必要があります。single-user OAuth runtimeをそのままmulti-userへ拡張しません。
 

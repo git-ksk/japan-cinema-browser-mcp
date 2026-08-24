@@ -289,7 +289,7 @@ npm run smoke:aeon
 npm run smoke:109
 ```
 
-通常の `npm test` / CIからは分離し、必要時だけ実ブラウザで実行します。challengeが出た場合は突破せず失敗扱いにします。 Execution Handoffのlive検証目的でchallengeを意図的に発生させません。upstream v0.1.0 dependencyはsource release commit archiveへimmutable pinし、`npm ci --ignore-scripts` で再現できる状態を維持します。
+通常の `npm test` / CIからは分離し、必要時だけ実ブラウザで実行します。challengeが出た場合は突破せず失敗扱いにします。 Execution Handoffのlive検証目的でchallengeを意図的に発生させません。upstream `mcp-execution-handoff` dependencyはreview済みcommit archiveへimmutable pinし、`npm ci --ignore-scripts` で再現できる状態を維持します。Browser Handoff変更時はconsumer-local CDP takeover primitiveを追加していないこと、Handoff input policyが意図した範囲を越えないこともstatic regressionで固定します。
 
 ## Public Repo CI / dependency policy
 

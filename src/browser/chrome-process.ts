@@ -114,6 +114,12 @@ export class ChromeProcess {
     return this.options.externalCdpPort !== undefined;
   }
 
+  getPid(): number | undefined {
+    if (this.isExternal()) return undefined;
+    const pid = this.child?.pid;
+    return this.child?.exitCode === null && Number.isSafeInteger(pid) && pid! > 0 ? pid : undefined;
+  }
+
   async start(): Promise<number> {
     if (this.options.externalCdpPort !== undefined) {
       if (!(await canReachCdp(this.options.externalCdpPort))) {

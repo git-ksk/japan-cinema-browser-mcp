@@ -16,11 +16,13 @@ Cloud Run構成は意図的に狭くしています。
 - 映画館サイトの読み取り・画面遷移だけを対象にする
 - 外部CDP接続は禁止
 - 購入実行は禁止
-- リモートでHuman Handoffは行わない
+- Cloud Run headless profileではHuman Handoffを行わない
 - CAPTCHA、MFA、アクセスチャレンジ、anti-bot機構を回避しない
 - 複数ユーザーで同じブラウザ状態を共有しない
 
 映画館サイト側でログイン、同意、アクセスチャレンジなど人間の操作が必要になった場合は安全側に停止します。手動操作が必要な利用には、ローカルの画面ありstdio構成を使ってください。
+
+Phase 4 TOHO Gate 0bには別途opt-inのBrowser Handoffがありますが、これはheadedなserver-owned Chrome + visible OS windowを必要とするためCloud Run headless profileの機能ではありません。`CINEMA_REMOTE_MODE=true` と `CINEMA_REMOTE_TAKEOVER=true` はそれぞれheadless/headedを要求し、意図的に同時有効化できません。
 
 ## 起動設定
 

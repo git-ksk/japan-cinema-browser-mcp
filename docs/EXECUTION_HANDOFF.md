@@ -12,7 +12,7 @@ upstreamが担当するのは再利用可能なcontrol-planeだけです。
 - generic execution-adapter contract
 - principal + invocation + canonical args ownership binding
 - MCP MRTR `input_required` requestState helper
-- optional durable checkpoint / browser-takeover module
+- optional durable checkpoint / first-class Browser Handoff module
 
 Japan Cinema側には次を残します。
 
@@ -24,7 +24,9 @@ Japan Cinema側には次を残します。
 - transaction / purchase-confirmation policy
 - どのoperation classをreplay可能にするかの判断
 
-Cinemaでは現時点でupstream browser-takeover transportを利用しません。Human interventionはdedicated local Chromeで直接完了します。
+通常のHuman interventionは引き続きdedicated local Chromeで直接完了できます。加えてPhase 4 TOHO Gate 0bだけは、upstreamのfirst-class `BrowserHandoffAdapter` を使うopt-in WebRTC経路を持ちます。Cinemaはintervention/principal、exact managed Chrome PID、明示input policyだけを渡し、WebRTC signaling/media/TURN、route ownership、exact-window/focus fencing、disconnect/reload generation recovery、revokeをHandoffへ委譲します。Cinema側でCDP screenshot/input takeoverを再実装しません。
+
+Gate 0bのinput policyは `tap=true / scroll=true / text=false / key=false` です。座席決定の物理検証以外へこのsurfaceを一般化せず、credential/PII/payment dataの入力経路として使いません。Browser Handoffはheadedなowned Chrome processとvisible OS windowを必須とし、`CINEMA_HEADLESS=true` やexternal CDPとの併用はfail closedします。
 
 ## Intervention detection
 
@@ -33,6 +35,7 @@ browser-side detectionからhandoffへ返すのはbounded categoryだけです�
 - `access_challenge`
 - `sign_in`
 - `consent`
+- `seat_decision`（TOHO Gate 0bのreviewed Human-only boundaryのみ）
 
 challenge answer、password、OTP/MFA、cookie、payment data、raw dialog/page contentをhandoff requestStateへ入れません。reviewed provider外へredirectしただけで自動的にtrustせず、Human対応が明示的に必要な場合だけhandoffとし、それ以外は通常URL policyでfail closedします。
 
@@ -69,7 +72,19 @@ Human completionはpurchase approvalではありません。将来final purchase
 
 Phase 4 TOHO checkout continuationでは、reviewed consent boundaryでexplicit interventionを作り、Human完了後も元のsemantic mutationをretryしません。A1/A2ではbounded `reviewed_checkout_boundary` action（provider/boundary/continuation digestのみ）とprocess-local one-shot bindingを実装済みです。bindingはexact browser target / provider / intent / showtime / selected seats / pre-Human fingerprintsへbindし、cancel、browser reset、TTL、owned context mismatchで破棄します。HumanがContinueだけ返してpre-consent controlが残っている場合はverificationでHumanへ戻します。fresh `prepare_checkout`がcurrent rendered stageをpositiveに再検証できるまでbindingはconsumeしません。詳細は [`PHASE4_TOHO_CONTINUATION_DESIGN.md`](./PHASE4_TOHO_CONTINUATION_DESIGN.md) を参照してください。
 
-2026-08-17のB1 preflightでは、TOHOのcurrent rendered flowにlegal consentより前の `確認する` seat-decision stepがあることを再確認しました。このcontrolはhold semantics未reviewのためexplicit Human Handoffの対象にもせず、provider adapterは`UNREVIEWED_INTERACTION`で停止します。A1/A2はpost-confirm provider state向けのplumbingとして保持します。
+2026-08-17のB1 preflightでは、TOHOのcurrent rendered flowにlegal consentより前の `確認する` seat-decision stepがあることを再確認しました。Agent側の座席画像直接activationをそのstepと同一視せず、current adapterは通常automationでは引き続き`UNREVIEWED_INTERACTION`で停止します。Gate 0bではone exact seat intentにbindingしたHuman-only `seat_decision` interventionを作り、Handoff WebRTC surface上でpointer/scrollだけ許可して、Humanがexact seatを選択し `確認する` を1回だけ操作した後、Cinemaがread-onlyでexact post-seat-decision terms boundaryを再検証します。Human Doneはseat hold成立や購入承認の証明ではなく、元のsemantic mutationは自動replayしません。物理Gate 0b acceptanceが完了するまで `seatSelection=false` / `checkoutPreparation=false` を維持します。
+
+## Browser Handoff — TOHO Gate 0b
+
+このremote surfaceは一般purpose browser takeoverではなく、#50 Gate 0bのbounded physical validation用です。
+
+- `CINEMA_REMOTE_TAKEOVER=true` はloopback HTTP server + authenticated HTTPS gatewayを必須とする。
+- Cloudflare Accessのexact email + Access JWTをnon-secret principal bindingへ変換し、locatorを別principalへ再利用させない。
+- `CINEMA_WEBRTC_TAKEOVER_HOST_EXECUTABLE` はabsolute path必須。macOS/Linuxのみで、headed Chrome + server-owned child PIDが必要。
+- Handoffへ渡すtargetはcurrent dedicated Chrome PIDだけ。Cinemaはwindow discovery、framebuffer、SDP/ICE/RTP、raw Human inputを扱わない。
+- Gate 0b input policyはpointer/scrollのみ。text/keyはHandoff server policyで拒否する。
+- Done/revoke後、Cinemaはcurrent provider/action bindingとexact postconditionをfresh read-only verificationし、失敗時はHumanへ戻すかfail closedする。
+- Cloud Run `CINEMA_REMOTE_MODE=true` はheadless必須なので、このheaded Browser Handoffとは意図的に両立しない。
 
 ## Invocation ownership
 

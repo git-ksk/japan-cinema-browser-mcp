@@ -9,12 +9,20 @@ import {
   type AuthInfo
 } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
-import { buildServer, config, probeBrowserReady, shutdownRuntime } from "./server.js";
+import {
+  buildServer,
+  config,
+  handleTakeoverHttpRequest,
+  isTakeoverHttpPath,
+  probeBrowserReady,
+  shutdownRuntime
+} from "./server.js";
 import { hostAllowed, originAllowed, parseContentLength } from "./http-security.js";
 import { FirebaseAuthVerifier } from "./firebase-auth.js";
 import { CinemaOAuthServer, cinemaOAuthResourceScope } from "./oauth-server.js";
 import { FirestoreCinemaOAuthStore } from "./oauth-store.js";
 import { runWithRequestPrincipal, type RequestPrincipal } from "./request-principal.js";
+import { cloudflareAccessTakeoverPrincipalBinding } from "./takeover-access.js";
 
 class HttpRequestError extends Error {
   constructor(readonly status: number, readonly code: string) {
@@ -181,6 +189,34 @@ async function startHttp(): Promise<void> {
       })();
       return;
     }
+    if (isTakeoverHttpPath(requestUrl.pathname)) {
+      const boundPrincipal = cloudflareAccessTakeoverPrincipalBinding(req.headers, config.takeover);
+      if (!boundPrincipal) {
+        reject(res, 403, "takeover_access_denied");
+        return;
+      }
+      const controller = makeAbortController(req, res);
+      void (async () => {
+        try {
+          const request = await toWebRequest(req, controller.signal);
+          const response = await handleTakeoverHttpRequest(request, boundPrincipal);
+          await writeWebResponse(response, res);
+        } catch (error) {
+          if (error instanceof HttpRequestError) {
+            if (error.status === 413) res.setHeader("connection", "close");
+            reject(res, error.status, error.code);
+            return;
+          }
+          if (!controller.signal.aborted) {
+            console.error("[japan-cinema-browser-mcp] takeover broker HTTP error", {
+              errorName: error instanceof Error ? error.name : "UnknownError"
+            });
+            reject(res, 500, "takeover_broker_error");
+          }
+        }
+      })();
+      return;
+    }
     if (requestUrl.pathname === "/health") {
       if (!validateProbeMethod(req, res)) return;
       privateHeaders(res);
@@ -264,6 +300,7 @@ async function startHttp(): Promise<void> {
   console.error(`[japan-cinema-browser-mcp] Streamable HTTP listening on http://${config.http.host}:${config.http.port}/mcp`);
   console.error(`[japan-cinema-browser-mcp] Remote mode: ${config.remote.enabled ? "enabled" : "disabled"}`);
   console.error("[japan-cinema-browser-mcp] Remote authentication: OAuth 2.1 + Firebase Auth");
+  console.error(`[japan-cinema-browser-mcp] Remote Human takeover: ${config.takeover.enabled ? "enabled via Cloudflare Access" : "disabled"}`);
 
   const shutdown = async () => {
     await mcpHandler.close().catch(() => undefined);
