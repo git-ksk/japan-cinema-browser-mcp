@@ -30,6 +30,7 @@ import {
   handoffStateMatchesInvocation,
   type HandoffRequestState
 } from "mcp-execution-handoff/mcp";
+import { BrowserHandoffAdapter } from "mcp-execution-handoff/browser-takeover";
 import { createCinemaExecutionAdapter } from "./cinema-execution-adapter.js";
 import { OperationQueue } from "./operation-queue.js";
 import { CINEMA_HANDOFF_POLICY } from "./handoff-policy.js";
@@ -50,11 +51,19 @@ import { AeonReadAdapter } from "./providers/aeon/adapter.js";
 import { TohoReadAdapter } from "./providers/toho/adapter.js";
 import { PurchaseGate, PurchaseGateError, type PurchaseSummary } from "./purchase-gate.js";
 import { currentRequestPrincipal, principalBinding } from "./request-principal.js";
+import { takeoverPrincipalBindingForEmail } from "./takeover-access.js";
 
 const SERVER_VERSION = "0.1.0";
 export const config = loadConfig();
 const chrome = new ChromeProcess(config.browser);
 const runtime = new CinemaBrowserRuntime(chrome, config.policy.maxReadChars);
+const browserHandoffAdapter = config.takeover.enabled && config.takeover.webRtcRuntime
+  ? new BrowserHandoffAdapter({
+      takeover: config.takeover,
+      runtime: config.takeover.webRtcRuntime
+    })
+  : undefined;
+const GATE0B_INPUT_POLICY = Object.freeze({ tap: true, scroll: true, text: false, key: false } as const);
 const executionAdapter = createCinemaExecutionAdapter(runtime);
 const operationQueue = new OperationQueue();
 const tohoReadAdapter = new TohoReadAdapter(runtime);
@@ -116,6 +125,18 @@ function ownerFor(toolName: string, args: unknown, resumeStrategy: HandoffResume
 
 function cinemaInterventionPrompt(intervention: CinemaIntervention): string {
   if (
+    intervention.action?.kind === "reviewed_gate0b_boundary" &&
+    intervention.action.provider === "toho" &&
+    intervention.action.boundary === "toho_seat_decision_gate0b"
+  ) {
+    return [
+      `TOHO Gate 0b is waiting for one Human seat-decision validation on exact seat ${intervention.action.seatId}.`,
+      `Use only the rendered TOHO UI to select ${intervention.action.seatId} and press \`確認する\` exactly once.`,
+      "Stop when the legal-terms boundary appears. Do not agree to terms, choose ticket types, enter credentials/PII/payment data, or continue toward purchase.",
+      "Press Done in the takeover page, then return here and choose Continue so the agent can perform read-only verification. No seat action is replayed."
+    ].join(" ");
+  }
+  if (
     intervention.action?.kind === "reviewed_checkout_boundary" &&
     intervention.action.provider === "toho" &&
     intervention.action.boundary === "toho_terms_consent_next"
@@ -134,13 +155,51 @@ function cinemaInterventionPrompt(intervention: CinemaIntervention): string {
       ? "a sign-in or authentication step"
       : intervention.reason === "consent"
         ? "a consent step"
-        : "a manual identity, consent, or transaction step outside the reviewed automation surface";
+        : intervention.reason === "seat_decision"
+          ? "a reviewed Human seat-decision step"
+          : "a manual identity, consent, or transaction step outside the reviewed automation surface";
   return [
     `The cinema browser requires ${label}.`,
     "Complete the manual step directly in the dedicated Chrome window.",
     "Do not paste passwords, OTP/MFA codes, CAPTCHA answers, cookies, payment-card data, bank data, or other credentials into this MCP prompt.",
     "Choose Continue only after the manual browser step is complete, or Cancel to stop the operation."
   ].join(" ");
+}
+
+function handoffPrompt(intervention: CinemaIntervention): string {
+  const base = cinemaInterventionPrompt(intervention);
+  if (
+    intervention.action?.kind !== "reviewed_gate0b_boundary" ||
+    intervention.action.provider !== "toho" ||
+    intervention.action.boundary !== "toho_seat_decision_gate0b"
+  ) {
+    return base;
+  }
+  const accessEmail = config.takeover.cloudflareAccessEmail;
+  if (!browserHandoffAdapter || !accessEmail) return base;
+  const targetProcessId = chrome.getPid();
+  if (!targetProcessId) {
+    throw new BrowserRuntimeError(
+      "BROWSER_UNAVAILABLE",
+      "TOHO Gate 0b Browser Handoff requires the current process to own the dedicated headed Chrome process."
+    );
+  }
+  const takeoverUrl = browserHandoffAdapter.start({
+    intervention: { id: intervention.id, epoch: intervention.epoch },
+    principalBinding: takeoverPrincipalBindingForEmail(accessEmail),
+    target: { processId: targetProcessId },
+    inputPolicy: GATE0B_INPUT_POLICY
+  });
+  return [
+    base,
+    "Remote Human takeover is available through the configured authenticated HTTPS gateway:",
+    takeoverUrl,
+    "Open that short-lived URL on your phone. Handoff permits pointer/scroll only for Gate 0b; text and keyboard input are server-blocked. Operate only the exact TOHO seat-decision surface, press Done, then return here and choose Continue. The locator is bound to this intervention and must not be forwarded."
+  ].join("\n\n");
+}
+
+async function revokeBrowserHandoff(interventionId: string): Promise<void> {
+  await browserHandoffAdapter?.revoke(interventionId);
 }
 
 async function humanInputRequired(
@@ -158,6 +217,7 @@ async function humanInputRequired(
 
   let active = executionAdapter.control.getActiveIntervention();
   if (!active || active.id !== intervention.id) {
+    await revokeBrowserHandoff(intervention.id);
     handoffOwners.delete(intervention.id);
     return errorResult(new BrowserRuntimeError(
       "UI_STATE_CHANGED",
@@ -187,14 +247,15 @@ async function humanInputRequired(
     requestState,
     inputRequests: {
       [HANDOFF_INPUT_KEY]: inputRequired.elicit({
-        message: cinemaInterventionPrompt(active),
+        message: handoffPrompt(active),
         requestedSchema: HUMAN_INTERVENTION_SCHEMA
       })
     }
   });
 }
 
-function cancelIntervention(interventionId: string): CallToolResult {
+async function cancelIntervention(interventionId: string): Promise<CallToolResult> {
+  await revokeBrowserHandoff(interventionId);
   const active = executionAdapter.control.getActiveIntervention();
   if (active?.id === interventionId) executionAdapter.control.cancelHumanIntervention(interventionId);
   handoffOwners.delete(interventionId);
@@ -308,6 +369,7 @@ async function runToolWithHandoff<T>(input: {
 
   const active = executionAdapter.control.getActiveIntervention();
   if (!active || active.id !== state.interventionId || active.epoch !== state.epoch) {
+    await revokeBrowserHandoff(state.interventionId);
     handoffOwners.delete(state.interventionId);
     purchaseGate.clear();
     runtime.clearCheckoutContinuation();
@@ -326,6 +388,7 @@ async function runToolWithHandoff<T>(input: {
   if (content.decision === "cancel") return cancelIntervention(state.interventionId);
 
   try {
+    await revokeBrowserHandoff(state.interventionId);
     executionAdapter.control.markHumanControlComplete(state.interventionId);
     await operationQueue.run(() => executionAdapter.control.verifyHumanIntervention(state.interventionId));
   } catch (error) {
@@ -339,12 +402,14 @@ async function runToolWithHandoff<T>(input: {
       const returned = executionAdapter.control.claimHumanControl(state.interventionId);
       return humanInputRequired(returned, owner, input.args);
     }
+    await revokeBrowserHandoff(state.interventionId);
     if (stillActive?.id === state.interventionId) executionAdapter.control.cancelHumanIntervention(state.interventionId);
     handoffOwners.delete(state.interventionId);
     purchaseGate.clear();
     return errorResult(error);
   }
 
+  await revokeBrowserHandoff(state.interventionId);
   const decision = executionAdapter.control.resumeAfterHumanIntervention(state.interventionId);
   handoffOwners.delete(state.interventionId);
   if (decision.resumePolicy !== "replay_safe" || input.resumeStrategy === "require_fresh_semantic_action") {
@@ -836,12 +901,28 @@ export function buildServer(): McpServer {
     },
     async () => safe(async () => {
       purchaseGate.clear();
+      const active = runtime.getActiveIntervention();
+      if (active) await revokeBrowserHandoff(active.id);
       await runtime.close();
       return { closed: true };
     })
   );
 
   return server;
+}
+
+export function isTakeoverHttpPath(pathname: string): boolean {
+  return browserHandoffAdapter?.ownsPath(pathname) ?? false;
+}
+
+export async function handleTakeoverHttpRequest(request: Request, boundPrincipal: string): Promise<Response> {
+  if (!browserHandoffAdapter?.ownsPath(new URL(request.url).pathname)) {
+    return new Response(JSON.stringify({ error: "not_found" }), {
+      status: 404,
+      headers: { "content-type": "application/json; charset=utf-8" }
+    });
+  }
+  return browserHandoffAdapter.handle(request, boundPrincipal);
 }
 
 export async function probeBrowserReady(): Promise<void> {
@@ -851,5 +932,7 @@ export async function probeBrowserReady(): Promise<void> {
 
 export async function shutdownRuntime(): Promise<void> {
   purchaseGate.clear();
+  const active = runtime.getActiveIntervention();
+  if (active) await revokeBrowserHandoff(active.id);
   await runtime.close();
 }

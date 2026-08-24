@@ -101,6 +101,17 @@ export interface AppConfig {
     enabled: boolean;
     disableHumanHandoff: boolean;
   };
+  takeover: {
+    enabled: boolean;
+    publicBaseUrl?: string;
+    ttlMs: number;
+    cloudflareAccessEmail?: string;
+    webRtcRuntime?: {
+      hostExecutable: string;
+      displayId?: number;
+      displayName?: string;
+    };
+  };
   policy: {
     maxReadChars: number;
     confirmationTtlMs: number;
@@ -122,6 +133,15 @@ export function loadConfig(): AppConfig {
 
   const headless = envBool("CINEMA_HEADLESS", false);
   const remoteEnabled = envBool("CINEMA_REMOTE_MODE", false);
+  const takeoverEnabled = envBool("CINEMA_REMOTE_TAKEOVER", false);
+  const takeoverPublicBaseUrl = publicOrigin("CINEMA_TAKEOVER_PUBLIC_BASE_URL");
+  const takeoverAccessEmailRaw = process.env.CINEMA_TAKEOVER_CLOUDFLARE_ACCESS_EMAIL?.trim().toLowerCase();
+  const takeoverAccessEmail = takeoverAccessEmailRaw || undefined;
+  const takeoverHostExecutable = process.env.CINEMA_WEBRTC_TAKEOVER_HOST_EXECUTABLE?.trim() || undefined;
+  const takeoverDisplayId = process.env.CINEMA_WEBRTC_TAKEOVER_DISPLAY_ID
+    ? envInt("CINEMA_WEBRTC_TAKEOVER_DISPLAY_ID", 1, 1, 4_294_967_295)
+    : undefined;
+  const takeoverDisplayName = process.env.CINEMA_WEBRTC_TAKEOVER_DISPLAY_NAME?.trim() || undefined;
   const enablePurchase = envBool("CINEMA_ENABLE_PURCHASE", false);
   const host = process.env.MCP_HTTP_HOST?.trim() || "127.0.0.1";
   const allowNonLoopback = envBool("MCP_ALLOW_NONLOOPBACK", false);
@@ -136,6 +156,32 @@ export function loadConfig(): AppConfig {
   const oauthAllowedClientHosts = envHosts("MCP_OAUTH_ALLOWED_CLIENT_HOSTS", []);
   if (!isLoopback(host) && !allowNonLoopback) {
     throw new Error("Non-loopback MCP_HTTP_HOST requires MCP_ALLOW_NONLOOPBACK=true");
+  }
+  if (takeoverAccessEmail && (!/^[^@\s]{1,128}@[^@\s]{1,190}$/.test(takeoverAccessEmail) || takeoverAccessEmail.length > 320)) {
+    throw new Error("CINEMA_TAKEOVER_CLOUDFLARE_ACCESS_EMAIL must be one valid email address");
+  }
+  if (takeoverEnabled) {
+    if (!isLoopback(host)) throw new Error("CINEMA_REMOTE_TAKEOVER=true requires loopback MCP_HTTP_HOST behind an authenticated HTTPS gateway");
+    if (headless) throw new Error("CINEMA_REMOTE_TAKEOVER=true requires headed Chrome because Browser Handoff binds one visible OS window");
+    if (externalCdpPort !== undefined) throw new Error("CINEMA_REMOTE_TAKEOVER=true forbids external CDP attachment");
+    if (!takeoverPublicBaseUrl) throw new Error("CINEMA_REMOTE_TAKEOVER=true requires CINEMA_TAKEOVER_PUBLIC_BASE_URL");
+    if (!takeoverAccessEmail) throw new Error("CINEMA_REMOTE_TAKEOVER=true requires CINEMA_TAKEOVER_CLOUDFLARE_ACCESS_EMAIL");
+    if (!takeoverHostExecutable || takeoverHostExecutable.includes("\0") || !path.isAbsolute(takeoverHostExecutable)) {
+      throw new Error("CINEMA_REMOTE_TAKEOVER=true requires absolute CINEMA_WEBRTC_TAKEOVER_HOST_EXECUTABLE");
+    }
+    if (process.platform === "darwin") {
+      if (takeoverDisplayName) throw new Error("CINEMA_WEBRTC_TAKEOVER_DISPLAY_NAME is Linux-only");
+    } else if (process.platform === "linux") {
+      if (takeoverDisplayId !== undefined) throw new Error("CINEMA_WEBRTC_TAKEOVER_DISPLAY_ID is macOS-only");
+      if (takeoverDisplayName && !/^:\d+(?:\.\d+)?$/.test(takeoverDisplayName)) {
+        throw new Error("CINEMA_WEBRTC_TAKEOVER_DISPLAY_NAME must be a local X11 display such as :99");
+      }
+    } else {
+      throw new Error("CINEMA_REMOTE_TAKEOVER=true currently supports macOS or Linux Browser Handoff hosts only");
+    }
+    if (authConfigured && allowedFirebaseUids.length !== 1) {
+      throw new Error("CINEMA_REMOTE_TAKEOVER=true currently requires exactly one allowed Firebase uid");
+    }
   }
   if (remoteEnabled) {
     if (!headless) throw new Error("CINEMA_REMOTE_MODE=true requires CINEMA_HEADLESS=true");
@@ -194,7 +240,20 @@ export function loadConfig(): AppConfig {
     } : {}),
     remote: {
       enabled: remoteEnabled,
-      disableHumanHandoff: remoteEnabled
+      disableHumanHandoff: remoteEnabled && !takeoverEnabled
+    },
+    takeover: {
+      enabled: takeoverEnabled,
+      ...(takeoverPublicBaseUrl ? { publicBaseUrl: takeoverPublicBaseUrl } : {}),
+      ttlMs: envInt("CINEMA_TAKEOVER_TTL_SECONDS", 300, 60, 600) * 1_000,
+      ...(takeoverAccessEmail ? { cloudflareAccessEmail: takeoverAccessEmail } : {}),
+      ...(takeoverEnabled && takeoverHostExecutable ? {
+        webRtcRuntime: {
+          hostExecutable: takeoverHostExecutable,
+          ...(takeoverDisplayId !== undefined ? { displayId: takeoverDisplayId } : {}),
+          ...(takeoverDisplayName ? { displayName: takeoverDisplayName } : {})
+        }
+      } : {})
     },
     policy: {
       maxReadChars: envInt("CINEMA_MAX_READ_CHARS", 8_000, 500, 30_000),

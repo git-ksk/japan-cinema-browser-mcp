@@ -124,11 +124,11 @@ test("Human handoff invalidation remains separate from purchase confirmation", (
   assert.throws(() => gate.consume(prepared.confirmationId));
 });
 
-test("v0.1.0 handoff dependency is immutable and transaction replay remains statically fenced", () => {
+test("reviewed Handoff dependency is immutable and transaction replay remains statically fenced", () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")) as { dependencies?: Record<string, string> };
   assert.equal(
     pkg.dependencies?.["mcp-execution-handoff"],
-    "https://github.com/git-ksk/mcp-execution-handoff/archive/c87fe17b4a9a24bda7aa42e1f40e75a491e72698.tar.gz"
+    "https://github.com/git-ksk/mcp-execution-handoff/archive/2a2b4351b060cd7fdbf2cb1457bec00c6d2eab57.tar.gz"
   );
   const server = fs.readFileSync(path.join(root, "src/server.ts"), "utf8");
   assert.match(server, /Human browser activity invalidates every prepared transaction confirmation/);
@@ -136,8 +136,40 @@ test("v0.1.0 handoff dependency is immutable and transaction replay remains stat
   assert.match(server, /TOHO checkout is waiting at the reviewed terms-consent boundary/);
   assert.match(server, /利用規約に同意して次へ/);
   const runtime = fs.readFileSync(path.join(root, "src/browser/runtime.ts"), "utf8");
+  assert.match(server, /new BrowserHandoffAdapter/);
+  assert.match(server, /GATE0B_INPUT_POLICY = Object\.freeze\(\{ tap: true, scroll: true, text: false, key: false \}/);
+  assert.match(server, /browserHandoffAdapter\.start\(\{[\s\S]*inputPolicy: GATE0B_INPUT_POLICY/);
+  assert.doesNotMatch(server, /new TakeoverBroker|createLink\(/);
+  assert.doesNotMatch(runtime, /captureHumanTakeoverFrame|tapHumanTakeover|insertHumanTakeoverText|pressHumanTakeoverKey/);
   assert.match(runtime, /CINEMA_HANDOFF_POLICY\.transaction\.resumePolicy/);
   assert.doesNotMatch(runtime, /captcha.{0,40}(solve|bypass)|hcaptcha.{0,40}(solve|bypass)/i);
+});
+
+test("TOHO Gate 0b creates a Human-only never-replay seat-decision intervention without seat mutation", async () => {
+  const runtime = new CinemaBrowserRuntime({ close: async () => undefined } as unknown as ChromeProcess, 1_000);
+  (runtime as unknown as { getReviewedBrowserContext: () => Promise<unknown> }).getReviewedBrowserContext = async () => ({
+    provider: "toho",
+    targetId: "target-gate0b",
+    host: "hlo.tohotheater.jp",
+    pathname: "/net/ticket/066/TNPI2010J01.do"
+  });
+  await assert.rejects(
+    runtime.beginTohoSeatDecisionGate0b({ seatId: "bad", intentDigest: `sha256:${"a".repeat(64)}` }),
+    /exact seat identity/
+  );
+  const intervention = await runtime.beginTohoSeatDecisionGate0b({
+    seatId: "A-2",
+    intentDigest: `sha256:${"a".repeat(64)}`
+  });
+  assert.equal(intervention.reason, "seat_decision");
+  assert.equal(intervention.resumePolicy, "never_replay");
+  assert.equal(intervention.action?.kind, "reviewed_gate0b_boundary");
+  if (intervention.action?.kind === "reviewed_gate0b_boundary") {
+    assert.equal(intervention.action.provider, "toho");
+    assert.equal(intervention.action.boundary, "toho_seat_decision_gate0b");
+    assert.equal(intervention.action.seatId, "A-2");
+  }
+  runtime.cancelHumanIntervention(intervention.id);
 });
 
 test("reviewed TOHO checkout boundary carries only a bounded digest action and remains never_replay", async () => {

@@ -67,3 +67,59 @@ test("HTTP boundary validates exact hosts, origins, and bounded content length",
   assert.throws(() => parseContentLength("2049", 2048), /request_body_too_large/);
   assert.throws(() => parseContentLength("1.5", 2048), /invalid_content_length/);
 });
+
+
+test("standalone remote takeover is opt-in, loopback-only, and Cloudflare-Access bound", () => {
+  withEnv({
+    CINEMA_REMOTE_TAKEOVER: "true",
+    CINEMA_TAKEOVER_PUBLIC_BASE_URL: "https://cinema-handoff.example",
+    CINEMA_TAKEOVER_CLOUDFLARE_ACCESS_EMAIL: "owner@example.com",
+    CINEMA_WEBRTC_TAKEOVER_HOST_EXECUTABLE: "/tmp/handoff-webrtc-host",
+    MCP_HTTP_HOST: "127.0.0.1",
+    CINEMA_ALLOW_EXTERNAL_CDP: "false",
+    CINEMA_CDP_PORT: undefined
+  }, () => {
+    const config = loadConfig();
+    assert.equal(config.takeover.enabled, true);
+    assert.equal(config.takeover.publicBaseUrl, "https://cinema-handoff.example");
+    assert.equal(config.takeover.cloudflareAccessEmail, "owner@example.com");
+    assert.equal(config.takeover.webRtcRuntime?.hostExecutable, "/tmp/handoff-webrtc-host");
+    assert.equal(config.remote.disableHumanHandoff, false);
+  });
+
+  withEnv({
+    CINEMA_REMOTE_TAKEOVER: "true",
+    CINEMA_TAKEOVER_PUBLIC_BASE_URL: "https://cinema-handoff.example",
+    CINEMA_TAKEOVER_CLOUDFLARE_ACCESS_EMAIL: "owner@example.com",
+    CINEMA_WEBRTC_TAKEOVER_HOST_EXECUTABLE: "/tmp/handoff-webrtc-host",
+    MCP_HTTP_HOST: "0.0.0.0",
+    MCP_ALLOW_NONLOOPBACK: "true"
+  }, () => {
+    assert.throws(() => loadConfig(), /requires loopback MCP_HTTP_HOST/);
+  });
+
+  withEnv({
+    CINEMA_REMOTE_TAKEOVER: "true",
+    CINEMA_TAKEOVER_PUBLIC_BASE_URL: "https://cinema-handoff.example",
+    CINEMA_TAKEOVER_CLOUDFLARE_ACCESS_EMAIL: "owner@example.com",
+    CINEMA_WEBRTC_TAKEOVER_HOST_EXECUTABLE: "/tmp/handoff-webrtc-host",
+    CINEMA_HEADLESS: "true",
+    MCP_HTTP_HOST: "127.0.0.1"
+  }, () => {
+    assert.throws(() => loadConfig(), /requires headed Chrome/);
+  });
+
+  withEnv({
+    CINEMA_REMOTE_TAKEOVER: "true",
+    CINEMA_TAKEOVER_PUBLIC_BASE_URL: "https://cinema-handoff.example",
+    CINEMA_TAKEOVER_CLOUDFLARE_ACCESS_EMAIL: "owner@example.com",
+    CINEMA_WEBRTC_TAKEOVER_HOST_EXECUTABLE: undefined,
+    MCP_HTTP_HOST: "127.0.0.1"
+  }, () => {
+    assert.throws(() => loadConfig(), /requires absolute CINEMA_WEBRTC_TAKEOVER_HOST_EXECUTABLE/);
+  });
+
+  withEnv({ CINEMA_REMOTE_TAKEOVER: "true", MCP_HTTP_HOST: "127.0.0.1" }, () => {
+    assert.throws(() => loadConfig(), /requires CINEMA_TAKEOVER_PUBLIC_BASE_URL/);
+  });
+});

@@ -45,14 +45,23 @@ type CdpClient = Awaited<ReturnType<typeof CDP>>;
 export type CinemaInterventionReason =
   | "access_challenge"
   | "sign_in"
-  | "consent";
+  | "consent"
+  | "seat_decision";
 
-export type CinemaHandoffAction = {
-  kind: "reviewed_checkout_boundary";
-  provider: "toho";
-  boundary: "toho_terms_consent_next";
-  continuationDigest: string;
-};
+export type CinemaHandoffAction =
+  | {
+      kind: "reviewed_checkout_boundary";
+      provider: "toho";
+      boundary: "toho_terms_consent_next";
+      continuationDigest: string;
+    }
+  | {
+      kind: "reviewed_gate0b_boundary";
+      provider: "toho";
+      boundary: "toho_seat_decision_gate0b";
+      seatId: string;
+      intentDigest: string;
+    };
 
 export interface CinemaReviewedBrowserContext {
   provider: CinemaProviderId;
@@ -256,6 +265,15 @@ export class CinemaBrowserRuntime {
   private targetId?: string;
   private readonly handoff = new ExecutionHandoffState<CinemaHandoffAction, CinemaInterventionReason>();
   private readonly checkoutContinuations = new CheckoutContinuationStore();
+  private gate0bBinding?: {
+    interventionId: string;
+    targetId: string;
+    provider: "toho";
+    seatId: string;
+    intentDigest: string;
+    sourceHost: string;
+    sourcePathname: string;
+  };
 
   constructor(
     private readonly chrome: ChromeProcess,
@@ -721,6 +739,38 @@ export class CinemaBrowserRuntime {
     return this.handoff.getResourceEpoch();
   }
 
+  async beginTohoSeatDecisionGate0b(input: { seatId: string; intentDigest: string }): Promise<CinemaIntervention> {
+    this.handoff.assertAgentAuthority();
+    if (!/^[A-Z]{1,4}-\d{1,4}$/.test(input.seatId) || !/^sha256:[a-f0-9]{64}$/.test(input.intentDigest)) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO Gate 0b requires one exact seat identity and bounded intent digest.");
+    }
+    const context = await this.getReviewedBrowserContext("toho");
+    if (!/^\/net\/ticket\/\d{3}\/TNPI2010J01\.do$/.test(context.pathname)) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO Gate 0b must start on the reviewed seat-map surface.");
+    }
+    const intervention = this.handoff.begin({
+      reason: "seat_decision",
+      action: {
+        kind: "reviewed_gate0b_boundary",
+        provider: "toho",
+        boundary: "toho_seat_decision_gate0b",
+        seatId: input.seatId,
+        intentDigest: input.intentDigest
+      },
+      resumePolicy: CINEMA_HANDOFF_POLICY.semantic_mutation.resumePolicy
+    });
+    this.gate0bBinding = {
+      interventionId: intervention.id,
+      targetId: context.targetId,
+      provider: "toho",
+      seatId: input.seatId,
+      intentDigest: input.intentDigest,
+      sourceHost: context.host,
+      sourcePathname: context.pathname
+    };
+    return intervention;
+  }
+
   async getReviewedBrowserContext(expectedProvider: CinemaProviderId): Promise<CinemaReviewedBrowserContext> {
     const current = await this.assertOfficialCurrentUrl(expectedProvider);
     if (!this.targetId) {
@@ -818,7 +868,7 @@ export class CinemaBrowserRuntime {
     const client = await this.getVerificationClient();
     const url = await this.currentUrlUnchecked(client);
     try {
-      assertOfficialUrl(url, active.action?.kind === "reviewed_checkout_boundary" ? active.action.provider : undefined);
+      assertOfficialUrl(url, active.action?.provider);
     } catch {
       throw new BrowserRuntimeError(
         "HUMAN_ACTION_REQUIRED",
@@ -826,6 +876,42 @@ export class CinemaBrowserRuntime {
         undefined,
         active
       );
+    }
+    if (active.action?.kind === "reviewed_gate0b_boundary") {
+      if (active.action.provider !== "toho" || active.action.boundary !== "toho_seat_decision_gate0b") {
+        this.gate0bBinding = undefined;
+        throw new BrowserRuntimeError("UNREVIEWED_INTERACTION", "The TOHO Gate 0b Human action is no longer supported.", undefined, active);
+      }
+      const binding = this.gate0bBinding;
+      if (
+        !binding || binding.interventionId !== active.id || binding.provider !== active.action.provider ||
+        binding.seatId !== active.action.seatId || binding.intentDigest !== active.action.intentDigest ||
+        !this.targetId || binding.targetId !== this.targetId
+      ) {
+        this.gate0bBinding = undefined;
+        throw new BrowserRuntimeError(
+          "UI_STATE_CHANGED",
+          "The TOHO Gate 0b browser/seat intent binding changed while Human control was active.",
+          undefined,
+          active
+        );
+      }
+      const verifiedBoundary = await client.Runtime.evaluate({
+        expression: TOHO_REVIEWED_CONSENT_BOUNDARY_VERIFY_EXPRESSION,
+        returnByValue: true,
+        awaitPromise: true
+      });
+      const boundaryState = verifiedBoundary.result.value as { preConsentBoundaryVisible?: boolean; matchingControls?: number } | undefined;
+      if (boundaryState?.preConsentBoundaryVisible !== true || boundaryState.matchingControls !== 1) {
+        throw new BrowserRuntimeError(
+          "HUMAN_ACTION_REQUIRED",
+          "TOHO Gate 0b has not reached the exact post-seat-decision terms boundary. Select only the bound seat, press `確認する` once, and stop before legal consent.",
+          { matchingControls: boundaryState?.matchingControls },
+          active
+        );
+      }
+      this.gate0bBinding = undefined;
+      return this.handoff.markVerified(interventionId);
     }
     if (active.action?.kind === "reviewed_checkout_boundary") {
       const binding = this.checkoutContinuations.peek();
@@ -884,10 +970,12 @@ export class CinemaBrowserRuntime {
   cancelHumanIntervention(interventionId: string): void {
     this.handoff.cancel(interventionId);
     this.checkoutContinuations.clear();
+    if (this.gate0bBinding?.interventionId === interventionId) this.gate0bBinding = undefined;
   }
 
   async close(): Promise<void> {
     this.checkoutContinuations.clear();
+    this.gate0bBinding = undefined;
     const active = this.handoff.getActive();
     if (active) this.handoff.cancel(active.id);
     const client = this.client;
