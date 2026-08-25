@@ -72,7 +72,7 @@ Human completionはpurchase approvalではありません。将来final purchase
 
 Phase 4 TOHO checkout continuationでは、reviewed consent boundaryでexplicit interventionを作り、Human完了後も元のsemantic mutationをretryしません。A1/A2ではbounded `reviewed_checkout_boundary` action（provider/boundary/continuation digestのみ）とprocess-local one-shot bindingを実装済みです。bindingはexact browser target / provider / intent / showtime / selected seats / pre-Human fingerprintsへbindし、cancel、browser reset、TTL、owned context mismatchで破棄します。HumanがContinueだけ返してpre-consent controlが残っている場合はverificationでHumanへ戻します。fresh `prepare_checkout`がcurrent rendered stageをpositiveに再検証できるまでbindingはconsumeしません。詳細は [`PHASE4_TOHO_CONTINUATION_DESIGN.md`](./PHASE4_TOHO_CONTINUATION_DESIGN.md) を参照してください。
 
-2026-08-17のB1 preflightでは、TOHOのcurrent rendered flowにlegal consentより前の `確認する` seat-decision stepがあることを再確認しました。Agent側の座席画像直接activationをそのstepと同一視せず、current adapterは通常automationでは引き続き`UNREVIEWED_INTERACTION`で停止します。Gate 0bではone exact seat intentにbindingしたHuman-only `seat_decision` interventionを作り、Handoff WebRTC surface上でpointer/scrollだけ許可して、Humanがexact seatを選択し `確認する` を1回だけ操作した後、Cinemaがread-onlyでexact post-seat-decision terms boundaryを再検証します。Human Doneはseat hold成立や購入承認の証明ではなく、元のsemantic mutationは自動replayしません。物理Gate 0b acceptanceが完了するまで `seatSelection=false` / `checkoutPreparation=false` を維持します。
+2026-08-17のB1 preflightでは、TOHOのcurrent rendered flowにlegal consentより前の `確認する` seat-decision stepがあることを再確認しました。Agent側の座席画像直接activationをそのstepと同一視せず、current adapterは通常automationでは引き続き`UNREVIEWED_INTERACTION`で停止します。Gate 0bではone exact seat intentにbindingしたHuman-only `seat_decision` interventionを作り、Handoff WebRTC surface上でpointer/scrollだけ許可します。physical sequenceは `exact seat選択 → 確認するを1回 → サイト自身の terms_check をHumanが明示的にON → Handoff Done` に固定し、`利用規約に同意して次へ` は押しません。Done後、Cinemaはread-onlyでexact seatが唯一の選択中seatであることと、review済み `terms_check` が1個だけ存在してcheckedであることを再検証します。Doneそのものはterms consent・seat hold成立・購入承認の証明ではなく、terms acknowledgementの証拠はprovider controlのchecked stateだけです。元のsemantic mutationは自動replayしません。物理Gate 0b acceptanceが完了するまで `seatSelection=false` / `checkoutPreparation=false` を維持します。
 
 ## Browser Handoff — TOHO Gate 0b
 
@@ -83,7 +83,7 @@ Phase 4 TOHO checkout continuationでは、reviewed consent boundaryでexplicit 
 - `CINEMA_WEBRTC_TAKEOVER_HOST_EXECUTABLE` はabsolute path必須。macOS/Linuxのみで、headed Chrome + server-owned child PIDが必要。
 - Handoffへ渡すtargetはcurrent dedicated Chrome PIDだけ。Cinemaはwindow discovery、framebuffer、SDP/ICE/RTP、raw Human inputを扱わない。
 - Gate 0b input policyはpointer/scrollのみ。text/keyはHandoff server policyで拒否する。
-- Done/revoke後、Cinemaはcurrent provider/action bindingとexact postconditionをfresh read-only verificationし、失敗時はHumanへ戻すかfail closedする。
+- Done/revoke後、Cinemaはcurrent provider/action binding、exact selected seat set、review済み `terms_check` のchecked stateをfresh read-only verificationし、失敗時はHumanへ戻すかfail closedする。`terms_check` はHumanだけが操作し、Cinemaはclick/change eventを発行しない。
 - Cloud Run `CINEMA_REMOTE_MODE=true` はheadless必須なので、このheaded Browser Handoffとは意図的に両立しない。
 
 ## Invocation ownership

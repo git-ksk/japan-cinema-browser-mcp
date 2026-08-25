@@ -172,7 +172,7 @@ test("TOHO Gate 0b creates a Human-only never-replay seat-decision intervention 
   runtime.cancelHumanIntervention(intervention.id);
 });
 
-test("TOHO Gate 0b verification requires the exact bound seat as well as the pre-consent boundary", async () => {
+test("TOHO Gate 0b verification requires the exact bound seat and explicit Human terms acknowledgement", async () => {
   const runtime = new CinemaBrowserRuntime({ close: async () => undefined } as unknown as ChromeProcess, 1_000);
   const mutable = runtime as unknown as {
     targetId: string;
@@ -193,10 +193,10 @@ test("TOHO Gate 0b verification requires the exact bound seat as well as the pre
   });
 
   let state = {
-    preConsentBoundaryVisible: true,
-    matchingControls: 1,
     expectedSeatSelected: false,
-    selectedSeatCount: 1
+    selectedSeatCount: 1,
+    termsCheckboxCount: 1,
+    termsAcknowledged: false
   };
   let expression = "";
   mutable.getVerificationClient = async () => ({
@@ -216,9 +216,10 @@ test("TOHO Gate 0b verification requires the exact bound seat as well as the pre
     (error: unknown) => {
       if (!(error instanceof BrowserRuntimeError) || error.code !== "HUMAN_ACTION_REQUIRED") return false;
       assert.deepEqual(error.details, {
-        matchingControls: 1,
         expectedSeatSelected: false,
-        selectedSeatCount: 1
+        selectedSeatCount: 1,
+        termsCheckboxCount: 1,
+        termsAcknowledged: false
       });
       return true;
     }
@@ -226,11 +227,25 @@ test("TOHO Gate 0b verification requires the exact bound seat as well as the pre
   assert.match(expression, /const expectedSeatId = "A-2"/);
   assert.match(expression, /img\[id\]\[alt\]/);
   assert.match(expression, /expectedSeatId \+ ' 選択中'/);
+  assert.match(expression, /input#terms_check\[type="checkbox"\]\[name="terms_check"\]/);
+  assert.match(expression, /termsCheckbox\.checked === true/);
+  assert.doesNotMatch(expression, /\.click\(|dispatchEvent|利用規約に同意して次へ/);
   assert.doesNotMatch(expression, /A-5/);
 
   runtime.claimHumanControl(intervention.id);
   runtime.markHumanControlComplete(intervention.id);
   state = { ...state, expectedSeatSelected: true };
+  await assert.rejects(
+    runtime.verifyHumanIntervention(intervention.id),
+    (error: unknown) =>
+      error instanceof BrowserRuntimeError &&
+      error.code === "HUMAN_ACTION_REQUIRED" &&
+      error.details?.termsAcknowledged === false
+  );
+
+  runtime.claimHumanControl(intervention.id);
+  runtime.markHumanControlComplete(intervention.id);
+  state = { ...state, termsAcknowledged: true };
   const verified = await runtime.verifyHumanIntervention(intervention.id);
   assert.equal(verified.status, "ready_to_resume");
   const decision = runtime.resumeAfterHumanIntervention(intervention.id);

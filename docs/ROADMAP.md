@@ -238,7 +238,7 @@ Discovery: [`PHASE4_CHECKOUT_DISCOVERY.md`](./PHASE4_CHECKOUT_DISCOVERY.md) / #4
 Implementation split:
 
 - ✅ #49 — provider-neutral checkout contract/core。strict intent、2-read seat freshness、exact-seat validation、ticket normalization、rendered summary/material fingerprintまで実装。`prepare_checkout` tool自体は未登録でtransaction capabilityは全社false
-- 🟡 #50 — TOHO first vertical slice。individual seat image activationはlocal/session selectionでcross-session holdを作らないことを実証。A1 explicit reviewed Human Handoff + A2 ephemeral one-shot continuation bindingに加え、Gate 0b用のHuman-only `seat_decision` interventionとHandoff first-class `BrowserHandoffAdapter` wiringを実装。Cinemaはexact seat intent / postconditionだけを所有し、WebRTC transportはHandoffへ委譲。Gate 0bはpointer/scroll-only、headed owned Chrome限定、semantic mutationはnever-replay。次はphysical iPhone/Safariでexact seat → `確認する` 1回 → post-seat-decision terms boundaryを検証し、hold/release semanticsを記録する。capability false維持
+- 🟡 #50 — TOHO first vertical slice。individual seat image activationはlocal/session selectionでcross-session holdを作らないことを実証。A1 explicit reviewed Human Handoff + A2 ephemeral one-shot continuation bindingに加え、Gate 0b用のHuman-only `seat_decision` interventionとHandoff first-class `BrowserHandoffAdapter` wiringを実装。Cinemaはexact seat intent / postconditionだけを所有し、WebRTC transportはHandoffへ委譲。Gate 0bはpointer/scroll-only、headed owned Chrome限定、semantic mutationはnever-replay。physical sequenceはexact seat → `確認する` 1回 → Humanがreview済み `terms_check` をON → Doneで、`利用規約に同意して次へ` は未操作のまま。Done後はexact seat + checkbox checkedをread-only検証し、fresh sessionでhold/release semanticsを観測する。capability false維持
 - ⬜ #51 — AEON hold/release review + provider adapter。TOHO parityを強制しない
 - ⬜ #52 — 109 explicit 10-minute hold review + provider adapter。TOHO parityを強制しない
 
