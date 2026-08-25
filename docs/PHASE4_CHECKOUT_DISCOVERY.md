@@ -66,7 +66,7 @@ Phase 3では、座席表へ入るだけでは選択席が発生しないこと�
 
 現在は `確認する` を、15分制限が始まる可能性のある重要境界として別途確認する方針です。
 
-利用規約欄と `terms_check` checkboxはseat page下部に常設されるため、欄や `利用規約に同意して次へ` の**存在**だけを `確認する` 後のpostconditionには使いません。Gate 0bのphysical proofではHumanがexact seat → `確認する` 1回 → provider自身の `terms_check` を明示的にONにし、CinemaはDone後にexact seatが唯一の選択中seatであることとcheckbox checkedだけをread-only検証します。`利用規約に同意して次へ` は押しません。Agentはcheckbox/advance controlを自動操作しません。
+利用規約欄と `terms_check` checkboxはseat page下部に常設されるため、欄や `利用規約に同意して次へ` の**存在**だけを `確認する` 後のpostconditionには使いません。Gate 0bのphysical proofではHumanがexact seat → `確認する` 1回 → provider自身の `terms_check` を明示的にONにし、CinemaはDone後にTOHO自身の `bookSeatIntForm.seat_no` とrendered `#seatList2` がexact seat 1件だけで一致すること、およびcheckbox checkedをread-only検証します。seat画像の `選択中` 表示は補助diagnosticだけにします。`利用規約に同意して次へ` は押しません。Agentはcheckbox/advance controlを自動操作しません。
 
 また、隔離環境の標準 `756x469` viewportでは横向き表示に関するブロックが出ました。`1280x813` ではその環境要因は解消しましたが、`確認する` は依然として操作可能になりませんでした。
 

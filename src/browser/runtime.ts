@@ -132,21 +132,33 @@ function tohoGate0bVerifyExpression(expectedSeatId: string): string {
   const expected = JSON.stringify(expectedSeatId);
   return `(() => {
   const expectedSeatId = ${expected};
+  const expectedSeatDisplay = expectedSeatId.replace('-', '');
   const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
   const visible = (el) => {
     const rect = el.getBoundingClientRect();
     const style = getComputedStyle(el);
     return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && style.pointerEvents !== 'none';
   };
-  const selectedSeats = Array.from(document.querySelectorAll('img[id][alt]'))
+  const bookingForm = document.forms.namedItem('bookSeatIntForm');
+  const seatNoControl = bookingForm?.elements.namedItem('seat_no');
+  const canonicalSeatIds = normalize(seatNoControl?.value)
+    .split(',')
+    .map((value) => normalize(value))
+    .filter(Boolean);
+  const renderedSeatLabels = Array.from(document.querySelectorAll('#seatList2 span'))
     .filter(visible)
+    .map((el) => normalize(el.textContent))
+    .filter(Boolean);
+  const selectedSeatImages = Array.from(document.querySelectorAll('img[id][alt]'))
     .filter((el) => normalize(el.getAttribute('alt')).endsWith(' 選択中'));
-  const selected = selectedSeats.length === 1 ? selectedSeats[0] : undefined;
-  const expectedSeatSelected = Boolean(
-    selected &&
-    normalize(selected.id) === expectedSeatId &&
-    normalize(selected.getAttribute('alt')) === expectedSeatId + ' 選択中'
+  const expectedSeatImage = document.getElementById(expectedSeatId);
+  const imageExpectedSelected = Boolean(
+    expectedSeatImage &&
+    normalize(expectedSeatImage.getAttribute('alt')) === expectedSeatId + ' 選択中'
   );
+  const expectedSeatSelected =
+    canonicalSeatIds.length === 1 && canonicalSeatIds[0] === expectedSeatId &&
+    renderedSeatLabels.length === 1 && renderedSeatLabels[0] === expectedSeatDisplay;
   const termsCheckboxes = Array.from(document.querySelectorAll('input#terms_check[type="checkbox"][name="terms_check"]'))
     .filter(visible);
   const termsCheckbox = termsCheckboxes.length === 1 ? termsCheckboxes[0] : undefined;
@@ -157,7 +169,10 @@ function tohoGate0bVerifyExpression(expectedSeatId: string): string {
   );
   return {
     expectedSeatSelected,
-    selectedSeatCount: selectedSeats.length,
+    selectedSeatCount: canonicalSeatIds.length,
+    renderedSeatCount: renderedSeatLabels.length,
+    imageSelectedSeatCount: selectedSeatImages.length,
+    imageExpectedSelected,
     termsCheckboxCount: termsCheckboxes.length,
     termsAcknowledged
   };
@@ -940,12 +955,16 @@ export class CinemaBrowserRuntime {
       const boundaryState = verifiedBoundary.result.value as {
         expectedSeatSelected?: boolean;
         selectedSeatCount?: number;
+        renderedSeatCount?: number;
+        imageSelectedSeatCount?: number;
+        imageExpectedSelected?: boolean;
         termsCheckboxCount?: number;
         termsAcknowledged?: boolean;
       } | undefined;
       if (
         boundaryState?.expectedSeatSelected !== true ||
         boundaryState.selectedSeatCount !== 1 ||
+        boundaryState.renderedSeatCount !== 1 ||
         boundaryState.termsCheckboxCount !== 1 ||
         boundaryState.termsAcknowledged !== true
       ) {
@@ -955,6 +974,9 @@ export class CinemaBrowserRuntime {
           {
             expectedSeatSelected: boundaryState?.expectedSeatSelected === true,
             selectedSeatCount: boundaryState?.selectedSeatCount,
+            renderedSeatCount: boundaryState?.renderedSeatCount,
+            imageSelectedSeatCount: boundaryState?.imageSelectedSeatCount,
+            imageExpectedSelected: boundaryState?.imageExpectedSelected === true,
             termsCheckboxCount: boundaryState?.termsCheckboxCount,
             termsAcknowledged: boundaryState?.termsAcknowledged === true
           },

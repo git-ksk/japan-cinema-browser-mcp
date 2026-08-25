@@ -268,7 +268,7 @@ Screen 4では画面表示の `113席 + 2車いす席` と、ちょうど2つの
 - 複数座席でも、1席ごとにbaselineから期待状態を再構成し、自分が選択した座席以外に変化があれば次のclick前に停止する
 - special / accessibility seatは初期sliceでは変更前に拒否する
 - 正確な選択済みseat setを確認しても、`確認する` が未レビューなら `UNREVIEWED_INTERACTION` で停止する
-- Gate 0b physical acceptanceではHumanだけがexact seat → `確認する` 1回 → review済み `terms_check` ONを行い、CinemaはDone後にexact seat + checkbox checkedをread-only検証する
+- Gate 0b physical acceptanceではHumanだけがexact seat → `確認する` 1回 → review済み `terms_check` ONを行い、CinemaはDone後にprovider-owned `bookSeatIntForm.seat_no` + rendered `#seatList2` のexact-seat一致 + checkbox checkedをread-only検証する
 - `利用規約に同意して次へ` / ticket / purchaser PII / payment / final purchaseはGate 0bでは操作しない
 - Human Handoff後に座席変更を自動再実行しない
 
