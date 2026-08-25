@@ -128,6 +128,37 @@ const INTERVENTION_EXPRESSION = `(() => {
   return null;
 })()`;
 
+function tohoGate0bVerifyExpression(expectedSeatId: string): string {
+  const expected = JSON.stringify(expectedSeatId);
+  return `(() => {
+  const expectedSeatId = ${expected};
+  const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+  const visible = (el) => {
+    const rect = el.getBoundingClientRect();
+    const style = getComputedStyle(el);
+    return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && style.pointerEvents !== 'none';
+  };
+  const matching = Array.from(document.querySelectorAll('button,a,input[type="button"],input[type="submit"]'))
+    .filter(visible)
+    .filter((el) => normalize(el.getAttribute('aria-label') || el.value || el.textContent) === '利用規約に同意して次へ');
+  const selectedSeats = Array.from(document.querySelectorAll('img[id][alt]'))
+    .filter(visible)
+    .filter((el) => normalize(el.getAttribute('alt')).endsWith(' 選択中'));
+  const selected = selectedSeats.length === 1 ? selectedSeats[0] : undefined;
+  const expectedSeatSelected = Boolean(
+    selected &&
+    normalize(selected.id) === expectedSeatId &&
+    normalize(selected.getAttribute('alt')) === expectedSeatId + ' 選択中'
+  );
+  return {
+    preConsentBoundaryVisible: matching.length === 1,
+    matchingControls: matching.length,
+    expectedSeatSelected,
+    selectedSeatCount: selectedSeats.length
+  };
+})()`;
+}
+
 const TOHO_REVIEWED_CONSENT_BOUNDARY_VERIFY_EXPRESSION = `(() => {
   const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
   const visible = (el) => {
@@ -897,16 +928,30 @@ export class CinemaBrowserRuntime {
         );
       }
       const verifiedBoundary = await client.Runtime.evaluate({
-        expression: TOHO_REVIEWED_CONSENT_BOUNDARY_VERIFY_EXPRESSION,
+        expression: tohoGate0bVerifyExpression(binding.seatId),
         returnByValue: true,
         awaitPromise: true
       });
-      const boundaryState = verifiedBoundary.result.value as { preConsentBoundaryVisible?: boolean; matchingControls?: number } | undefined;
-      if (boundaryState?.preConsentBoundaryVisible !== true || boundaryState.matchingControls !== 1) {
+      const boundaryState = verifiedBoundary.result.value as {
+        preConsentBoundaryVisible?: boolean;
+        matchingControls?: number;
+        expectedSeatSelected?: boolean;
+        selectedSeatCount?: number;
+      } | undefined;
+      if (
+        boundaryState?.preConsentBoundaryVisible !== true ||
+        boundaryState.matchingControls !== 1 ||
+        boundaryState.expectedSeatSelected !== true ||
+        boundaryState.selectedSeatCount !== 1
+      ) {
         throw new BrowserRuntimeError(
           "HUMAN_ACTION_REQUIRED",
-          "TOHO Gate 0b has not reached the exact post-seat-decision terms boundary. Select only the bound seat, press `確認する` once, and stop before legal consent.",
-          { matchingControls: boundaryState?.matchingControls },
+          "TOHO Gate 0b has not reached the exact bound-seat postcondition. Select only the bound seat, press `確認する` once, and stop before legal consent.",
+          {
+            matchingControls: boundaryState?.matchingControls,
+            expectedSeatSelected: boundaryState?.expectedSeatSelected === true,
+            selectedSeatCount: boundaryState?.selectedSeatCount
+          },
           active
         );
       }

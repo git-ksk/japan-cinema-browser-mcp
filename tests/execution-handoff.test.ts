@@ -172,6 +172,71 @@ test("TOHO Gate 0b creates a Human-only never-replay seat-decision intervention 
   runtime.cancelHumanIntervention(intervention.id);
 });
 
+test("TOHO Gate 0b verification requires the exact bound seat as well as the pre-consent boundary", async () => {
+  const runtime = new CinemaBrowserRuntime({ close: async () => undefined } as unknown as ChromeProcess, 1_000);
+  const mutable = runtime as unknown as {
+    targetId: string;
+    getReviewedBrowserContext: () => Promise<{ provider: "toho"; targetId: string; host: string; pathname: string }>;
+    getVerificationClient: () => Promise<unknown>;
+    currentUrlUnchecked: () => Promise<string>;
+  };
+  mutable.targetId = "target-gate0b-verify";
+  mutable.getReviewedBrowserContext = async () => ({
+    provider: "toho",
+    targetId: "target-gate0b-verify",
+    host: "hlo.tohotheater.jp",
+    pathname: "/net/ticket/066/TNPI2010J01.do"
+  });
+  const intervention = await runtime.beginTohoSeatDecisionGate0b({
+    seatId: "A-2",
+    intentDigest: `sha256:${"b".repeat(64)}`
+  });
+
+  let state = {
+    preConsentBoundaryVisible: true,
+    matchingControls: 1,
+    expectedSeatSelected: false,
+    selectedSeatCount: 1
+  };
+  let expression = "";
+  mutable.getVerificationClient = async () => ({
+    Runtime: {
+      evaluate: async (input: { expression: string }) => {
+        expression = input.expression;
+        return { result: { value: state } };
+      }
+    }
+  });
+  mutable.currentUrlUnchecked = async () => "https://hlo.tohotheater.jp/net/ticket/066/TNPI2010J01.do";
+
+  runtime.claimHumanControl(intervention.id);
+  runtime.markHumanControlComplete(intervention.id);
+  await assert.rejects(
+    runtime.verifyHumanIntervention(intervention.id),
+    (error: unknown) => {
+      if (!(error instanceof BrowserRuntimeError) || error.code !== "HUMAN_ACTION_REQUIRED") return false;
+      assert.deepEqual(error.details, {
+        matchingControls: 1,
+        expectedSeatSelected: false,
+        selectedSeatCount: 1
+      });
+      return true;
+    }
+  );
+  assert.match(expression, /const expectedSeatId = "A-2"/);
+  assert.match(expression, /img\[id\]\[alt\]/);
+  assert.match(expression, /expectedSeatId \+ ' 選択中'/);
+  assert.doesNotMatch(expression, /A-5/);
+
+  runtime.claimHumanControl(intervention.id);
+  runtime.markHumanControlComplete(intervention.id);
+  state = { ...state, expectedSeatSelected: true };
+  const verified = await runtime.verifyHumanIntervention(intervention.id);
+  assert.equal(verified.status, "ready_to_resume");
+  const decision = runtime.resumeAfterHumanIntervention(intervention.id);
+  assert.equal(decision.resumePolicy, "never_replay");
+});
+
 test("reviewed TOHO checkout boundary carries only a bounded digest action and remains never_replay", async () => {
   const runtime = new CinemaBrowserRuntime({ close: async () => undefined } as unknown as ChromeProcess, 1_000);
   const mutable = runtime as unknown as { targetId: string };
