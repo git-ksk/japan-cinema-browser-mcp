@@ -25,7 +25,7 @@
     "@google-cloud/firestore": "^8.7.0",
     "@modelcontextprotocol/server": "2.0.0",
     "chrome-remote-interface": "0.34.0",
-    "mcp-execution-handoff": "https://github.com/git-ksk/mcp-execution-handoff/archive/57a74fe55ec19c862e102febe942ffd7108d63f7.tar.gz",
+    "mcp-execution-handoff": "https://github.com/git-ksk/mcp-execution-handoff/archive/a56cdf22ae6fcf6201c08de7974e01ef5795f6b3.tar.gz",
     "zod": "4.4.3"
   },
   "devDependencies": {
