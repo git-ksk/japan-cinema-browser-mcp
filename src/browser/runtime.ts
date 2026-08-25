@@ -138,9 +138,6 @@ function tohoGate0bVerifyExpression(expectedSeatId: string): string {
     const style = getComputedStyle(el);
     return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && style.pointerEvents !== 'none';
   };
-  const matching = Array.from(document.querySelectorAll('button,a,input[type="button"],input[type="submit"]'))
-    .filter(visible)
-    .filter((el) => normalize(el.getAttribute('aria-label') || el.value || el.textContent) === '利用規約に同意して次へ');
   const selectedSeats = Array.from(document.querySelectorAll('img[id][alt]'))
     .filter(visible)
     .filter((el) => normalize(el.getAttribute('alt')).endsWith(' 選択中'));
@@ -150,11 +147,19 @@ function tohoGate0bVerifyExpression(expectedSeatId: string): string {
     normalize(selected.id) === expectedSeatId &&
     normalize(selected.getAttribute('alt')) === expectedSeatId + ' 選択中'
   );
+  const termsCheckboxes = Array.from(document.querySelectorAll('input#terms_check[type="checkbox"][name="terms_check"]'))
+    .filter(visible);
+  const termsCheckbox = termsCheckboxes.length === 1 ? termsCheckboxes[0] : undefined;
+  const termsAcknowledged = Boolean(
+    termsCheckbox &&
+    termsCheckbox.disabled !== true &&
+    termsCheckbox.checked === true
+  );
   return {
-    preConsentBoundaryVisible: matching.length === 1,
-    matchingControls: matching.length,
     expectedSeatSelected,
-    selectedSeatCount: selectedSeats.length
+    selectedSeatCount: selectedSeats.length,
+    termsCheckboxCount: termsCheckboxes.length,
+    termsAcknowledged
   };
 })()`;
 }
@@ -933,24 +938,25 @@ export class CinemaBrowserRuntime {
         awaitPromise: true
       });
       const boundaryState = verifiedBoundary.result.value as {
-        preConsentBoundaryVisible?: boolean;
-        matchingControls?: number;
         expectedSeatSelected?: boolean;
         selectedSeatCount?: number;
+        termsCheckboxCount?: number;
+        termsAcknowledged?: boolean;
       } | undefined;
       if (
-        boundaryState?.preConsentBoundaryVisible !== true ||
-        boundaryState.matchingControls !== 1 ||
-        boundaryState.expectedSeatSelected !== true ||
-        boundaryState.selectedSeatCount !== 1
+        boundaryState?.expectedSeatSelected !== true ||
+        boundaryState.selectedSeatCount !== 1 ||
+        boundaryState.termsCheckboxCount !== 1 ||
+        boundaryState.termsAcknowledged !== true
       ) {
         throw new BrowserRuntimeError(
           "HUMAN_ACTION_REQUIRED",
-          "TOHO Gate 0b has not reached the exact bound-seat postcondition. Select only the bound seat, press `確認する` once, and stop before legal consent.",
+          "TOHO Gate 0b requires the exact bound seat plus explicit Human terms acknowledgement. Select only the bound seat, press `確認する` once, check the site's reviewed terms checkbox yourself, then press Handoff Done without pressing `利用規約に同意して次へ`.",
           {
-            matchingControls: boundaryState?.matchingControls,
             expectedSeatSelected: boundaryState?.expectedSeatSelected === true,
-            selectedSeatCount: boundaryState?.selectedSeatCount
+            selectedSeatCount: boundaryState?.selectedSeatCount,
+            termsCheckboxCount: boundaryState?.termsCheckboxCount,
+            termsAcknowledged: boundaryState?.termsAcknowledged === true
           },
           active
         );

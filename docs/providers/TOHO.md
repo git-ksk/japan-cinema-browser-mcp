@@ -243,7 +243,8 @@ TOHO-ONEへログインせず購入できるguest pathはレビュー済みで�
 Gate 0bが未完了の間は:
 
 - `確認する` を自動操作しない
-- 利用規約同意へ自動継続しない
+- Gate 0bでprovider自身の `terms_check` をONにする場合もHuman操作だけに限定し、Agentはcheckboxを自動操作しない
+- `利用規約に同意して次へ` へ自動継続しない
 - 別座席を試さない
 - 推測によるretryをしない
 - `seatSelection=false`
@@ -267,8 +268,8 @@ Screen 4では画面表示の `113席 + 2車いす席` と、ちょうど2つの
 - 複数座席でも、1席ごとにbaselineから期待状態を再構成し、自分が選択した座席以外に変化があれば次のclick前に停止する
 - special / accessibility seatは初期sliceでは変更前に拒否する
 - 正確な選択済みseat setを確認しても、`確認する` が未レビューなら `UNREVIEWED_INTERACTION` で停止する
-- `確認する` Gate 0b通過後だけ `利用規約に同意して次へ` のHuman Handoff候補になれる
-- consent / ticket / purchaser PII / payment / final purchaseは操作しない
+- Gate 0b physical acceptanceではHumanだけがexact seat → `確認する` 1回 → review済み `terms_check` ONを行い、CinemaはDone後にexact seat + checkbox checkedをread-only検証する
+- `利用規約に同意して次へ` / ticket / purchaser PII / payment / final purchaseはGate 0bでは操作しない
 - Human Handoff後に座席変更を自動再実行しない
 
 Gate 0は一部だけ確認済みですが、hold開始・解放境界が未証明なので対応機能は有効化していません。
