@@ -195,6 +195,9 @@ test("TOHO Gate 0b verification requires the exact bound seat and explicit Human
   let state = {
     expectedSeatSelected: false,
     selectedSeatCount: 1,
+    renderedSeatCount: 1,
+    imageSelectedSeatCount: 1,
+    imageExpectedSelected: false,
     termsCheckboxCount: 1,
     termsAcknowledged: false
   };
@@ -218,6 +221,9 @@ test("TOHO Gate 0b verification requires the exact bound seat and explicit Human
       assert.deepEqual(error.details, {
         expectedSeatSelected: false,
         selectedSeatCount: 1,
+        renderedSeatCount: 1,
+        imageSelectedSeatCount: 1,
+        imageExpectedSelected: false,
         termsCheckboxCount: 1,
         termsAcknowledged: false
       });
@@ -225,8 +231,12 @@ test("TOHO Gate 0b verification requires the exact bound seat and explicit Human
     }
   );
   assert.match(expression, /const expectedSeatId = "A-2"/);
+  assert.match(expression, /document\.forms\.namedItem\('bookSeatIntForm'\)/);
+  assert.match(expression, /elements\.namedItem\('seat_no'\)/);
+  assert.match(expression, /#seatList2 span/);
+  assert.match(expression, /expectedSeatDisplay = expectedSeatId\.replace\('-', ''\)/);
   assert.match(expression, /img\[id\]\[alt\]/);
-  assert.match(expression, /expectedSeatId \+ ' 選択中'/);
+  assert.match(expression, /imageExpectedSelected/);
   assert.match(expression, /input#terms_check\[type="checkbox"\]\[name="terms_check"\]/);
   assert.match(expression, /termsCheckbox\.checked === true/);
   assert.doesNotMatch(expression, /\.click\(|dispatchEvent|利用規約に同意して次へ/);
