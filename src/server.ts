@@ -16,6 +16,12 @@ import { BrowserRuntimeError, CinemaBrowserRuntime, type CinemaIntervention } fr
 import { runTimedBrowserOperation } from "./browser/operation-timeout.js";
 import { CheckoutCoreError } from "./checkout.js";
 import {
+  HumanCheckoutHandoffError,
+  humanCheckoutHandoffDigest,
+  humanCheckoutHandoffIntentSchema,
+  validateHumanCheckoutHandoffSeatReads
+} from "./full-checkout-handoff.js";
+import {
   ExecutionHandoffError,
   claimHandoffOwner,
   createHandoffOwner,
@@ -73,6 +79,7 @@ const windowHandoffAdapter =
     : undefined;
 const REVIEWED_POINTER_ONLY_INPUT_POLICY = Object.freeze({ tap: true, scroll: true, text: false, key: false } as const);
 const REVIEWED_PURCHASER_FORM_INPUT_POLICY = Object.freeze({ tap: true, scroll: true, text: true, key: true } as const);
+const REVIEWED_FULL_CHECKOUT_INPUT_POLICY = Object.freeze({ tap: true, scroll: true, text: true, key: true } as const);
 const executionAdapter = createCinemaExecutionAdapter(runtime);
 const operationQueue = new OperationQueue();
 const tohoReadAdapter = new TohoReadAdapter(runtime);
@@ -100,6 +107,7 @@ function errorResult(error: unknown): CallToolResult {
   const known =
     error instanceof BrowserRuntimeError ||
     error instanceof CheckoutCoreError ||
+    error instanceof HumanCheckoutHandoffError ||
     error instanceof ProviderPolicyError ||
     error instanceof PurchaseGateError ||
     error instanceof SeatRecommendationError ||
@@ -110,7 +118,7 @@ function errorResult(error: unknown): CallToolResult {
     ? error.message
     : "The operation failed unexpectedly. Check the local MCP server logs.";
   const details =
-    error instanceof BrowserRuntimeError || error instanceof CheckoutCoreError || error instanceof SeatRecommendationError
+    error instanceof BrowserRuntimeError || error instanceof CheckoutCoreError || error instanceof HumanCheckoutHandoffError || error instanceof SeatRecommendationError
       ? error.details
       : undefined;
   return {
@@ -175,6 +183,21 @@ function cinemaInterventionPrompt(intervention: CinemaIntervention): string {
   }
 
   if (
+    intervention.action?.kind === "reviewed_full_checkout_handoff" &&
+    intervention.action.provider === "toho" &&
+    intervention.action.boundary === "toho_full_checkout"
+  ) {
+    return [
+      intervention.action.seatIds.length > 0
+        ? `TOHO full checkout Handoff is ready for the exact intended seats: ${intervention.action.seatIds.join(", ")}.`
+        : "TOHO full checkout Handoff is ready on the exact reviewed showtime seat map. Choose your seat(s) directly in the provider UI.",
+      "From this point onward, you control the dedicated Chrome window directly: select the intended seat(s), review and accept provider terms only if you agree, choose the ticket type, continue as guest or sign in, enter purchaser information, choose and complete payment, and review the final purchase yourself.",
+      "A final purchase/payment button can cause a real charge. Press it only if you personally intend to buy this ticket. The agent will not press, replay, or confirm that control for you.",
+      "Keep credentials, OTP/MFA, purchaser details, card/bank data, wallet approvals, and CAPTCHA answers inside the Human-controlled browser only. Press Handoff Done after TOHO returns to a post-purchase provider screen."
+    ].join(" ");
+  }
+
+  if (
     intervention.action?.kind === "reviewed_purchaser_payment_boundary" &&
     intervention.action.provider === "toho" &&
     intervention.action.boundary === "toho_purchaser_payment_entry"
@@ -210,7 +233,8 @@ async function handoffPrompt(intervention: CinemaIntervention): Promise<string> 
     intervention.action?.provider === "toho" && (
       (intervention.action.kind === "reviewed_gate0b_boundary" && intervention.action.boundary === "toho_seat_decision_gate0b") ||
       (intervention.action.kind === "reviewed_gate1_boundary" && intervention.action.boundary === "toho_terms_advance_gate1") ||
-      (intervention.action.kind === "reviewed_purchaser_payment_boundary" && intervention.action.boundary === "toho_purchaser_payment_entry")
+      (intervention.action.kind === "reviewed_purchaser_payment_boundary" && intervention.action.boundary === "toho_purchaser_payment_entry") ||
+      (intervention.action.kind === "reviewed_full_checkout_handoff" && intervention.action.boundary === "toho_full_checkout")
     );
   if (!reviewedRemoteBoundary) return base;
   const accessEmail = config.takeover.cloudflareAccessEmail;
@@ -230,7 +254,12 @@ async function handoffPrompt(intervention: CinemaIntervention): Promise<string> 
     );
   }
   const purchaserForm = intervention.action?.kind === "reviewed_purchaser_payment_boundary";
-  const inputPolicy = purchaserForm ? REVIEWED_PURCHASER_FORM_INPUT_POLICY : REVIEWED_POINTER_ONLY_INPUT_POLICY;
+  const fullCheckout = intervention.action?.kind === "reviewed_full_checkout_handoff";
+  const inputPolicy = fullCheckout
+    ? REVIEWED_FULL_CHECKOUT_INPUT_POLICY
+    : purchaserForm
+      ? REVIEWED_PURCHASER_FORM_INPUT_POLICY
+      : REVIEWED_POINTER_ONLY_INPUT_POLICY;
   const takeoverUrl = windowHandoffAdapter.start({
     intervention: { id: intervention.id, epoch: intervention.epoch },
     principalBinding: takeoverPrincipalBindingForEmail(accessEmail),
@@ -241,9 +270,11 @@ async function handoffPrompt(intervention: CinemaIntervention): Promise<string> 
     base,
     "Remote Human takeover is available through the configured authenticated HTTPS gateway:",
     takeoverUrl,
-    purchaserForm
-      ? "Open that short-lived URL on your phone. This reviewed purchaser/payment form Handoff permits pointer/scroll/text/key input directly to the bounded Chrome window. Do not paste purchaser or payment values into the MCP prompt. Press Done only after the exact provider `次へ` transition and stop before any final purchase control."
-      : "Open that short-lived URL on your phone. This reviewed Cinema Window Handoff uses WSS only and permits pointer/scroll only; text and keyboard input are server-blocked. Operate only the exact bounded TOHO step described above, press Done, then return here and choose Continue. The locator is bound to this intervention and must not be forwarded."
+    fullCheckout
+      ? "Open that short-lived URL on your phone. This Full Checkout Handoff permits pointer/scroll/text/key input directly to the bounded Chrome window. All checkout and payment actions are Human-operated; press Done only after you finish or intentionally stop the checkout."
+      : purchaserForm
+        ? "Open that short-lived URL on your phone. This reviewed purchaser/payment form Handoff permits pointer/scroll/text/key input directly to the bounded Chrome window. Do not paste purchaser or payment values into the MCP prompt. Press Done only after the exact provider `次へ` transition and stop before any final purchase control."
+        : "Open that short-lived URL on your phone. This reviewed Cinema Window Handoff uses WSS only and permits pointer/scroll only; text and keyboard input are server-blocked. Operate only the exact bounded TOHO step described above, press Done, then return here and choose Continue. The locator is bound to this intervention and must not be forwarded."
   ].join("\n\n");
 }
 
@@ -471,6 +502,13 @@ async function runToolWithHandoff<T>(input: {
   await revokeBrowserHandoff(state.interventionId);
   const decision = executionAdapter.control.resumeAfterHumanIntervention(state.interventionId);
   handoffOwners.delete(state.interventionId);
+  if (
+    input.toolName === "start_checkout_handoff" &&
+    decision.action?.kind === "reviewed_full_checkout_handoff" &&
+    decision.action.provider === "toho"
+  ) {
+    return jsonResult(runtime.consumeTohoFullCheckoutHandoffOutcome(decision.action.intentDigest));
+  }
   if (decision.resumePolicy !== "replay_safe" || input.resumeStrategy === "require_fresh_semantic_action") {
     return staleAfterInterventionResult();
   }
@@ -729,6 +767,53 @@ export function buildServer(): McpServer {
         count, preference, ...(limit !== undefined ? { limit } : {}),
         ...(includeSpecialSeats !== undefined ? { includeSpecialSeats } : {})
       }, requireRecommendationSeatAdapter(provider))
+    })
+  );
+
+  server.registerTool(
+    "start_checkout_handoff",
+    {
+      title: "Start Human cinema checkout",
+      description: "TOHO only. Re-read the exact showtime seat map twice and, when seatIds are supplied, require those seats to remain available; otherwise seat choice stays entirely with the user. Then hand the dedicated Chrome window to the user for the entire checkout through any real purchase. The agent does not select seats, accept terms, enter PII/payment data, or press the final purchase control.",
+      inputSchema: humanCheckoutHandoffIntentSchema,
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false }
+    },
+    async (input, ctx) => runToolWithHandoff({
+      toolName: "start_checkout_handoff",
+      args: input,
+      resumeStrategy: CINEMA_HANDOFF_POLICY.transaction.resumeStrategy,
+      ctx,
+      timeoutMs: recommendSeatsTimeoutMs(),
+      task: async () => {
+        assertProviderCapability(input.provider, "humanCheckoutHandoff");
+        if (config.remote.disableHumanHandoff) {
+          throw new BrowserRuntimeError(
+            "HUMAN_ACTION_REQUIRED",
+            "Full checkout Handoff is available only in the local headed Human-control runtime."
+          );
+        }
+        const query = {
+          theater: input.showtime.theater,
+          date: input.showtime.date,
+          movie: input.showtime.movie,
+          startTime: input.showtime.startTime,
+          ...(input.showtime.screen ? { screen: input.showtime.screen } : {})
+        };
+        const first = await tohoReadAdapter.getSeatAvailability(query);
+        const second = await tohoReadAdapter.getSeatAvailability(query);
+        const validated = validateHumanCheckoutHandoffSeatReads(input, first, second);
+        const intentDigest = humanCheckoutHandoffDigest(validated.intent);
+        const intervention = await runtime.beginTohoFullCheckoutHandoff({
+          seatIds: validated.intent.seatIds ?? [],
+          intentDigest
+        });
+        throw new BrowserRuntimeError(
+          "HUMAN_ACTION_REQUIRED",
+          "The exact TOHO showtime and intended seats were revalidated. Human control is required for the entire checkout and any real purchase.",
+          { showtimeIdentity: validated.showtimeIdentity, intendedSeatIds: validated.intent.seatIds ?? [] },
+          intervention
+        );
+      }
     })
   );
 

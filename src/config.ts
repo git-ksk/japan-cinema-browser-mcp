@@ -233,7 +233,7 @@ export function loadConfig(): AppConfig {
       enabled: takeoverEnabled,
       ...(takeoverPublicBaseUrl ? { publicBaseUrl: takeoverPublicBaseUrl } : {}),
       localPort: takeoverLocalPort,
-      ttlMs: envInt("CINEMA_TAKEOVER_TTL_SECONDS", 300, 60, 600) * 1_000,
+      ttlMs: envInt("CINEMA_TAKEOVER_TTL_SECONDS", 1_800, 60, 1_800) * 1_000,
       ...(takeoverAccessEmail ? { cloudflareAccessEmail: takeoverAccessEmail } : {}),
       ...(takeoverEnabled && takeoverHostExecutable ? { hostExecutable: takeoverHostExecutable } : {})
     },

@@ -60,7 +60,7 @@ provider registryと横断ポリシーを保持します。
 - sensitive field判定
 - final purchase control判定
 
-TOHO / AEON / 109は `theaters=true / showtimes=true / seatMap=true`。`seatSelection / checkoutPreparation / purchaseSubmission` は全providerでfalseで、`CINEMA_ENABLE_PURCHASE=true` でも最終submitは実行できません。
+TOHO / AEON / 109は `theaters=true / showtimes=true / seatMap=true`。Agent側の `seatSelection / checkoutPreparation / purchaseSubmission` は全providerでfalseで、`CINEMA_ENABLE_PURCHASE=true` でも最終submitは実行できません。これとは別にHuman専用の `humanCheckoutHandoff` capabilityを持ち、TOHOだけtrueです。
 
 ### `src/providers/toho/adapter.ts`
 
@@ -139,7 +139,7 @@ Phase 4 #50のTOHO first-slice implementationです。現時点では**internal 
 - alternate seat、automatic retry、generic click fallbackを使わない
 - exact selected setを確認後、rendered `利用規約に同意して次へ` をHuman-only boundaryとして返し、自動clickしない
 
-Gate 0 live reviewではindividual seat activationがcross-session availabilityを変更しないことを確認しましたが、post-consent server-side hold start/releaseは未証明です。このため`seatSelection` / `checkoutPreparation`はfalseのままです。
+Gate 0b / Gate 1のphysical reviewで、個別seat activationや`確認する`まではcross-session holdを開始せず、Humanの`利用規約に同意して次へ`遷移でserver-visible holdが始まり、15分表示と自然releaseまで確認しました。この証拠はoptional automationの安全研究として保持します。製品の既定導線ではAgentがこの境界を分割操作せず、J01で2回の安定read後にFull Checkout Handoffへ移行します。
 
 ### `src/seat-recommendation.ts` / `src/recommend-seats.ts`
 
@@ -159,7 +159,8 @@ Phase 4のprovider-neutral checkout contract / safety coreです。#49ではbrow
 - checkout summaryはprovider adapterが現在のrendered UIから再取得したbounded factsだけをstrict parseし、caller intentとexact matchした場合だけmaterial SHA-256 fingerprintを生成する
 - missing subtotal / fees / totalはmissingのまま保持し、0や空配列を発明しない
 - arbitrary `providerData` / raw page/dialog / opaque checkout URLをgeneric summaryへ持ち込まない
-- `prepare_checkout` toolはreview済みprovider adapterが1社以上成立するまで登録しない
+- `prepare_checkout` はoptional automationとして未登録のまま維持する
+- v0.4.0の既定TOHO導線は `start_checkout_handoff`。上映回をstrictにbindし、seat mapの2回安定read後は座席選択から実購入までHumanへ一括handoffする。ticket/PII/payment/final-submitをMCP schemaへ持ち込まない
 
 `materialFingerprint`は`observedAt`だけを除外し、provider/theater/movie/date/time/screen/seats/tickets/amounts/current stageをbindingします。これはfinal purchase confirmationではなく、Phase 4で現在のrendered material factsが同じか比較するためのcontractです。
 
@@ -273,11 +274,12 @@ interface ProviderCapabilities {
   seatMap: boolean;
   seatSelection: boolean;
   checkoutPreparation: boolean;
+  humanCheckoutHandoff: boolean;
   purchaseSubmission: boolean;
 }
 ```
 
-capability matrixは表示用metadataではなくruntime policy boundaryです。`showtimes=true` でも `purchaseSubmission=false` なら、上映検索だけを提供し、最終購入は拒否します。
+capability matrixは表示用metadataではなくruntime policy boundaryです。`humanCheckoutHandoff=true` はHumanが専用browserを操作できることだけを表し、Agentの `seatSelection / checkoutPreparation / purchaseSubmission` を一切昇格させません。TOHOは `humanCheckoutHandoff=true` かつ `purchaseSubmission=false` です。
 
 UI変更や規約上の懸念が出た場合はcapabilityを落とします。無効化された機能をgeneric fuzzy automationで無理に代替しません。
 

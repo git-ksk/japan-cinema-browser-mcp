@@ -195,6 +195,7 @@ Human-only surfaceは `mcp-execution-handoff` のgeneric control planeへ接続�
 - TOHO Gate 0bのhistorical physical acceptanceはHandoff `BrowserHandoffAdapter` + WebRTCで完了済み。current Gate 1 acceptanceはHandoff v0.4.1 `WindowWebSocketHandoffAdapter`のWSS-only pathを使い、Cinemaはdedicated Chrome PID + read-onlyでexactly-one確認したmacOS CGWindowIDと `tap/scroll only` policyだけを渡す。text/keyはserver-side denyし、WebRTC/ICE/STUN/TURNやconsumer-local WSS brokerは使わない。Humanがprovider自身のreview済み `terms_check` を明示的にONにした事実はDone後にread-onlyでboolean検証するが、Cinemaはそのcheckboxや `利用規約に同意して次へ` を自動操作しない。Done自体はseat hold/consent/purchase approvalとして扱わない
 - provider adapter内部のexact pointer primitiveをnorthbound generic click/fillやdisabled capabilityの迂回路として公開しない。TOHO #50ではexact rendered seat ID/tag hit-test後のordinary-seat mutationだけに限定し、post-consent hold境界が未証明の間はtool/capabilityへ接続しない
 - Phase 4 checkout intentへpurchaser PII/contact、credential、payment、consent、caller-supplied amount/summary/final-controlを追加しない
+- TOHO Full Checkout Handoffではtext/key入力をHuman-controlled exact Windowへ許可するが、PII/credential/payment/OTP/CAPTCHAの内容をCinemaのMCP requestState、structured result、application logへ転記しない。Agentの`purchaseSubmission`権限とは分離する
 - checkout summaryはprovider-rendered bounded factsを再読した結果だけから作り、missing amount factを0等へ補完しない
 - provider-specific raw page/dialog、arbitrary provider data、opaque checkout URL/session tokenをgeneric checkout resultへ流さない
 - seat mutation候補は2回のread-only freshness確認後のexact intended seatだけとし、stale/missing/unavailable時に代替席を自動選択しない

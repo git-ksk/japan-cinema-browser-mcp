@@ -6,6 +6,8 @@ export interface ProviderCapabilities {
   seatMap: boolean;
   seatSelection: boolean;
   checkoutPreparation: boolean;
+  /** Human-operated checkout takeover. This never grants agent-side purchase authority. */
+  humanCheckoutHandoff: boolean;
   purchaseSubmission: boolean;
 }
 
@@ -23,6 +25,7 @@ const NO_TRANSACTION_CAPABILITIES = {
   seatMap: false,
   seatSelection: false,
   checkoutPreparation: false,
+  humanCheckoutHandoff: false,
   purchaseSubmission: false
 } as const;
 
@@ -36,7 +39,8 @@ export const CINEMA_PROVIDERS: Record<CinemaProviderId, CinemaProviderDefinition
       theaters: true,
       showtimes: true,
       ...NO_TRANSACTION_CAPABILITIES,
-      seatMap: true
+      seatMap: true,
+      humanCheckoutHandoff: true
     }
   },
   aeon: {

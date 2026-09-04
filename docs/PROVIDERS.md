@@ -47,12 +47,13 @@
 | 上映情報semantic | ✅ | ✅ | ✅ |
 | 座席表read | ✅ | ✅ | ✅ |
 | 座席選択 | ⬜ | ⬜ | ⬜ |
-| Checkout preparation | ⬜ | ⬜ | ⬜ |
-| Final purchase | ⬜ | ⬜ | ⬜ |
+| Checkout preparation (Agent) | ⬜ | ⬜ | ⬜ |
+| Full checkout Human Handoff | ✅ | ⬜ | ⬜ |
+| Final purchase (Agent submit) | ⬜ | ⬜ | ⬜ |
 
 `✅` はそのcapabilityについて実装済み、`⬜` は未解禁を表します。
 
-TOHO / AEON / 109の3社でreview済みread-only `seatMap=true` です。109はseat-map entryで10分session timerが開始しますがselected=0を必須検証します。AEONはactual seatに`active`が1件でもあればfail closedします。`seatSelection=false / checkoutPreparation=false / purchaseSubmission=false` は3社とも維持します。
+TOHO / AEON / 109の3社でreview済みread-only `seatMap=true` です。109はseat-map entryで10分session timerが開始しますがselected=0を必須検証します。AEONはactual seatに`active`が1件でもあればfail closedします。`seatSelection=false / checkoutPreparation=false / purchaseSubmission=false` は3社とも維持します。Human-operated checkoutは別capabilityで、TOHOのみ `humanCheckoutHandoff=true` です。
 
 ## Phase 3 Seat Intelligence Discovery — 2026-08-17
 
@@ -187,7 +188,8 @@ TOHOの公開UIには、複数の劇場名が1つのschedule routeを共有す�
 - `find_showtimes` — TOHO / AEON / 109のbounded cross-provider read
 - `get_seat_availability` — TOHO / AEON / 109のreview済みread-only seat map。seat clickなし
 - `recommend_seats` — TOHOのみ。freshnessを再検証してconfirmed available seatをscore。seat clickなし
-- `prepare_checkout` — Phase 4 target。現時点では未実装 / provider capability未解禁
+- `start_checkout_handoff` — TOHOのみ。exact showtime seat mapを2回readで再検証後、座席選択から購入完了までHumanへ一括handoff。Agent submitなし
+- `prepare_checkout` — optional automation target。現時点では未登録 / Agent checkout capability未解禁
 
 無効化されたseat/checkout/purchase capabilityをgeneric fuzzy automationへfallbackしません。Provider adapter内部のread-only navigation/clickはgeneric toolと分離し、rendered public UIから採用したexplicit route/controlと遷移後identityをprovider固有に再検証します。
 
