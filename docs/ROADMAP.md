@@ -221,7 +221,7 @@ Discovery: [`PHASE4_CHECKOUT_DISCOVERY.md`](./PHASE4_CHECKOUT_DISCOVERY.md) / #4
 2026-08-17 Discovery結論:
 
 - ✅ TOHO / AEON / 109のcheckout stageをread-only / semantic mutation / Human-only / final purchaseへ分類
-- ✅ TOHO: guest pathと15分timeout semanticsを確認。ただしseat activation/decisionのexact hold trigger・release境界は未証明のため `seatSelection=false` 維持
+- ✅ TOHO: guest pathと15分timeout semanticsを確認。Gate 0b v6でexact seat → `確認する` 1回 → Human `terms_check`までphysical acceptance済み。直後fresh sessionではexact seatが引き続きavailableで、externally visible holdは未観測。hold trigger / release境界は引き続き未確定のため `seatSelection=false` 維持
 - ✅ AEON: visible deselectionは確認できるがserver-side hold trigger/timeout/release semanticsは未証明のため `seatSelection=false` 維持
 - ✅ 109: 10分seat holdが公式明記。Phase 3でentry timerとseat holdを分離済みだがseat activationはserver-side reversible/expiring mutationとして個別reviewが必要
 - ✅ ticket type normalization候補を定義。provider label/restrictionをauthoritativeとしeligibilityを推測しない
@@ -230,15 +230,15 @@ Discovery: [`PHASE4_CHECKOUT_DISCOVERY.md`](./PHASE4_CHECKOUT_DISCOVERY.md) / #4
 - ✅ legal/terms consent、credential、OTP/MFA、CAPTCHA/challenge、paymentはHuman-only
 - ✅ semantic mutation / transactionは `never_replay`、Human後はfresh semantic action + provider/context再検証
 - ✅ TOHOをconditional first vertical sliceに維持。Gate 0でhold/release semanticsを証明できなければcapabilityを上げずblocked扱い
-- 🟡 #50 Gate 0実測: exact ordinary seat activationはrendered local/session selectionだけを変更し、別fresh profileのavailability/state fingerprintへ影響しないことを確認。server-side hold triggerはseat clickより後段
-- 🟡 seat選択後のrendered `利用規約に同意して次へ` はHuman-only。post-consent hold start / release semanticsは未証明なので `seatSelection=false` / `checkoutPreparation=false` を継続
+- ✅ #50 Gate 0 / Gate 0b実測: exact ordinary seat activationはrendered local/session selectionだけを変更。さらにphysical Gate 0b v6でexact seat → `確認する` → Human `terms_check` をcanonical verifierで確認し、直後fresh sessionでもexact seatはavailable。`確認する` までにexternally visible holdは観測されなかった
+- 🟡 次のGate 1はrendered `利用規約に同意して次へ` のHuman-only 1回遷移。Gate 0b proofをtarget / exact seat / intent / host/path / resource epochへone-shot bindingするacceptance plumbingを実装済み。post-consent hold start / release semanticsは未証明なので `seatSelection=false` / `checkoutPreparation=false` を継続
 - 🟡 internal TOHO adapterはexact pointer hit-test、1席ごとのexpected-state revalidation、no substitute/retry、special-seat拒否、consent boundary stopまでを実装。MCP toolには未登録
 - ✅ #49 generic core: checkout intentからPII/credential/payment/consent/caller-supplied summaryを除外し、missing amount factはmissingのまま保持。arbitrary provider data / raw page-dialog / opaque checkout URLもgeneric summaryへ持ち込まない
 
 Implementation split:
 
 - ✅ #49 — provider-neutral checkout contract/core。strict intent、2-read seat freshness、exact-seat validation、ticket normalization、rendered summary/material fingerprintまで実装。`prepare_checkout` tool自体は未登録でtransaction capabilityは全社false
-- 🟡 #50 — TOHO first vertical slice。individual seat image activationはlocal/session selectionでcross-session holdを作らないことを実証。A1 explicit reviewed Human Handoff + A2 ephemeral one-shot continuation bindingに加え、Gate 0b用のHuman-only `seat_decision` interventionとHandoff first-class `BrowserHandoffAdapter` wiringを実装。Cinemaはexact seat intent / postconditionだけを所有し、WebRTC transportはHandoffへ委譲。Gate 0bはpointer/scroll-only、headed owned Chrome限定、semantic mutationはnever-replay。physical sequenceはexact seat → `確認する` 1回 → Humanがreview済み `terms_check` をON → Doneで、`利用規約に同意して次へ` は未操作のまま。Done後はprovider-owned `seat_no` + rendered `seatList2` のexact-seat一致 + checkbox checkedをread-only検証し、fresh sessionでhold/release semanticsを観測する。capability false維持
+- 🟡 #50 — TOHO first vertical slice。Gate 0b physical acceptance完了。exact seat → `確認する` 1回 → Human `terms_check` → Doneをprovider-owned `seat_no` + rendered `seatList2` で検証し、直後fresh sessionでもseat availableを確認。Handoff first-class `BrowserHandoffAdapter`はv0.4.1へ更新済み。次のGate 1 acceptance plumbingはGate 0b proofをtarget / provider / exact seat / intent / host/path / resource epochへone-shot bindingし、pointer/scroll-only Human Handoffで `利用規約に同意して次へ` を1回だけ扱い、直後 `TNPI2010J02.do` 以外をfail closed。ticket操作・seat replayなし。physical Gate 1とhold/timer/fresh-session観測待ち。capability false維持
 - ⬜ #51 — AEON hold/release review + provider adapter。TOHO parityを強制しない
 - ⬜ #52 — 109 explicit 10-minute hold review + provider adapter。TOHO parityを強制しない
 
@@ -251,7 +251,7 @@ Implementation split:
 - ✅ Human操作後のofficial provider / challenge state再検証
 - ✅ semantic mutation / transactionのautomatic replay禁止
 - ✅ Human intervention開始時のprepared purchase confirmation破棄
-- ✅ TOHO Gate 0bのWebRTC Browser Handoffをconsumer-local transport実装なしでHandoff first-class adapterへ接続。pointer/scroll-only、text/key server-block、exact managed Chrome PID binding、Done後fresh verification
+- ✅ TOHO Gate 0b / Gate 1 acceptanceのWebRTC Browser Handoffをconsumer-local transport実装なしでHandoff first-class adapterへ接続。Handoff v0.4.1固定、pointer/scroll-only、text/key server-block、exact managed Chrome PID binding、Done後fresh verification
 
 TOHO / AEON / 109のread-only `seatMap` はtrueです。`seatSelection` / `checkoutPreparation` / `purchaseSubmission` は引き続き全providerでfalseです。Human Handoff実装はtransaction capabilityの解禁を意味しません。
 

@@ -23,6 +23,50 @@ import { PurchaseGate } from "../src/purchase-gate.js";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PRINCIPAL = "local-stdio";
 
+async function establishTohoGate0bProof(
+  runtime: CinemaBrowserRuntime,
+  input: { targetId: string; seatId: string; intentDigest: string }
+): Promise<void> {
+  const mutable = runtime as unknown as {
+    targetId: string;
+    getReviewedBrowserContext: () => Promise<{ provider: "toho"; targetId: string; host: string; pathname: string }>;
+    getVerificationClient: () => Promise<unknown>;
+    currentUrlUnchecked: () => Promise<string>;
+  };
+  mutable.targetId = input.targetId;
+  mutable.getReviewedBrowserContext = async () => ({
+    provider: "toho",
+    targetId: input.targetId,
+    host: "hlo.tohotheater.jp",
+    pathname: "/net/ticket/066/TNPI2010J01.do"
+  });
+  mutable.getVerificationClient = async () => ({
+    Runtime: {
+      evaluate: async () => ({
+        result: {
+          value: {
+            expectedSeatSelected: true,
+            selectedSeatCount: 1,
+            renderedSeatCount: 1,
+            imageSelectedSeatCount: 1,
+            imageExpectedSelected: true,
+            termsCheckboxCount: 1,
+            termsAcknowledged: true
+          }
+        }
+      })
+    }
+  });
+  mutable.currentUrlUnchecked = async () => "https://hlo.tohotheater.jp/net/ticket/066/TNPI2010J01.do";
+  const intervention = await runtime.beginTohoSeatDecisionGate0b({ seatId: input.seatId, intentDigest: input.intentDigest });
+  runtime.claimHumanControl(intervention.id);
+  runtime.markHumanControlComplete(intervention.id);
+  const verified = await runtime.verifyHumanIntervention(intervention.id);
+  assert.equal(verified.status, "ready_to_resume");
+  const decision = runtime.resumeAfterHumanIntervention(intervention.id);
+  assert.equal(decision.resumePolicy, "never_replay");
+}
+
 test("Cinema maps pure reads, navigation, mutations and transactions to progressively stricter handoff policies", () => {
   assert.deepEqual(CINEMA_HANDOFF_POLICY.read, {
     resumePolicy: "replay_safe",
@@ -137,8 +181,10 @@ test("reviewed Handoff dependency is immutable and transaction replay remains st
   assert.match(server, /利用規約に同意して次へ/);
   const runtime = fs.readFileSync(path.join(root, "src/browser/runtime.ts"), "utf8");
   assert.match(server, /new BrowserHandoffAdapter/);
-  assert.match(server, /GATE0B_INPUT_POLICY = Object\.freeze\(\{ tap: true, scroll: true, text: false, key: false \}/);
-  assert.match(server, /browserHandoffAdapter\.start\(\{[\s\S]*inputPolicy: GATE0B_INPUT_POLICY/);
+  assert.match(server, /REVIEWED_POINTER_ONLY_INPUT_POLICY = Object\.freeze\(\{ tap: true, scroll: true, text: false, key: false \}/);
+  assert.match(server, /browserHandoffAdapter\.start\(\{[\s\S]*inputPolicy: REVIEWED_POINTER_ONLY_INPUT_POLICY/);
+  assert.match(server, /reviewed_gate1_boundary/);
+  assert.match(server, /toho_terms_advance_gate1/);
   assert.doesNotMatch(server, /new TakeoverBroker|createLink\(/);
   assert.doesNotMatch(runtime, /captureHumanTakeoverFrame|tapHumanTakeover|insertHumanTakeoverText|pressHumanTakeoverKey/);
   assert.match(runtime, /CINEMA_HANDOFF_POLICY\.transaction\.resumePolicy/);
@@ -260,6 +306,164 @@ test("TOHO Gate 0b verification requires the exact bound seat and explicit Human
   assert.equal(verified.status, "ready_to_resume");
   const decision = runtime.resumeAfterHumanIntervention(intervention.id);
   assert.equal(decision.resumePolicy, "never_replay");
+});
+
+test("TOHO Gate 1 starts only from the exact Gate 0b postcondition and reviewed provider continuation", async () => {
+  const runtime = new CinemaBrowserRuntime({ close: async () => undefined } as unknown as ChromeProcess, 1_000);
+  const mutable = runtime as unknown as {
+    targetId: string;
+    getReviewedBrowserContext: () => Promise<{ provider: "toho"; targetId: string; host: string; pathname: string }>;
+    getClient: () => Promise<unknown>;
+  };
+  mutable.targetId = "target-gate1";
+  mutable.getReviewedBrowserContext = async () => ({
+    provider: "toho",
+    targetId: "target-gate1",
+    host: "hlo.tohotheater.jp",
+    pathname: "/net/ticket/066/TNPI2010J01.do"
+  });
+  await assert.rejects(
+    runtime.beginTohoTermsAdvanceGate1({ seatId: "A-2", intentDigest: `sha256:${"c".repeat(64)}` }),
+    (error: unknown) => error instanceof BrowserRuntimeError && error.code === "UI_STATE_CHANGED" && /Gate 0b proof/.test(error.message)
+  );
+  await establishTohoGate0bProof(runtime, {
+    targetId: "target-gate1",
+    seatId: "A-2",
+    intentDigest: `sha256:${"c".repeat(64)}`
+  });
+  let precondition = {
+    expectedSeatSelected: true,
+    selectedSeatCount: 1,
+    renderedSeatCount: 1,
+    termsCheckboxCount: 1,
+    termsAcknowledged: true,
+    matchingControls: 1,
+    controlHrefExact: true,
+    formNameExact: true,
+    formMethodExact: true,
+    formTargetExact: true,
+    kakuteiControlCount: 1
+  };
+  let expression = "";
+  mutable.getClient = async () => ({
+    Runtime: {
+      evaluate: async (input: { expression: string }) => {
+        expression = input.expression;
+        return { result: { value: precondition } };
+      }
+    }
+  });
+  const intervention = await runtime.beginTohoTermsAdvanceGate1({
+    seatId: "A-2",
+    intentDigest: `sha256:${"c".repeat(64)}`
+  });
+  assert.equal(intervention.reason, "consent");
+  assert.equal(intervention.resumePolicy, "never_replay");
+  assert.equal(intervention.action?.kind, "reviewed_gate1_boundary");
+  if (intervention.action?.kind === "reviewed_gate1_boundary") {
+    assert.equal(intervention.action.provider, "toho");
+    assert.equal(intervention.action.boundary, "toho_terms_advance_gate1");
+    assert.equal(intervention.action.seatId, "A-2");
+  }
+  assert.match(expression, /bookSeatIntForm/);
+  assert.match(expression, /利用規約に同意して次へ/);
+  assert.match(expression, /javascript:bookSeat\(\);/);
+  assert.match(expression, /TNPI2010J02\.do/);
+  assert.doesNotMatch(expression, /\.click\(|dispatchEvent|submit\(\)/);
+  runtime.cancelHumanIntervention(intervention.id);
+
+  await establishTohoGate0bProof(runtime, {
+    targetId: "target-gate1",
+    seatId: "A-2",
+    intentDigest: `sha256:${"c".repeat(64)}`
+  });
+  precondition = { ...precondition, termsAcknowledged: false };
+  await assert.rejects(
+    runtime.beginTohoTermsAdvanceGate1({ seatId: "A-2", intentDigest: `sha256:${"c".repeat(64)}` }),
+    (error: unknown) => error instanceof BrowserRuntimeError && error.code === "UI_STATE_CHANGED"
+  );
+});
+
+test("TOHO Gate 1 verification accepts only the immediate reviewed J02 continuation and never replays the seat action", async () => {
+  const runtime = new CinemaBrowserRuntime({ close: async () => undefined } as unknown as ChromeProcess, 1_000);
+  const mutable = runtime as unknown as {
+    targetId: string;
+    getReviewedBrowserContext: () => Promise<{ provider: "toho"; targetId: string; host: string; pathname: string }>;
+    getClient: () => Promise<unknown>;
+    getVerificationClient: () => Promise<unknown>;
+    currentUrlUnchecked: () => Promise<string>;
+  };
+  mutable.targetId = "target-gate1-verify";
+  mutable.getReviewedBrowserContext = async () => ({
+    provider: "toho",
+    targetId: "target-gate1-verify",
+    host: "hlo.tohotheater.jp",
+    pathname: "/net/ticket/066/TNPI2010J01.do"
+  });
+  mutable.getClient = async () => ({
+    Runtime: { evaluate: async () => ({ result: { value: {
+      expectedSeatSelected: true,
+      selectedSeatCount: 1,
+      renderedSeatCount: 1,
+      termsCheckboxCount: 1,
+      termsAcknowledged: true,
+      matchingControls: 1,
+      controlHrefExact: true,
+      formNameExact: true,
+      formMethodExact: true,
+      formTargetExact: true,
+      kakuteiControlCount: 1
+    } } }) }
+  });
+  mutable.getVerificationClient = async () => ({ Runtime: { evaluate: async () => ({ result: { value: {} } }) } });
+  let currentUrl = "https://hlo.tohotheater.jp/net/ticket/066/TNPI2010J01.do";
+  mutable.currentUrlUnchecked = async () => currentUrl;
+
+  await establishTohoGate0bProof(runtime, {
+    targetId: "target-gate1-verify",
+    seatId: "A-2",
+    intentDigest: `sha256:${"d".repeat(64)}`
+  });
+  mutable.currentUrlUnchecked = async () => currentUrl;
+  const intervention = await runtime.beginTohoTermsAdvanceGate1({
+    seatId: "A-2",
+    intentDigest: `sha256:${"d".repeat(64)}`
+  });
+  runtime.claimHumanControl(intervention.id);
+  runtime.markHumanControlComplete(intervention.id);
+  await assert.rejects(
+    runtime.verifyHumanIntervention(intervention.id),
+    (error: unknown) => error instanceof BrowserRuntimeError && error.code === "HUMAN_ACTION_REQUIRED"
+  );
+
+  runtime.claimHumanControl(intervention.id);
+  runtime.markHumanControlComplete(intervention.id);
+  currentUrl = "https://hlo.tohotheater.jp/net/ticket/066/TNPI2010J03.do";
+  await assert.rejects(
+    runtime.verifyHumanIntervention(intervention.id),
+    (error: unknown) => error instanceof BrowserRuntimeError && error.code === "UI_STATE_CHANGED"
+  );
+  runtime.cancelHumanIntervention(intervention.id);
+
+  currentUrl = "https://hlo.tohotheater.jp/net/ticket/066/TNPI2010J01.do";
+  await establishTohoGate0bProof(runtime, {
+    targetId: "target-gate1-verify",
+    seatId: "A-2",
+    intentDigest: `sha256:${"e".repeat(64)}`
+  });
+  mutable.currentUrlUnchecked = async () => currentUrl;
+  const retry = await runtime.beginTohoTermsAdvanceGate1({
+    seatId: "A-2",
+    intentDigest: `sha256:${"e".repeat(64)}`
+  });
+  runtime.claimHumanControl(retry.id);
+  runtime.markHumanControlComplete(retry.id);
+  currentUrl = "https://hlo.tohotheater.jp/net/ticket/066/TNPI2010J02.do";
+  const verified = await runtime.verifyHumanIntervention(retry.id);
+  assert.equal(verified.status, "ready_to_resume");
+  const decision = runtime.resumeAfterHumanIntervention(retry.id);
+  assert.equal(decision.resumePolicy, "never_replay");
+  assert.equal(decision.action?.kind, "reviewed_gate1_boundary");
 });
 
 test("reviewed TOHO checkout boundary carries only a bounded digest action and remains never_replay", async () => {

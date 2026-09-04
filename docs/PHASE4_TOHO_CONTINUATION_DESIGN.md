@@ -354,28 +354,31 @@ Phase 4では常に `false` です。
 
 #50の継続処理基盤としてA1/A2は実装済みです。ただし、provider capabilityの有効化や `prepare_checkout` の公開登録は行っていません。
 
-その後のB1事前確認で、TOHOの公開画面には利用規約同意より前に `確認する` という座席決定段階があることが判明しました。
+2026-08-25のphysical Gate 0b v6では、exact `A-2` に対してHumanが `確認する` を1回だけ実行し、provider自身の `terms_check` をONにした後、Cinemaのcanonical verifierが `bookSeatIntForm.seat_no` とrendered `#seatList2` のexact-seat一致を確認しました。直後の独立fresh sessionでも `A-2` は `available` のままでした。したがって、**`確認する` + terms checkboxまででは、別sessionから観測できるserver-side holdは発生しませんでした**。この結果だけから15分holdの開始点やrelease semanticsは断定しません。
 
-A1/A2の基盤自体は有効ですが、現在のprovider adapterはGate 0bでhold semanticsを確認するまで `確認する` で停止しなければなりません。
+次のmaterial候補はHuman-onlyの `利用規約に同意して次へ` です。2026-09-04時点でGate 1 acceptance plumbingを実装し、Handoffはv0.4.1 release commitへ固定しています。Gate 1はGate 0b成功proofをtarget / provider / exact seat / intent digest / host / pathname / resource epochへone-shot bindingし、途中に別resource操作が入れば失効します。開始前にcanonical seat、terms acknowledgement、exact form/action/controlをread-onlyで再検証し、Human操作後は同一hostの直後 `TNPI2010J02.do` だけを受理します。券種選択は行わず、seat mutationのreplayもありません。
 
-1. **A1 — レビュー済み境界専用のintervention基盤** — 実装済み
+1. **A1 — レビュー済み境界専用のintervention基盤** — ✅ 実装済み
    - 型付き `CinemaHandoffAction`
    - provider専用handoff entry point
    - 境界専用のHuman prompt
    - capability変更なし
-2. **A2 — 短命な継続bindingと新規action dispatch** — 基盤実装済み
+2. **A2 — 短命な継続bindingと新規action dispatch** — ✅ 基盤実装済み
    - target / provider / intent / material binding
    - one-shot消費・無効化
    - 座席操作のリプレイなし
    - capability変更なし
-3. **Gate 0b — TOHOの `確認する` 座席決定境界レビュー** — 次のprovider gate
-   - 直接seat imageへ近道せず、正しい表示上の操作順を確立する
-   - `確認する` が公開FAQ記載の15分holdを開始するか確認する
-   - 継続許可前に、選択・hold identityと解放semanticsを証明する
-4. **B1 — 同意後Gate 1 live review** — Gate 0b待ち
-   - 人間による同意遷移は1回だけ
-   - 読み取り専用で段階・hold・別fresh profileを確認
-   - holdが観測された場合は自然expiryで解放を確認
+3. **Gate 0b — TOHOの `確認する` 座席決定境界レビュー** — ✅ physical acceptance完了
+   - exact seat → `確認する` 1回 → Human `terms_check` → Doneを検証済み
+   - canonical selected-seat identityをTOHO自身のform + rendered summaryで確認
+   - 直後fresh sessionではexact seatが引き続きavailableで、externally visible holdなし
+   - hold開始点・自然releaseは未確定のためcapabilityはfalse維持
+4. **B1 — 同意後Gate 1 live review** — 🟡 acceptance plumbing実装済み / physical review待ち
+   - Gate 0bのone-shot proofと同一resource epochだけから開始
+   - 人間による `利用規約に同意して次へ` は1回だけ
+   - 直後 `TNPI2010J02.do` で停止し、券種を選ばない
+   - 読み取り専用で段階・hold/timer・別fresh profileを確認
+   - holdが観測された場合は推測cleanupをせず自然expiryで解放を確認
 5. **B2 — 券種adapter**
    - B1で同意後画面がレビューできた後だけ実装
    - 厳密な券種正規化・選択

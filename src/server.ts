@@ -63,7 +63,7 @@ const browserHandoffAdapter = config.takeover.enabled && config.takeover.webRtcR
       runtime: config.takeover.webRtcRuntime
     })
   : undefined;
-const GATE0B_INPUT_POLICY = Object.freeze({ tap: true, scroll: true, text: false, key: false } as const);
+const REVIEWED_POINTER_ONLY_INPUT_POLICY = Object.freeze({ tap: true, scroll: true, text: false, key: false } as const);
 const executionAdapter = createCinemaExecutionAdapter(runtime);
 const operationQueue = new OperationQueue();
 const tohoReadAdapter = new TohoReadAdapter(runtime);
@@ -137,6 +137,18 @@ function cinemaInterventionPrompt(intervention: CinemaIntervention): string {
     ].join(" ");
   }
   if (
+    intervention.action?.kind === "reviewed_gate1_boundary" &&
+    intervention.action.provider === "toho" &&
+    intervention.action.boundary === "toho_terms_advance_gate1"
+  ) {
+    return [
+      `TOHO Gate 1 is waiting at the Human-only terms advance for exact seat ${intervention.action.seatId}.`,
+      "The agent already revalidated that this exact seat is the only canonical selected seat, the provider terms checkbox is checked, and the exact provider continuation is still bound.",
+      "If you agree to the provider terms, press `利用規約に同意して次へ` exactly once and stop immediately on the next page before choosing any ticket type.",
+      "Press Handoff Done there. Do not change seats, choose ticket types, enter credentials/PII/payment data, or proceed toward final purchase. No seat action is replayed."
+    ].join(" ");
+  }
+  if (
     intervention.action?.kind === "reviewed_checkout_boundary" &&
     intervention.action.provider === "toho" &&
     intervention.action.boundary === "toho_terms_consent_next"
@@ -168,33 +180,32 @@ function cinemaInterventionPrompt(intervention: CinemaIntervention): string {
 
 function handoffPrompt(intervention: CinemaIntervention): string {
   const base = cinemaInterventionPrompt(intervention);
-  if (
-    intervention.action?.kind !== "reviewed_gate0b_boundary" ||
-    intervention.action.provider !== "toho" ||
-    intervention.action.boundary !== "toho_seat_decision_gate0b"
-  ) {
-    return base;
-  }
+  const reviewedRemoteBoundary =
+    intervention.action?.provider === "toho" && (
+      (intervention.action.kind === "reviewed_gate0b_boundary" && intervention.action.boundary === "toho_seat_decision_gate0b") ||
+      (intervention.action.kind === "reviewed_gate1_boundary" && intervention.action.boundary === "toho_terms_advance_gate1")
+    );
+  if (!reviewedRemoteBoundary) return base;
   const accessEmail = config.takeover.cloudflareAccessEmail;
   if (!browserHandoffAdapter || !accessEmail) return base;
   const targetProcessId = chrome.getPid();
   if (!targetProcessId) {
     throw new BrowserRuntimeError(
       "BROWSER_UNAVAILABLE",
-      "TOHO Gate 0b Browser Handoff requires the current process to own the dedicated headed Chrome process."
+      "TOHO reviewed Browser Handoff requires the current process to own the dedicated headed Chrome process."
     );
   }
   const takeoverUrl = browserHandoffAdapter.start({
     intervention: { id: intervention.id, epoch: intervention.epoch },
     principalBinding: takeoverPrincipalBindingForEmail(accessEmail),
     target: { processId: targetProcessId },
-    inputPolicy: GATE0B_INPUT_POLICY
+    inputPolicy: REVIEWED_POINTER_ONLY_INPUT_POLICY
   });
   return [
     base,
     "Remote Human takeover is available through the configured authenticated HTTPS gateway:",
     takeoverUrl,
-    "Open that short-lived URL on your phone. Handoff permits pointer/scroll only for Gate 0b; text and keyboard input are server-blocked. Operate only the exact TOHO seat-decision surface, press Done, then return here and choose Continue. The locator is bound to this intervention and must not be forwarded."
+    "Open that short-lived URL on your phone. This reviewed Cinema Handoff permits pointer/scroll only; text and keyboard input are server-blocked. Operate only the exact bounded TOHO step described above, press Done, then return here and choose Continue. The locator is bound to this intervention and must not be forwarded."
   ].join("\n\n");
 }
 
