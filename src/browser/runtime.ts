@@ -1489,6 +1489,8 @@ export class CinemaBrowserRuntime {
     this.gate0bProof = undefined;
     this.gate1Binding = undefined;
     this.gate1TicketProof = undefined;
+    this.b2GuestProof = undefined;
+    this.purchaserPaymentBinding = undefined;
     const active = this.handoff.getActive();
     if (active) this.handoff.cancel(active.id);
     const client = this.client;
@@ -1739,6 +1741,10 @@ export class CinemaBrowserRuntime {
           this.client = undefined;
           this.targetId = undefined;
           this.checkoutContinuations.clear();
+          this.gate0bProof = undefined;
+          this.gate1TicketProof = undefined;
+          this.b2GuestProof = undefined;
+          this.purchaserPaymentBinding = undefined;
         }
       }
     }
@@ -1770,6 +1776,10 @@ export class CinemaBrowserRuntime {
           this.client = undefined;
           this.targetId = undefined;
           this.checkoutContinuations.clear();
+          this.gate0bProof = undefined;
+          this.gate1TicketProof = undefined;
+          this.b2GuestProof = undefined;
+          this.purchaserPaymentBinding = undefined;
         }
         throw error;
       }
