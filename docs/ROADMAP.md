@@ -232,13 +232,13 @@ Discovery: [`PHASE4_CHECKOUT_DISCOVERY.md`](./PHASE4_CHECKOUT_DISCOVERY.md) / #4
 - ✅ TOHOをconditional first vertical sliceに維持。Gate 0でhold/release semanticsを証明できなければcapabilityを上げずblocked扱い
 - ✅ #50 Gate 0 / Gate 0b実測: exact ordinary seat activationはrendered local/session selectionだけを変更。さらにphysical Gate 0b v6でexact seat → `確認する` → Human `terms_check` をcanonical verifierで確認し、直後fresh sessionでもexact seatはavailable。`確認する` までにexternally visible holdは観測されなかった
 - ✅ Gate 1 physical acceptance完了。`利用規約に同意して次へ` のHuman-only 1回遷移でJ02へ到達し、fresh profileでexact seatがunavailable化。J02の15分自動解除表示と、その後の自然releaseによるavailable復帰も確認。exact解除秒は未計測
-- 🟡 internal TOHO adapterはseat境界に加えてB2 ticket-stageを実装。J02のexact provider ticket ID/label/priceを正規化し、初期1席sliceではGate 1のtarget/seat/intent/epoch one-shot proof後にreview済み`一般`だけをexact pointerで選択可能。学生・シニア・障がい等の資格券はHuman review、provider Ajaxが追加条件を返した場合も停止。`ログインせず次へ`は検証だけでクリックしない。physical B2 acceptance待ち、MCP tool未登録
+- ✅ internal TOHO adapterのB2 ticket-stage physical acceptance完了。Gate 1のtarget/seat/intent/epoch one-shot proof後、callerが明示したreview済み`一般` 1枚だけをexact pointerで選択し、provider ID `529-2100-0010-0`、表示 `一般 2,100円`、hidden/rendered total 2,100円、Ajax settlement=0、追加条件markerなしを実機確認。選択後にanchor labelが変わるDOMもPR #83でstrict normalize対応。`ログインせず次へ`は検証だけで未操作、MCP tool未登録
 - ✅ #49 generic core: checkout intentからPII/credential/payment/consent/caller-supplied summaryを除外し、missing amount factはmissingのまま保持。arbitrary provider data / raw page-dialog / opaque checkout URLもgeneric summaryへ持ち込まない
 
 Implementation split:
 
 - ✅ #49 — provider-neutral checkout contract/core。strict intent、2-read seat freshness、exact-seat validation、ticket normalization、rendered summary/material fingerprintまで実装。`prepare_checkout` tool自体は未登録でtransaction capabilityは全社false
-- 🟡 #50 — TOHO first vertical slice。Gate 0b / Gate 1 physical acceptanceとserver-side hold→15分自然release証拠まで完了。Gate 1成功時にJ02 B2用proofをtarget / exact seat / intent digest / host/path / resource epochへone-shot生成する。B2はread-only J02 reviewを基に、exact provider ticket ID/label/price・1席slot・guest continuation identityをfail-closedで正規化し、review済み`一般`のみexact pointer mutation候補、資格券・追加Ajax条件はHumanへ戻す。guest/purchaser continuationは未操作。physical B2 acceptance待ちで `seatSelection=false` / `checkoutPreparation=false` / `purchaseSubmission=false` 維持
+- 🟡 #50 — TOHO first vertical slice。Gate 0b / Gate 1のhold→15分自然releaseに加え、B2 physical mutation acceptanceまで完了。exact one-shot Gate 1 proofからcaller明示のreview済み`一般` 1枚だけを選択し、provider ID/label/price/total/Ajax settlement/追加条件なしを実機で検証した。資格券はHuman review、guest continuationは未操作。次はB3のguest→購入者情報・支払いHuman-only境界とpre-purchase summary reachabilityをreviewする。`seatSelection=false` / `checkoutPreparation=false` / `purchaseSubmission=false` 維持
 - ⬜ #51 — AEON hold/release review + provider adapter。TOHO parityを強制しない
 - ⬜ #52 — 109 explicit 10-minute hold review + provider adapter。TOHO parityを強制しない
 

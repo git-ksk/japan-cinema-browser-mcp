@@ -72,6 +72,8 @@ Phase 3では、座席表へ入るだけでは選択席が発生しないこと�
 
 2026-09-05のJ02 read-only reviewでは、seat slot `A2`、hidden `ticket_type_name`、exact modal trigger、TOHO自身の `SelectTicket.setTicket(...)` に埋め込まれたprovider ticket ID / label / price、`ログインせず次へ` のguest continuation identityを確認しました。券種選択後はprovider Ajaxが3D/追加料金・キャンペーン・決済限定・MovieTicket等を返し得るため、B2は選択後にこれらを再読して条件があれば停止します。資格を推測せず、初期1席sliceでagent候補とするのはreview済み`一般`だけです。
 
+同日のB2 physical mutation acceptanceでは、callerが明示した`一般` 1枚のみをexact pointerで選択しました。選択後のprovider IDは`529-2100-0010-0`、表示は`一般 2,100円`、hidden/rendered totalはいずれも2,100円、Ajaxはsettled、追加料金/キャンペーン/MovieTicket/決済限定/provider warningは観測されませんでした。`ログインせず次へ`は未操作です。選択後に同じmodal anchorの表示labelが選択済み券種へ変わるため初回post-readがfail closedしましたが、PR #83でread-only stage normalizationだけを選択済みDOMへ対応し、pointer mutation直前のexact未選択label検証は維持しています。
+
 また、隔離環境の標準 `756x469` viewportでは横向き表示に関するブロックが出ました。`1280x813` ではその環境要因は解消しましたが、`確認する` は依然として操作可能になりませんでした。
 
 このため、画面サイズを変えて無理に続行したり、座席選択を繰り返したりせず安全側に停止します。

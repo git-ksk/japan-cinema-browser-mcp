@@ -159,7 +159,7 @@ interface CheckoutContinuationBinding {
 - `continuationDigest` は重要事実を正規化したSHA-256であり、権限tokenとして扱わない。
 - クライアントがdigestを返したこと自体を認可条件にしない。認可はactive intervention ownershipと現在画面の再検証で決める。
 
-TOHOのhold開始点はまだ証明されていないため、このTTLを「TOHOの15分hold」とは表現しません。実装内部の安全TTLと、TOHO画面に表示される期限は別物です。
+Gate 1 physical acceptanceでTOHOのserver-side hold開始境界と自然releaseは実証済みですが、この内部TTLを「TOHOの15分hold」とは扱いません。実装内部の安全TTLと、TOHO画面に表示される15分期限は別のauthorityです。
 
 ## C. Human Handoff完了後の再検証
 
@@ -386,16 +386,17 @@ Phase 4では常に `false` です。
    - exact seat → `確認する` 1回 → Human `terms_check` → Doneを検証済み
    - canonical selected-seat identityをTOHO自身のform + rendered summaryで確認
    - 直後fresh sessionではexact seatが引き続きavailableで、externally visible holdなし
-   - hold開始点・自然releaseは未確定のためcapabilityはfalse維持
+   - このGate 0b単体ではholdを観測せず、後続Gate 1でhold開始点・自然releaseを別途実証。capabilityは引き続きfalse
 4. **B1 — 同意後Gate 1 live review** — ✅ physical acceptance完了
    - Human `利用規約に同意して次へ` 1回でJ02へ到達
    - fresh profileでexact seat unavailable化を確認
    - J02の15分自動解除表示と、能動releaseなしのavailable復帰を確認
-5. **B2 — 券種adapter** — 🟡 implementation/test完了 / physical mutation acceptance待ち
+5. **B2 — 券種adapter** — ✅ implementation/test/physical mutation acceptance完了
    - J02の1席slot、provider ticket ID/label/price、guest continuationをstrict normalize
    - Gate 1 proofをtarget / seat / intent / path / resource epochへone-shot binding
-   - review済み`一般`のみexact pointerで選択候補。資格券はHuman review
-   - provider Ajax後に追加料金/条件を再読し、存在・不明なら停止
+   - caller明示のreview済み`一般` 1枚だけをexact pointerで実機選択済み。資格券はHuman review
+   - provider ID `529-2100-0010-0`、`一般 2,100円`、total 2,100円、Ajax settlement=0、追加条件markerなしをpost-selectionで確認
+   - 選択後にmodal anchorの表示labelが変わる実DOMをPR #83でstrict normalize対応。mutation直前のexact未選択label検証は維持
    - `ログインせず次へ`はB2ではクリックしない
 6. **B3 — 購入者情報・支払いhandoffと確認画面境界**
    - provider固有の肯定条件を確認

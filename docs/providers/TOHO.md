@@ -18,7 +18,7 @@ Phase 4 チェックアウト調査: 2026-08-17
 | 劇場一覧・劇場選択 | 有効 | 公式劇場一覧に表示されたlinkのみ |
 | 上映情報取得 | 有効 | 劇場・日付・作品・上映回を表示中のUIから抽出 |
 | 座席表の読み取り | 有効 | #32のread-only adapterと#33の鮮度確認・推薦 |
-| 座席選択 | 無効 | `seatSelection=false`。座席決定後のhold開始点と解放条件が未証明 |
+| 座席選択 | 無効 | `seatSelection=false`。Gate 1でのhold開始と自然releaseは実証済みだが、公開capability化はB3を含むPhase 4 closeout待ち |
 | チェックアウト準備 | 無効 | #49の共通基盤は完了。#50は内部実装のみで公開機能にはしていない |
 | 最終購入 | 無効 | Phase 5で別途厳格なレビューが必要 |
 
@@ -238,9 +238,9 @@ TOHO-ONEへログインせず購入できるguest pathはレビュー済みで�
 
 座席画像が `選択中` になっただけでは選択座席summaryが先へ進まず、`確認する` も操作可能になりませんでした。そのため、直接seat imageを選んだことをFAQ上の「希望座席を決定」と同一視しません。
 
-`確認する` を15分hold開始点の有力候補としてGate 0bで別途レビューします。
+`確認する` は当時15分hold開始点の有力候補としてGate 0bで別途レビューしました。physical Gate 0bではfresh sessionがavailableのままで、hold開始点ではないことを確認済みです。
 
-Gate 0bが未完了の間は:
+Gate 0b受入前に適用していた安全規則は:
 
 - `確認する` を自動操作しない
 - Gate 0bでprovider自身の `terms_check` をONにする場合もHuman操作だけに限定し、Agentはcheckboxを自動操作しない
@@ -272,7 +272,7 @@ Screen 4では画面表示の `113席 + 2車いす席` と、ちょうど2つの
 - Gate 0bでは `利用規約に同意して次へ` / ticket / purchaser PII / payment / final purchaseを操作しない。Gate 1はHuman-onlyで同意後J02まで、B2はJ02内のreview済み券種だけを別のfresh semantic actionとして扱う
 - Human Handoff後に座席変更を自動再実行しない
 
-Gate 0b / Gate 1はphysical acceptance済みで、Gate 1遷移時のserver-side holdと15分表示、能動解除なしの自然releaseまで確認しました。ただしB2/B3の後続境界は段階的review中なので対応機能はまだ有効化していません。
+Gate 0b / Gate 1に加えてB2のphysical acceptanceまで完了しています。Gate 1遷移時のserver-side holdと15分表示、能動解除なしの自然release、さらにcaller明示の`一般` 1枚のexact ticket mutationとpost-selection provider factsを確認しました。ただしB3のguest/purchaser/payment境界はreview中なので対応機能はまだ有効化していません。
 
 同意後の継続処理は、同じ呼び出しを再開して座席操作を繰り返す方式ではありません。明示的なHuman Handoffの後に、**新しい意味操作**として現在の画面を再検証し、元の購入意図へ結び直します。
 
@@ -291,7 +291,7 @@ Gate 0b / Gate 1はphysical acceptance済みで、Gate 1遷移時のserver-side 
 - `ログインせず次へ` はidentityをread-only検証するだけでB2からは操作しない
 - MCP tool公開、`seatSelection` / `checkoutPreparation` / `purchaseSubmission` の変更は行わない
 
-B2のexact mutation自体はphysical acceptance前なので、実装が存在することをcapability approvalとは扱いません。
+2026-09-05のphysical acceptanceでは、caller明示の`一般` 1枚だけをexact pointerで選択し、provider ID `529-2100-0010-0`、rendered `一般 2,100円`、hidden/rendered total 2,100円、Ajax settlement=0、追加条件markerなしを確認しました。選択後は同じmodal anchorの表示が`券種を選択してください`から選択済み券種へ変わるため、PR #83でstage readだけをlabel非依存のexact `a[data-modal]` identityへ修正し、mutation直前の未選択label検証は維持しています。B2完了だけをcapability approvalとは扱いません。
 
 ### 人間だけが扱う境界
 
@@ -310,7 +310,7 @@ B2のexact mutation自体はphysical acceptance前なので、実装が存在す
 
 TOHOは、Phase 3の座席identity・鮮度確認基盤、レビュー済みguest continuation、公開されたcheckout手順・15分timeout情報が3社の中で最も揃っています。
 
-ただし「最初の候補」であることはcapability approvalを意味しません。Gate 0b / Gate 1のhold/releaseは実証済みですが、B2のphysical ticket mutationとB3のguest/purchaser境界が未完了なので、引き続きcapabilityはfalseです。
+ただし「最初の候補」であることはcapability approvalを意味しません。Gate 0b / Gate 1のhold/releaseとB2のphysical ticket mutationは実証済みですが、B3のguest/purchaser/payment境界とpre-purchase summaryが未完了なので、引き続きcapabilityはfalseです。
 
 ## 今後
 
