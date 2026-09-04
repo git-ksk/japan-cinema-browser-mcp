@@ -47,6 +47,7 @@ export type CinemaInterventionReason =
   | "sign_in"
   | "consent"
   | "purchaser_information"
+  | "checkout"
   | "seat_decision";
 
 export type CinemaHandoffAction =
@@ -76,6 +77,13 @@ export type CinemaHandoffAction =
       boundary: "toho_purchaser_payment_entry";
       seatId: string;
       intentDigest: string;
+    }
+  | {
+      kind: "reviewed_full_checkout_handoff";
+      provider: "toho";
+      boundary: "toho_full_checkout";
+      seatIds: string[];
+      intentDigest: string;
     };
 
 export interface CinemaReviewedBrowserContext {
@@ -83,6 +91,15 @@ export interface CinemaReviewedBrowserContext {
   targetId: string;
   host: string;
   pathname: string;
+}
+
+export interface TohoFullCheckoutHandoffOutcome {
+  provider: "toho";
+  handoffCompleted: true;
+  purchaseCompletion: "unverified_paid_acceptance_pending";
+  pathname: string;
+  title: string;
+  paidAcceptanceRequired: true;
 }
 
 export type CinemaIntervention = ExecutionIntervention<CinemaHandoffAction, CinemaInterventionReason>;
@@ -423,6 +440,16 @@ export class CinemaBrowserRuntime {
     sourcePathname: string;
     targetPathname: string;
   };
+  private fullCheckoutBinding?: {
+    interventionId: string;
+    targetId: string;
+    provider: "toho";
+    seatIds: string[];
+    intentDigest: string;
+    sourceHost: string;
+    sourcePathname: string;
+  };
+  private fullCheckoutOutcome?: { intentDigest: string; value: TohoFullCheckoutHandoffOutcome };
 
   constructor(
     private readonly chrome: ChromeProcess,
@@ -933,6 +960,60 @@ export class CinemaBrowserRuntime {
     return this.handoff.getResourceEpoch();
   }
 
+  async beginTohoFullCheckoutHandoff(input: { seatIds: string[]; intentDigest: string }): Promise<CinemaIntervention> {
+    this.handoff.assertAgentAuthority();
+    this.fullCheckoutOutcome = undefined;
+    this.checkoutContinuations.clear();
+    this.gate0bProof = undefined;
+    this.gate1TicketProof = undefined;
+    this.b2GuestProof = undefined;
+    this.purchaserPaymentBinding = undefined;
+    if (
+      input.seatIds.length > 8 ||
+      new Set(input.seatIds).size !== input.seatIds.length ||
+      input.seatIds.some((seatId) => !/^[A-Z]{1,4}-\d{1,4}$/.test(seatId)) ||
+      !/^sha256:[a-f0-9]{64}$/.test(input.intentDigest)
+    ) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO full checkout Handoff requires exact unique seat identities and one bounded intent digest.");
+    }
+    const context = await this.getReviewedBrowserContext("toho");
+    if (!/^\/net\/ticket\/\d{3}\/TNPI2010J01\.do$/.test(context.pathname)) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO full checkout Handoff must start on the reviewed seat-map surface.");
+    }
+    const intervention = this.handoff.begin({
+      reason: "checkout",
+      action: {
+        kind: "reviewed_full_checkout_handoff",
+        provider: "toho",
+        boundary: "toho_full_checkout",
+        seatIds: [...input.seatIds],
+        intentDigest: input.intentDigest
+      },
+      resumePolicy: CINEMA_HANDOFF_POLICY.transaction.resumePolicy
+    });
+    this.fullCheckoutBinding = {
+      interventionId: intervention.id,
+      targetId: context.targetId,
+      provider: "toho",
+      seatIds: [...input.seatIds],
+      intentDigest: input.intentDigest,
+      sourceHost: context.host,
+      sourcePathname: context.pathname
+    };
+    return intervention;
+  }
+
+  consumeTohoFullCheckoutHandoffOutcome(intentDigest: string): TohoFullCheckoutHandoffOutcome {
+    this.handoff.assertAgentAuthority();
+    const outcome = this.fullCheckoutOutcome;
+    if (!outcome || outcome.intentDigest !== intentDigest) {
+      this.fullCheckoutOutcome = undefined;
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO full checkout Handoff outcome is missing or does not match the exact intent.");
+    }
+    this.fullCheckoutOutcome = undefined;
+    return outcome.value;
+  }
+
   async beginTohoSeatDecisionGate0b(input: { seatId: string; intentDigest: string }): Promise<CinemaIntervention> {
     this.handoff.assertAgentAuthority();
     this.gate0bProof = undefined;
@@ -1270,6 +1351,47 @@ export class CinemaBrowserRuntime {
         active
       );
     }
+    let fullCheckoutCandidate: TohoFullCheckoutHandoffOutcome | undefined;
+    if (active.action?.kind === "reviewed_full_checkout_handoff") {
+      const action = active.action;
+      const binding = this.fullCheckoutBinding;
+      if (
+        action.provider !== "toho" || action.boundary !== "toho_full_checkout" ||
+        !binding || binding.interventionId !== active.id || binding.provider !== "toho" ||
+        binding.intentDigest !== action.intentDigest ||
+        binding.seatIds.length !== action.seatIds.length ||
+        binding.seatIds.some((seatId, index) => seatId !== action.seatIds[index]) ||
+        !this.targetId || binding.targetId !== this.targetId
+      ) {
+        this.fullCheckoutBinding = undefined;
+        throw new BrowserRuntimeError("UI_STATE_CHANGED", "The TOHO full checkout Handoff binding changed while Human control was active.", undefined, active);
+      }
+      const current = new URL(url);
+      const inProgress = [
+        /^\/net\/ticket\/\d{3}\/TNPI2010J01\.do$/,
+        /^\/net\/ticket\/\d{3}\/TNPI2010J02\.do$/,
+        /^\/net\/ticket\/\d{3}\/TNPI2030J02\.do$/,
+        /^\/net\/ticket\/\d{3}\/TNPI2055J02\.do$/
+      ].some((pattern) => pattern.test(current.pathname));
+      if (inProgress) {
+        throw new BrowserRuntimeError(
+          "HUMAN_ACTION_REQUIRED",
+          "TOHO checkout is still on a known in-progress purchase surface. Continue the checkout yourself and press Handoff Done only after TOHO returns to a post-purchase provider screen.",
+          { pathname: current.pathname },
+          active
+        );
+      }
+      const titleResult = await client.Runtime.evaluate({ expression: "document.title", returnByValue: true });
+      const title = typeof titleResult.result.value === "string" ? titleResult.result.value.slice(0, 240) : "";
+      fullCheckoutCandidate = {
+        provider: "toho",
+        handoffCompleted: true,
+        purchaseCompletion: "unverified_paid_acceptance_pending",
+        pathname: current.pathname,
+        title,
+        paidAcceptanceRequired: true
+      };
+    }
     if (active.action?.kind === "reviewed_gate0b_boundary") {
       if (active.action.provider !== "toho" || active.action.boundary !== "toho_seat_decision_gate0b") {
         this.gate0bBinding = undefined;
@@ -1465,7 +1587,12 @@ export class CinemaBrowserRuntime {
         active
       );
     }
-    return this.handoff.markVerified(interventionId);
+    const verified = this.handoff.markVerified(interventionId);
+    if (fullCheckoutCandidate && active.action?.kind === "reviewed_full_checkout_handoff") {
+      this.fullCheckoutOutcome = { intentDigest: active.action.intentDigest, value: fullCheckoutCandidate };
+      this.fullCheckoutBinding = undefined;
+    }
+    return verified;
   }
 
   resumeAfterHumanIntervention(interventionId: string): ResumeDecision<CinemaHandoffAction> {
@@ -1479,6 +1606,8 @@ export class CinemaBrowserRuntime {
     this.gate1TicketProof = undefined;
     this.b2GuestProof = undefined;
     this.purchaserPaymentBinding = undefined;
+    this.fullCheckoutBinding = undefined;
+    this.fullCheckoutOutcome = undefined;
     if (this.gate0bBinding?.interventionId === interventionId) this.gate0bBinding = undefined;
     if (this.gate1Binding?.interventionId === interventionId) this.gate1Binding = undefined;
   }
@@ -1491,6 +1620,8 @@ export class CinemaBrowserRuntime {
     this.gate1TicketProof = undefined;
     this.b2GuestProof = undefined;
     this.purchaserPaymentBinding = undefined;
+    this.fullCheckoutBinding = undefined;
+    this.fullCheckoutOutcome = undefined;
     const active = this.handoff.getActive();
     if (active) this.handoff.cancel(active.id);
     const client = this.client;
@@ -1745,6 +1876,8 @@ export class CinemaBrowserRuntime {
           this.gate1TicketProof = undefined;
           this.b2GuestProof = undefined;
           this.purchaserPaymentBinding = undefined;
+          this.fullCheckoutBinding = undefined;
+          this.fullCheckoutOutcome = undefined;
         }
       }
     }
@@ -1780,6 +1913,8 @@ export class CinemaBrowserRuntime {
           this.gate1TicketProof = undefined;
           this.b2GuestProof = undefined;
           this.purchaserPaymentBinding = undefined;
+          this.fullCheckoutBinding = undefined;
+          this.fullCheckoutOutcome = undefined;
         }
         throw error;
       }

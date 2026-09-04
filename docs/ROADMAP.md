@@ -212,7 +212,7 @@ Exit criteria:
 
 ## Phase 4 — Checkout Preparation / Human Handoff
 
-目的: user-intendedな1 bookingの可逆・低リスクな準備だけをprovider別review後に自動化し、identity / PII / consent / payment / final purchaseはHumanへ戻す。
+目的: v0.4.0の既定導線では、Agentは上映回・seat mapのfreshness確認までを担当し、TOHOは座席選択から実購入までを1回のFull Checkout HandoffでHumanへ渡す。Agent-side checkout automationはoptional研究として分離する。
 
 状態: 🟡 Discovery + provider-neutral core complete / generic Human Handoff基盤実装済み / transaction capabilityは全社未解禁
 
@@ -238,7 +238,7 @@ Discovery: [`PHASE4_CHECKOUT_DISCOVERY.md`](./PHASE4_CHECKOUT_DISCOVERY.md) / #4
 Implementation split:
 
 - ✅ #49 — provider-neutral checkout contract/core。strict intent、2-read seat freshness、exact-seat validation、ticket normalization、rendered summary/material fingerprintまで実装。`prepare_checkout` tool自体は未登録でtransaction capabilityは全社false
-- 🟡 #50 — TOHO first vertical slice。Gate 0b / Gate 1のhold→15分自然releaseに加え、B2 physical mutation acceptanceまで完了。exact one-shot Gate 1 proofからcaller明示のreview済み`一般` 1枚だけを選択し、provider ID/label/price/total/Ajax settlement/追加条件なしを実機で検証した。資格券は資格を推測せず、exact ticket ID / label / price / eligibility textを会話上でユーザー確認してから選択できるcontractへ拡張。ticket eligibility確認にはbrowser Handoffを使わず、Gate 1 proofはexact ticket identityへbindしたまま、確認factsはlive DOMとexact照合してproof消費前に検証する。B3a guest continuation physical acceptance済み。`TNPI2030J02.do` の `purchaseInfoInputForm` は氏名/カナ/性別/年齢/電話/メールと支払い方法選択を同一ページに持ち、POST targetは `TNPI2055J02.do`。B3bはこのcombined purchaser/payment-choice surfaceをHuman Handoffし、PII/payment値をMCPへ流さず、Done後はroute/非機密構造のみ再検証する。次はB3b physical acceptanceとpost-route/pre-purchase summary review。`seatSelection=false` / `checkoutPreparation=false` / `purchaseSubmission=false` 維持
+- 🟡 #50 — TOHO first vertical slice。Gate 0b / Gate 1のhold→15分自然release、B2 `一般` exact mutation、B3a guest continuationまでのphysical evidenceを保持。製品既定方針はここで単純化し、`start_checkout_handoff` を公開してexact showtime seat mapの2-read安定確認後、座席選択〜規約〜券種〜PII〜payment〜実購入をHumanへ一括handoffする。B2/B3 automationはoptional/internalへ降格。TOHOのみ `humanCheckoutHandoff=true`、Agentの `seatSelection=false / checkoutPreparation=false / purchaseSubmission=false` は維持。残るpaid E2E acceptanceは実料金が発生するため、actual purchaseを実施する時だけsuccess route/markerを確定する
 - ⬜ #51 — AEON hold/release review + provider adapter。TOHO parityを強制しない
 - ⬜ #52 — 109 explicit 10-minute hold review + provider adapter。TOHO parityを強制しない
 
@@ -253,11 +253,15 @@ Implementation split:
 - ✅ Human intervention開始時のprepared purchase confirmation破棄
 - ✅ TOHO Gate 0bはWebRTC Browser Handoffでphysical acceptance済み。current Gate 1はHandoff v0.4.1 `WindowWebSocketHandoffAdapter`へ移行し、既存Mac Tunnel上のCinema専用hostname / Access / origin port、WSS-only、exact managed Chrome PID + macOS CGWindowID binding、pointer/scroll-only、text/key server-block、Done後fresh verificationをconsumer-local transport再実装なしで構成
 
-TOHO / AEON / 109のread-only `seatMap` はtrueです。`seatSelection` / `checkoutPreparation` / `purchaseSubmission` は引き続き全providerでfalseです。Human Handoff実装はtransaction capabilityの解禁を意味しません。
+TOHO / AEON / 109のread-only `seatMap` はtrueです。`seatSelection` / `checkoutPreparation` / `purchaseSubmission` は引き続き全providerでfalseです。別capability `humanCheckoutHandoff` はTOHOだけtrueで、Humanが購入することをAgentのtransaction capability解禁とは扱いません。
 
-目標tool:
+v0.4.0既定tool:
 
-- `prepare_checkout` — 少なくとも1 providerのreview済みadapterが安全に機能する段階で公開。coreだけ先にmergeしてunsupported providerをprepared扱いしない
+- `start_checkout_handoff` — TOHO。exact showtime seat mapを2回readで再検証後、座席選択から実購入までHumanへ一括handoff
+
+Optional automation:
+
+- `prepare_checkout` — B2/B3研究成果を使う将来候補。v0.4.0既定UXのblockerにはしない
 
 `prepare_checkout` の責務候補:
 
@@ -276,7 +280,7 @@ TOHO / AEON / 109のread-only `seatMap` はtrueです。`seatSelection` / `check
 Release direction:
 
 - `v0.4.0 — Checkout Preparation` をcandidate next releaseとする
-- 初期candidate scopeはgeneric core + TOHO first slice
+- 初期candidate scopeはgeneric core + TOHO `start_checkout_handoff`。paid success marker acceptanceだけ実購入時へ繰り越す
 - AEON / 109は個別reviewでscopeが固まった場合だけ同milestoneへ追加
 - milestoneやIssue assignmentはcapability approvalを意味しない
 - version bump / tag / GitHub Release / npm publish / production deployはPhase 4 Discoveryでは行わない

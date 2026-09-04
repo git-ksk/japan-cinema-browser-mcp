@@ -170,6 +170,7 @@ npm start
 | `get_showtimes` | 劇場・日付・作品・上映回を読む |
 | `get_seat_availability` | 指定上映回の座席表を読み取り専用で確認する |
 | `recommend_seats` | TOHOの座席表から候補を順位付けする |
+| `start_checkout_handoff` | TOHOで上映回・seat mapを再確認し、座席選択から購入完了までHumanへ操作権を渡す |
 | `resolve_theater_targets` | 外部の場所候補を公式劇場一覧で再照合する |
 | `find_showtimes` | 最大3件の劇場を横断して上映情報を検索する |
 | `click_cinema_control` | レビュー済みの読み取り系操作だけを実行する |
@@ -198,7 +199,7 @@ npm start
 
 ## 座席表と座席提案
 
-3社とも座席表の読み取りに対応していますが、座席をクリックして確保する機能は無効です。
+3社とも座席表の読み取りに対応しています。Agentが座席をクリックして確保する `seatSelection` は無効のままです。TOHOだけは別capabilityの `humanCheckoutHandoff=true` とし、上映回のseat mapを2回安定readした後、`start_checkout_handoff` から座席選択〜利用規約〜券種〜購入者情報〜支払い〜最終購入までをHumanが専用Chromeで一貫して操作できます。seatIdsはoptionalで、未指定なら座席自体もHandoff内でHumanが選びます。Agentは購入submitを行いません。
 
 TOHOの `recommend_seats` では、同じ座席表を2回読み、上映回・レイアウト・空席状態が一致した場合だけ候補を返します。状態が変わっていた場合は古い結果を使いません。
 

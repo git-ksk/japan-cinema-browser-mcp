@@ -227,6 +227,12 @@ interface CinemaTicketType {
 
 表示されていない金額や手数料を0として補完しません。
 
+## v0.4.0の既定導線
+
+Gate 0b / Gate 1 / B2 / B3の調査でhold・ticket・guest・purchaser/payment境界を実証した後、製品の初期導線はより単純なFull Checkout Human Handoffへ切り替えます。Agentはexact showtime seat mapの2回readまでを担当し、座席選択以降はHumanが専用browser上で実購入まで操作します。B2/B3 automationはoptional研究として残し、`prepare_checkout` はv0.4.0既定UXのblockerにしません。
+
+TOHOのみ `humanCheckoutHandoff=true` とし、`seatSelection=false / checkoutPreparation=false / purchaseSubmission=false` は維持します。実購入完了後のsuccess route/markerは有料physical acceptance時に確定し、それまでは購入成功を機械的に断定しません。
+
 ## `prepare_checkout` が担う範囲
 
 将来公開する場合の責務は次のとおりです。

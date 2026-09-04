@@ -189,7 +189,10 @@ test("reviewed Handoff dependency is immutable and transaction replay remains st
   assert.doesNotMatch(server, /BrowserHandoffAdapter|webrtc_direct|webrtc_relay/);
   assert.match(server, /REVIEWED_POINTER_ONLY_INPUT_POLICY = Object\.freeze\(\{ tap: true, scroll: true, text: false, key: false \}/);
   assert.match(server, /REVIEWED_PURCHASER_FORM_INPUT_POLICY = Object\.freeze\(\{ tap: true, scroll: true, text: true, key: true \}/);
-  assert.match(server, /const inputPolicy = purchaserForm \? REVIEWED_PURCHASER_FORM_INPUT_POLICY : REVIEWED_POINTER_ONLY_INPUT_POLICY/);
+  assert.match(server, /REVIEWED_FULL_CHECKOUT_INPUT_POLICY = Object\.freeze\(\{ tap: true, scroll: true, text: true, key: true \}/);
+  assert.match(server, /const inputPolicy = fullCheckout[\s\S]*REVIEWED_FULL_CHECKOUT_INPUT_POLICY[\s\S]*REVIEWED_PURCHASER_FORM_INPUT_POLICY[\s\S]*REVIEWED_POINTER_ONLY_INPUT_POLICY/);
+  assert.match(server, /reviewed_full_checkout_handoff/);
+  assert.match(server, /A final purchase\/payment button can cause a real charge/);
   assert.match(server, /windowHandoffAdapter\.start\(\{[\s\S]*windowId: targetWindowId[\s\S]*inputPolicy/);
   assert.match(server, /reviewed_gate1_boundary/);
   assert.match(server, /toho_terms_advance_gate1/);
@@ -731,4 +734,62 @@ test("reviewed TOHO consent verification returns to Human while the exact pre-co
   assert.equal(decision.action?.continuationDigest, binding.continuationDigest);
   assert.equal(runtime.peekCheckoutContinuation()?.continuationDigest, binding.continuationDigest);
   runtime.clearCheckoutContinuation();
+});
+
+test("TOHO full checkout Handoff stays Human-owned through known purchase stages and returns only an unverified one-shot post-Handoff outcome", async () => {
+  const runtime = new CinemaBrowserRuntime({ close: async () => undefined } as unknown as ChromeProcess, 1_000);
+  const mutable = runtime as unknown as {
+    targetId: string;
+    getReviewedBrowserContext: () => Promise<{ provider: "toho"; targetId: string; host: string; pathname: string }>;
+    getVerificationClient: () => Promise<unknown>;
+    currentUrlUnchecked: () => Promise<string>;
+  };
+  mutable.targetId = "target-full-checkout";
+  mutable.getReviewedBrowserContext = async () => ({
+    provider: "toho",
+    targetId: "target-full-checkout",
+    host: "hlo.tohotheater.jp",
+    pathname: "/net/ticket/036/TNPI2010J01.do"
+  });
+  const digest = `sha256:${"e".repeat(64)}`;
+  const intervention = await runtime.beginTohoFullCheckoutHandoff({ seatIds: ["A-2"], intentDigest: digest });
+  assert.equal(intervention.reason, "checkout");
+  assert.equal(intervention.resumePolicy, "never_replay");
+  assert.equal(intervention.action?.kind, "reviewed_full_checkout_handoff");
+
+  let currentUrl = "https://hlo.tohotheater.jp/net/ticket/036/TNPI2030J02.do";
+  mutable.currentUrlUnchecked = async () => currentUrl;
+  mutable.getVerificationClient = async () => ({
+    Runtime: {
+      evaluate: async ({ expression }: { expression: string }) => ({
+        result: { value: expression === "document.title" ? "TOHO post checkout" : undefined }
+      })
+    }
+  });
+
+  runtime.claimHumanControl(intervention.id);
+  runtime.markHumanControlComplete(intervention.id);
+  await assert.rejects(
+    runtime.verifyHumanIntervention(intervention.id),
+    (error) => error instanceof BrowserRuntimeError && error.code === "HUMAN_ACTION_REQUIRED"
+  );
+
+  runtime.claimHumanControl(intervention.id);
+  runtime.markHumanControlComplete(intervention.id);
+  currentUrl = "https://hlo.tohotheater.jp/net/ticket/036/TNPI2999J02.do";
+  const verified = await runtime.verifyHumanIntervention(intervention.id);
+  assert.equal(verified.status, "ready_to_resume");
+  const decision = runtime.resumeAfterHumanIntervention(intervention.id);
+  assert.equal(decision.resumePolicy, "never_replay");
+  assert.equal(decision.action?.kind, "reviewed_full_checkout_handoff");
+  const outcome = runtime.consumeTohoFullCheckoutHandoffOutcome(digest);
+  assert.deepEqual(outcome, {
+    provider: "toho",
+    handoffCompleted: true,
+    purchaseCompletion: "unverified_paid_acceptance_pending",
+    pathname: "/net/ticket/036/TNPI2999J02.do",
+    title: "TOHO post checkout",
+    paidAcceptanceRequired: true
+  });
+  assert.throws(() => runtime.consumeTohoFullCheckoutHandoffOutcome(digest), /missing or does not match/);
 });

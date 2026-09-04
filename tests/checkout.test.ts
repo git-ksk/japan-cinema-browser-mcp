@@ -395,7 +395,8 @@ test("Phase 4 core preserves never-replay semantics and does not register prepar
   const server = fs.readFileSync(path.join(root, "src/server.ts"), "utf8");
   assert.doesNotMatch(server, /registerTool\(\s*["']prepare_checkout["']/);
   assert.match(server, /error instanceof CheckoutCoreError/);
-  assert.match(server, /CheckoutCoreError \|\| error instanceof SeatRecommendationError/);
+  assert.match(server, /CheckoutCoreError \|\|[\s\S]*HumanCheckoutHandoffError \|\|[\s\S]*SeatRecommendationError/);
+  assert.match(server, /registerTool\(\s*["']start_checkout_handoff["']/);
   const checkout = fs.readFileSync(path.join(root, "src/checkout.ts"), "utf8");
   assert.doesNotMatch(checkout, /finalPurchaseClick|confirm_purchase_action|prepare_purchase_confirmation/);
 });

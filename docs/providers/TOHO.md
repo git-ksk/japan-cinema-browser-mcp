@@ -19,8 +19,9 @@ Phase 4 チェックアウト調査: 2026-08-17
 | 上映情報取得 | 有効 | 劇場・日付・作品・上映回を表示中のUIから抽出 |
 | 座席表の読み取り | 有効 | #32のread-only adapterと#33の鮮度確認・推薦 |
 | 座席選択 | 無効 | `seatSelection=false`。Gate 1でのhold開始と自然releaseは実証済みだが、公開capability化はB3を含むPhase 4 closeout待ち |
-| チェックアウト準備 | 無効 | #49の共通基盤は完了。#50は内部実装のみで公開機能にはしていない |
-| 最終購入 | 無効 | Phase 5で別途厳格なレビューが必要 |
+| チェックアウト準備（Agent） | 無効 | `checkoutPreparation=false`。B2/B3 automationは研究・optional実装として保持 |
+| Full checkout Human Handoff | 有効 | `humanCheckoutHandoff=true`。2回の安定read後、座席選択から購入完了までHumanが操作 |
+| 最終購入（Agent submit） | 無効 | `purchaseSubmission=false`。実購入ボタンはHumanだけが操作 |
 
 ## Phase 1で確認した公式導線
 
@@ -272,11 +273,25 @@ Screen 4では画面表示の `113席 + 2車いす席` と、ちょうど2つの
 - Gate 0bでは `利用規約に同意して次へ` / ticket / purchaser PII / payment / final purchaseを操作しない。Gate 1はHuman-onlyで同意後J02まで、B2はJ02内のreview済み券種だけを別のfresh semantic actionとして扱う
 - Human Handoff後に座席変更を自動再実行しない
 
-Gate 0b / Gate 1 / B2に加えてB3a guest continuationのphysical acceptanceまで完了しています。Gate 1遷移時のserver-side holdと15分表示、能動解除なしの自然release、さらにcaller明示の`一般` 1枚のexact ticket mutationとpost-selection provider factsを確認しました。B3aではexact `ログインせず次へ` 1回で `TNPI2030J02.do` へ到達し、購入者情報と支払い方法選択が同一ページであることを確認しました。B3b Human Handoffとその後のpre-purchase summaryはreview中なので対応機能はまだ有効化していません。
+Gate 0b / Gate 1 / B2 / B3aのphysical evidenceは完了しており、hold開始・15分自然release、`一般 2,100円`のexact ticket mutation、guest continuation、J2030の購入者情報＋支払い方法同一surfaceまで確認済みです。これらは今後のoptional automation研究として保持します。製品の既定v0.4導線はより単純化し、J01のexact showtime seat mapを2回readして安定性を確認した後、`start_checkout_handoff` で座席選択から利用規約、券種、guest/login、PII、payment、最終購入までHumanへ一括handoffします。
 
 同意後の継続処理は、同じ呼び出しを再開して座席操作を繰り返す方式ではありません。明示的なHuman Handoffの後に、**新しい意味操作**として現在の画面を再検証し、元の購入意図へ結び直します。
 
 詳細: [`../PHASE4_TOHO_CONTINUATION_DESIGN.md`](../PHASE4_TOHO_CONTINUATION_DESIGN.md)
+
+
+### v0.4.0既定導線 — Full Checkout Human Handoff
+
+既定製品フローではGate 0b / Gate 1 / B2 / B3をユーザーとの複数往復にしません。
+
+1. Agentがexact showtimeのseat mapを2回readする。
+2. seatIdsを事前指定した場合はその席が両観測でavailableか確認する。未指定ならseat choiceをHumanへ残す。showtime/layout/state driftがあれば開始前に停止する。
+3. `start_checkout_handoff` でsame managed Chrome / exact macOS WindowをHumanへ渡す。
+4. Humanが座席選択、`確認する`、規約同意、券種、guest/login、購入者情報、支払い、最終確認、実購入を自分で操作する。
+5. AgentはHuman操作をreplayせず、PII/credential/payment dataをMCP prompt/state/log/resultへ取り込まない。
+6. known in-progress TOHO routeでDoneした場合は完了扱いにせずHumanへ戻す。外部決済・認証surface上のDoneもTOHO公式へ戻るまで受理しない。
+
+実購入後のexact success route/markerは**有料のphysical acceptanceが必要**なため未確定です。それまではDone後のunknown later TOHO routeを購入成功とは断定せず `unverified_paid_acceptance_pending` として返します。`purchaseSubmission=false` は維持します。
 
 ### B2 券種段階
 
@@ -292,7 +307,7 @@ Gate 0b / Gate 1 / B2に加えてB3a guest continuationのphysical acceptanceま
 - B3a physical acceptanceではsame targetで `/net/ticket/036/TNPI2010J02.do` → `/net/ticket/036/TNPI2030J02.do` を確認
 - J2030は `purchaseInfoInputForm` / POST / `/net/ticket/036/TNPI2055J02.do`。氏名・カナ・性別・年齢・電話・メールと支払い方法radioが同じHuman-only surfaceに存在する
 - B3bのremote Handoffだけpointer/scroll/text/keyを許可し、入力値をMCP prompt/state/log/resultへ取り込まない。Gate 0b/Gate 1はtext/key禁止のまま
-- MCP tool公開、`seatSelection` / `checkoutPreparation` / `purchaseSubmission` の変更は行わない
+- B2/B3 automationだけでは `seatSelection` / `checkoutPreparation` / `purchaseSubmission` を変更しない。既定公開経路は別capabilityの `humanCheckoutHandoff`
 
 2026-09-05のphysical acceptanceでは、caller明示の`一般` 1枚だけをexact pointerで選択し、provider ID `529-2100-0010-0`、rendered `一般 2,100円`、hidden/rendered total 2,100円、Ajax settlement=0、追加条件markerなしを確認しました。選択後は同じmodal anchorの表示が`券種を選択してください`から選択済み券種へ変わるため、PR #83でstage readだけをlabel非依存のexact `a[data-modal]` identityへ修正し、PR #84で選択summaryをexact `.ticket-item` 内のunique `.ticket-content` へbindしました。修正版は同じretained live J02で `一般 2,100円` / provider ID / total / Ajax settlement / 追加条件なしを再検証済みです。mutation直前の未選択label検証は維持し、B2完了だけをcapability approvalとは扱いません。
 
@@ -313,7 +328,7 @@ Gate 0b / Gate 1 / B2に加えてB3a guest continuationのphysical acceptanceま
 
 TOHOは、Phase 3の座席identity・鮮度確認基盤、レビュー済みguest continuation、公開されたcheckout手順・15分timeout情報が3社の中で最も揃っています。
 
-ただし「最初の候補」であることはcapability approvalを意味しません。Gate 0b / Gate 1のhold/releaseとB2のphysical ticket mutationは実証済みですが、B3のguest/purchaser/payment境界とpre-purchase summaryが未完了なので、引き続きcapabilityはfalseです。
+Agent transaction capabilityは引き続きfalseです。一方でHuman-onlyのFull Checkout Handoffは、Agentが購入操作を行わない独立capabilityとしてTOHOで有効化します。実購入後の成功markerだけは有料physical acceptance待ちです。
 
 ## 今後
 
