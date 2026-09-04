@@ -285,8 +285,8 @@ Gate 0b / Gate 1に加えてB2のphysical acceptanceまで完了しています�
 - physical acceptanceと同じ1席vertical slice
 - Gate 1成功時のtarget / exact seat / checkout intent digest / J02 path / resource epoch proofをone-shot消費
 - option listのprovider ID / label / rendered priceをstrict normalizeし、未知labelやdriftはfail closed
-- `一般`だけをunconditioned standard ticketとしてexact pointer selection候補にする
-- 大学・専門、高校生、中学・小学、幼児、シニア、障がい者割引は資格を推測せずHuman review
+- `一般`は追加確認なしのunconditioned standard ticketとしてexact pointer selection候補にする
+- 大学・専門、高校生、中学・小学、幼児、シニア、障がい者割引は資格を推測しない。まずexact provider ticket ID / label / rendered price / eligibility textを返して会話上でユーザー確認を要求し、そのexact factsへの `eligibilityAcknowledgement` がある場合だけ選択する。ticket eligibilityだけのためにbrowser Handoffは使わない
 - 選択後はprovider Ajax settlementを待ち、3D/追加料金・キャンペーン・MovieTicket・決済限定・provider warningが出れば停止
 - `ログインせず次へ` はidentityをread-only検証するだけでB2からは操作しない
 - MCP tool公開、`seatSelection` / `checkoutPreparation` / `purchaseSubmission` の変更は行わない

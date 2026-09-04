@@ -60,11 +60,26 @@ const checkoutShowtimeIntentSchema = z.object({
   screen: shortTextSchema.optional()
 }).strict();
 
+const ticketEligibilityAcknowledgementSchema = z.object({
+  confirmed: z.literal(true),
+  renderedPriceYen: z.number().int().nonnegative().max(1_000_000),
+  eligibilityText: z.string().trim().min(1).max(500)
+}).strict();
+
 const checkoutTicketChoiceSchema = z.object({
   providerTicketTypeId: ticketIdSchema.optional(),
   label: shortTextSchema,
-  quantity: z.number().int().min(1).max(8)
-}).strict();
+  quantity: z.number().int().min(1).max(8),
+  eligibilityAcknowledgement: ticketEligibilityAcknowledgementSchema.optional()
+}).strict().superRefine((value, ctx) => {
+  if (value.eligibilityAcknowledgement !== undefined && value.providerTicketTypeId === undefined) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["providerTicketTypeId"],
+      message: "eligibility acknowledgement requires one exact provider ticket type id"
+    });
+  }
+});
 
 export const cinemaCheckoutIntentSchema = z.object({
   provider: providerSchema,
@@ -209,6 +224,7 @@ export type CinemaCheckoutBlockedReason =
   | "seat_unavailable"
   | "ticket_unavailable"
   | "ticket_constraint"
+  | "ticket_confirmation_required"
   | "summary_mismatch"
   | "ambiguous_rendered_state";
 
@@ -235,6 +251,7 @@ export class CheckoutCoreError extends Error {
       | "SEAT_UNAVAILABLE"
       | "TICKET_UNAVAILABLE"
       | "TICKET_CONSTRAINT"
+      | "TICKET_CONFIRMATION_REQUIRED"
       | "SUMMARY_MISMATCH"
       | "AMBIGUOUS_RENDERED_STATE",
     message: string,

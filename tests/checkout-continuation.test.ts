@@ -56,6 +56,28 @@ test("checkout continuation digest is canonical across seat/ticket input orderin
   assert.equal(checkoutIntentDigest(a), checkoutIntentDigest(b));
 });
 
+test("checkout continuation digest keeps post-Gate1 eligibility acknowledgement outside the one-shot proof", () => {
+  const unacknowledged: CinemaCheckoutIntent = {
+    ...intent,
+    ticketChoices: [{ providerTicketTypeId: "631-1600-0010-0", label: "大学・専門", quantity: 1 }]
+  };
+  const acknowledged: CinemaCheckoutIntent = {
+    ...intent,
+    ticketChoices: [{
+      providerTicketTypeId: "631-1600-0010-0",
+      label: "大学・専門",
+      quantity: 1,
+      eligibilityAcknowledgement: { confirmed: true, renderedPriceYen: 1600, eligibilityText: "大学・専門" }
+    }]
+  };
+  const differentTicket: CinemaCheckoutIntent = {
+    ...intent,
+    ticketChoices: [{ providerTicketTypeId: "643-1100-0010-0", label: "高校生", quantity: 1 }]
+  };
+  assert.equal(checkoutIntentDigest(unacknowledged), checkoutIntentDigest(acknowledged));
+  assert.notEqual(checkoutIntentDigest(unacknowledged), checkoutIntentDigest(differentTicket));
+});
+
 test("checkout continuation store keeps only bounded non-secret material and consumes one-shot", () => {
   let now = 1_000;
   const store = new CheckoutContinuationStore(60_000, () => now);

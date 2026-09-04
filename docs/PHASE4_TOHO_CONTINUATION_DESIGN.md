@@ -223,7 +223,7 @@ TOHOの同意後画面を実際にレビューできた後にだけ実装しま�
 - 券種枚数と選択座席数を一致させる。
 - 名称・制約はTOHO画面の表示を正とする。
 - 年齢、学生、シニア、障害者、会員資格を推測しない。
-- 資格確認・credential・条件付きの導線はHuman Handoffへ戻す。
+- `ticket_eligibility` はexact provider ticket ID / label / rendered price / eligibility textを会話上でユーザー確認し、その同一factsへの `eligibilityAcknowledgement` がある場合だけ選択する。資格を推測しない。credential / PIN / coupon / provider-required manual stepはHuman Handoffまたは安全停止へ戻す。
 - coupon / voucher / MovieTicket / member credential / PIN相当は人間のみが扱う。
 - 推測による券種選択や割引最適化をしない。
 
@@ -237,11 +237,11 @@ Gate 1 physical acceptance後の `TNPI2010J02.do` を追加操作なしでレビ
 - `券種を選択してください` はexact `data-modal=modal-target-00` のmodal trigger
 - modal内の各券種はTOHO自身の `SelectTicket.setTicket(groupIndex, seatIndex, providerTicketTypeId, label, renderedPrice)` へbindされる
 - このrunでは `一般`、大学・専門、高校生、中学・小学、幼児、シニア、障がい者割引2種のprovider ID / label / rendered priceをread-onlyで取得できた
-- `一般`以外は名称そのものに資格条件が含まれるため、Cinemaはeligibilityを推測せず `ticket_eligibility` Human reviewへ戻す
+- `一般`以外は名称そのものに資格条件が含まれるため、Cinemaはeligibilityを推測しない。まず `TICKET_CONFIRMATION_REQUIRED` としてexact provider ticket ID / label / rendered price / eligibility textを返し、会話上のユーザー確認を得た同一factsだけを `eligibilityAcknowledgement` として再投入する。ticket eligibility確認だけではbrowser Handoffしない
 - 券種選択後、TOHOはAjaxで追加料金/3D・キャンペーン/決済限定/MovieTicket等の追加条件を返し得る。B2はAjax settlement後にこれらを再読し、追加条件があればguest continuationへ進まず停止する
 - `ログインせず次へ` はexact `gotoRej(4, '<site>', '', '')` と `TNPI2030J02.do` form actionをread-onlyで検証するだけで、B2ではクリックしない
 
-初期implementationはphysical acceptanceと同じ1席vertical sliceに限定します。Gate 1成功時に得たtarget / seat / checkout intent digest / host/path / resource epochのproofをone-shotで消費してからだけ、review済み`一般`のexact modal trigger → exact ticket optionという2つのpointer mutationを許可します。proof不一致・既選択・価格/ID/label drift・Ajax状態不明・追加条件はすべてfail closedです。`prepare_checkout`公開やcapability変更はこの実装だけでは行いません。
+初期implementationはphysical acceptanceと同じ1席vertical sliceに限定します。Gate 1成功時に得たtarget / seat / checkout intent digest / host/path / resource epochのproofをone-shotで消費してからだけ、review済みexact ticketのmodal trigger → exact ticket optionという2つのpointer mutationを許可します。`一般`は追加確認不要、資格条件付き券種はprovider ticket ID / label / rendered price / eligibility textの完全一致した `eligibilityAcknowledgement` が必須です。acknowledgementはGate 1後に得るためGate 1 intent digest自体は変えず、exact provider ticket ID / labelはproofで固定したまま、rendered price / eligibility textをlive再読してacknowledgementと照合します。未確認/価格・文言driftではproof消費前に停止します。proof不一致・既選択・Ajax状態不明・追加条件はすべてfail closedです。`prepare_checkout`公開やcapability変更はこの実装だけでは行いません。
 
 ## F. 後続のHuman-only境界
 
@@ -394,7 +394,7 @@ Phase 4では常に `false` です。
 5. **B2 — 券種adapter** — ✅ implementation/test/physical mutation acceptance完了
    - J02の1席slot、provider ticket ID/label/price、guest continuationをstrict normalize
    - Gate 1 proofをtarget / seat / intent / path / resource epochへone-shot binding
-   - caller明示のreview済み`一般` 1枚だけをexact pointerで実機選択済み。資格券はHuman review
+   - caller明示のreview済み`一般` 1枚をexact pointerで実機選択済み。資格条件付きのreview済み券種は、exact ID / label / price / eligibility textを会話上でユーザー確認し、Gate 1 proofのexact ticket identityとlive price / eligibility textに一致するacknowledgement後のみ選択可能。ticket eligibility確認にはbrowser Handoffを使わない
    - provider ID `529-2100-0010-0`、`一般 2,100円`、total 2,100円、Ajax settlement=0、追加条件markerなしをpost-selectionで確認
    - 選択後にmodal anchorの表示labelが変わる実DOMをPR #83でstrict normalize対応。PR #84ではexact ticket item内のunique selection summaryへbindingし、同じlive J02でpost-selection factsを再検証。mutation直前のexact未選択label検証は維持
    - `ログインせず次へ`はB2ではクリックしない
