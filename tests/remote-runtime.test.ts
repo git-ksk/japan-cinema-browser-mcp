@@ -79,6 +79,10 @@ test("standalone remote takeover is opt-in, loopback-only, and Cloudflare-Access
     CINEMA_ALLOW_EXTERNAL_CDP: "false",
     CINEMA_CDP_PORT: undefined
   }, () => {
+    if (process.platform !== "darwin") {
+      assert.throws(() => loadConfig(), /reviewed macOS exact-Window WSS path only/);
+      return;
+    }
     const config = loadConfig();
     assert.equal(config.takeover.enabled, true);
     assert.equal(config.takeover.publicBaseUrl, "https://cinema-handoff.example");
