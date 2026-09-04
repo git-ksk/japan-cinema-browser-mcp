@@ -269,14 +269,29 @@ Screen 4では画面表示の `113席 + 2車いす席` と、ちょうど2つの
 - special / accessibility seatは初期sliceでは変更前に拒否する
 - 正確な選択済みseat setを確認しても、`確認する` が未レビューなら `UNREVIEWED_INTERACTION` で停止する
 - Gate 0b physical acceptanceではHumanだけがexact seat → `確認する` 1回 → review済み `terms_check` ONを行い、CinemaはDone後にprovider-owned `bookSeatIntForm.seat_no` + rendered `#seatList2` のexact-seat一致 + checkbox checkedをread-only検証する
-- `利用規約に同意して次へ` / ticket / purchaser PII / payment / final purchaseはGate 0bでは操作しない
+- Gate 0bでは `利用規約に同意して次へ` / ticket / purchaser PII / payment / final purchaseを操作しない。Gate 1はHuman-onlyで同意後J02まで、B2はJ02内のreview済み券種だけを別のfresh semantic actionとして扱う
 - Human Handoff後に座席変更を自動再実行しない
 
-Gate 0は一部だけ確認済みですが、hold開始・解放境界が未証明なので対応機能は有効化していません。
+Gate 0b / Gate 1はphysical acceptance済みで、Gate 1遷移時のserver-side holdと15分表示、能動解除なしの自然releaseまで確認しました。ただしB2/B3の後続境界は段階的review中なので対応機能はまだ有効化していません。
 
 同意後の継続処理は、同じ呼び出しを再開して座席操作を繰り返す方式ではありません。明示的なHuman Handoffの後に、**新しい意味操作**として現在の画面を再検証し、元の購入意図へ結び直します。
 
 詳細: [`../PHASE4_TOHO_CONTINUATION_DESIGN.md`](../PHASE4_TOHO_CONTINUATION_DESIGN.md)
+
+### B2 券種段階
+
+2026-09-05のread-only J02 reviewでは、1席A2に対してprovider ticket ID / label / priceを含むexact `SelectTicket.setTicket(...)` optionを確認しました。初期B2 adapterは次に限定します。
+
+- physical acceptanceと同じ1席vertical slice
+- Gate 1成功時のtarget / exact seat / checkout intent digest / J02 path / resource epoch proofをone-shot消費
+- option listのprovider ID / label / rendered priceをstrict normalizeし、未知labelやdriftはfail closed
+- `一般`だけをunconditioned standard ticketとしてexact pointer selection候補にする
+- 大学・専門、高校生、中学・小学、幼児、シニア、障がい者割引は資格を推測せずHuman review
+- 選択後はprovider Ajax settlementを待ち、3D/追加料金・キャンペーン・MovieTicket・決済限定・provider warningが出れば停止
+- `ログインせず次へ` はidentityをread-only検証するだけでB2からは操作しない
+- MCP tool公開、`seatSelection` / `checkoutPreparation` / `purchaseSubmission` の変更は行わない
+
+B2のexact mutation自体はphysical acceptance前なので、実装が存在することをcapability approvalとは扱いません。
 
 ### 人間だけが扱う境界
 
@@ -295,7 +310,7 @@ Gate 0は一部だけ確認済みですが、hold開始・解放境界が未証�
 
 TOHOは、Phase 3の座席identity・鮮度確認基盤、レビュー済みguest continuation、公開されたcheckout手順・15分timeout情報が3社の中で最も揃っています。
 
-ただし「最初の候補」であることはcapability approvalを意味しません。Gate 0b / Gate 1でholdと解放の意味を安全に証明できない場合は、引き続きblockedのままにします。
+ただし「最初の候補」であることはcapability approvalを意味しません。Gate 0b / Gate 1のhold/releaseは実証済みですが、B2のphysical ticket mutationとB3のguest/purchaser境界が未完了なので、引き続きcapabilityはfalseです。
 
 ## 今後
 

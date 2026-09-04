@@ -229,6 +229,20 @@ TOHOの同意後画面を実際にレビューできた後にだけ実装しま�
 
 通常券の選択も `semantic_mutation` です。対象controlの厳密なレビュー、test、限定live reviewを通してからのみ有効にします。
 
+### 2026-09-05 J02 read-only review / B2初期slice
+
+Gate 1 physical acceptance後の `TNPI2010J02.do` を追加操作なしでレビューし、1席 `A2` に対する券種段階を確認しました。
+
+- seatごとにhidden `.select_ticket` / `ticket_type_name` があり、未選択値は `-0--`
+- `券種を選択してください` はexact `data-modal=modal-target-00` のmodal trigger
+- modal内の各券種はTOHO自身の `SelectTicket.setTicket(groupIndex, seatIndex, providerTicketTypeId, label, renderedPrice)` へbindされる
+- このrunでは `一般`、大学・専門、高校生、中学・小学、幼児、シニア、障がい者割引2種のprovider ID / label / rendered priceをread-onlyで取得できた
+- `一般`以外は名称そのものに資格条件が含まれるため、Cinemaはeligibilityを推測せず `ticket_eligibility` Human reviewへ戻す
+- 券種選択後、TOHOはAjaxで追加料金/3D・キャンペーン/決済限定/MovieTicket等の追加条件を返し得る。B2はAjax settlement後にこれらを再読し、追加条件があればguest continuationへ進まず停止する
+- `ログインせず次へ` はexact `gotoRej(4, '<site>', '', '')` と `TNPI2030J02.do` form actionをread-onlyで検証するだけで、B2ではクリックしない
+
+初期implementationはphysical acceptanceと同じ1席vertical sliceに限定します。Gate 1成功時に得たtarget / seat / checkout intent digest / host/path / resource epochのproofをone-shotで消費してからだけ、review済み`一般`のexact modal trigger → exact ticket optionという2つのpointer mutationを許可します。proof不一致・既選択・価格/ID/label drift・Ajax状態不明・追加条件はすべてfail closedです。`prepare_checkout`公開やcapability変更はこの実装だけでは行いません。
+
 ## F. 後続のHuman-only境界
 
 ### 購入者情報
@@ -356,7 +370,7 @@ Phase 4では常に `false` です。
 
 2026-08-25のphysical Gate 0b v6では、exact `A-2` に対してHumanが `確認する` を1回だけ実行し、provider自身の `terms_check` をONにした後、Cinemaのcanonical verifierが `bookSeatIntForm.seat_no` とrendered `#seatList2` のexact-seat一致を確認しました。直後の独立fresh sessionでも `A-2` は `available` のままでした。したがって、**`確認する` + terms checkboxまででは、別sessionから観測できるserver-side holdは発生しませんでした**。この結果だけから15分holdの開始点やrelease semanticsは断定しません。
 
-次のmaterial候補はHuman-onlyの `利用規約に同意して次へ` です。2026-09-04時点でGate 1 acceptance plumbingを実装し、Handoffはv0.4.1 release commitへ固定しています。Gate 1はGate 0b成功proofをtarget / provider / exact seat / intent digest / host / pathname / resource epochへone-shot bindingし、途中に別resource操作が入れば失効します。開始前にcanonical seat、terms acknowledgement、exact form/action/controlをread-onlyで再検証し、Human操作後は同一hostの直後 `TNPI2010J02.do` だけを受理します。券種選択は行わず、seat mutationのreplayもありません。physical Gate 1ではHandoff `WindowWebSocketHandoffAdapter` のWSS-only pathを使い、Cinema専用hostname + Access appを、同じMacで稼働中のhealthyなCloudflare Tunnel connectorへrouteし、専用loopback listenerへ接続します。dedicated Chrome PIDに対してvisible layer-0 macOS windowがexactly oneである場合だけCGWindowIDをbindingし、WebRTC/ICE/STUN/TURNは起動しません。
+2026-09-04のphysical Gate 1では、Human-only `利用規約に同意して次へ` 1回で `TNPI2010J02.do` へ到達し、直後の独立fresh profileでexact `A-2` が `available` から `unavailable` へ変わるserver-side holdを確認しました。J02は15分以内に購入が完了しなければ座席を自動解除すると表示し、能動的な戻る/取消/解除を使わない後続fresh profileでA-2が `available` に復帰したため自然releaseも確認済みです（exact解除秒は未計測）。Handoffはv0.4.1 `WindowWebSocketHandoffAdapter` WSS-onlyで、WebRTC/ICE/STUN/TURNは使いません。Gate 1成功時にはB2用のexact target / seat / intent / J02 path / resource epoch proofをone-shot生成し、別resource操作や再利用を拒否します。
 
 1. **A1 — レビュー済み境界専用のintervention基盤** — ✅ 実装済み
    - 型付き `CinemaHandoffAction`
@@ -373,15 +387,16 @@ Phase 4では常に `false` です。
    - canonical selected-seat identityをTOHO自身のform + rendered summaryで確認
    - 直後fresh sessionではexact seatが引き続きavailableで、externally visible holdなし
    - hold開始点・自然releaseは未確定のためcapabilityはfalse維持
-4. **B1 — 同意後Gate 1 live review** — 🟡 acceptance plumbing実装済み / physical review待ち
-   - Gate 0bのone-shot proofと同一resource epochだけから開始
-   - 人間による `利用規約に同意して次へ` は1回だけ
-   - 直後 `TNPI2010J02.do` で停止し、券種を選ばない
-   - 読み取り専用で段階・hold/timer・別fresh profileを確認
-   - holdが観測された場合は推測cleanupをせず自然expiryで解放を確認
-5. **B2 — 券種adapter**
-   - B1で同意後画面がレビューできた後だけ実装
-   - 厳密な券種正規化・選択
+4. **B1 — 同意後Gate 1 live review** — ✅ physical acceptance完了
+   - Human `利用規約に同意して次へ` 1回でJ02へ到達
+   - fresh profileでexact seat unavailable化を確認
+   - J02の15分自動解除表示と、能動releaseなしのavailable復帰を確認
+5. **B2 — 券種adapter** — 🟡 implementation/test完了 / physical mutation acceptance待ち
+   - J02の1席slot、provider ticket ID/label/price、guest continuationをstrict normalize
+   - Gate 1 proofをtarget / seat / intent / path / resource epochへone-shot binding
+   - review済み`一般`のみexact pointerで選択候補。資格券はHuman review
+   - provider Ajax後に追加料金/条件を再読し、存在・不明なら停止
+   - `ログインせず次へ`はB2ではクリックしない
 6. **B3 — 購入者情報・支払いhandoffと確認画面境界**
    - provider固有の肯定条件を確認
    - 最終購入は引き続き到達不能

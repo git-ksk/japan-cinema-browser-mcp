@@ -14,7 +14,12 @@ import {
   type TohoShowtime,
   type TohoTheater
 } from "../src/providers/toho/adapter.js";
-import { TohoCheckoutAdapter } from "../src/providers/toho/checkout-adapter.js";
+import {
+  TOHO_TICKET_STAGE_EXPRESSION,
+  TohoCheckoutAdapter,
+  normalizeTohoTicketStageSnapshot,
+  type TohoTicketStageSnapshot
+} from "../src/providers/toho/checkout-adapter.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const seatUrl = "https://hlo.tohotheater.jp/net/ticket/036/TNPI2010J01.do";
@@ -373,8 +378,217 @@ test("TOHO internal checkout adapter never crosses an absent or sensitive Human 
 test("TOHO Phase 4 adapter remains internal while transaction capabilities are disabled", () => {
   const server = fs.readFileSync(path.join(root, "src/server.ts"), "utf8");
   const providers = fs.readFileSync(path.join(root, "src/providers.ts"), "utf8");
-  assert.doesNotMatch(server, /TohoCheckoutAdapter|selectExactSeatsToConsentBoundary|registerTool\(\s*["']prepare_checkout/);
+  assert.doesNotMatch(server, /TohoCheckoutAdapter|selectExactSeatsToConsentBoundary|selectExactTicketAfterGate1|registerTool\(\s*["']prepare_checkout/);
   assert.match(providers, /seatSelection:\s*false/);
   assert.match(providers, /checkoutPreparation:\s*false/);
   assert.match(providers, /purchaseSubmission:\s*false/);
+});
+
+
+function ticketOption(providerTicketTypeId: string, label: string, price: string) {
+  return {
+    text: `${label}${price}`,
+    href: `javascript:SelectTicket.setTicket('0', '0', '${providerTicketTypeId}', '${label}', '${price}')`
+  };
+}
+
+function ticketStageSnapshot(overrides: Partial<TohoTicketStageSnapshot> = {}): TohoTicketStageSnapshot {
+  return {
+    title: "チケットの種類 || TOHOシネマズ",
+    pathname: "/net/ticket/036/TNPI2010J02.do",
+    formName: "purchaseContentsConfirmIntForm",
+    formMethod: "post",
+    formActionPathname: "/net/ticket/036/TNPI2030J02.do",
+    ticketSiteCd: "036",
+    tsize: "1",
+    iValue: "2",
+    hTotal: "0",
+    totalText: "合計 0円",
+    ajaxActive: 0,
+    formErrorVisible: false,
+    formErrorText: "",
+    guestControls: [{ label: "ログインせず次へ", href: "javascript:void(0)", onclick: "gotoRej(4, '036', '', '');" }],
+    slots: [{
+      seatLabel: "A2",
+      modalTarget: "modal-target-00",
+      selectTicketValue: "-0--",
+      selectionText: "券種を選択してください",
+      options: [
+        ticketOption("529-2100-0010-0", "一般", "2,100円"),
+        ticketOption("631-1600-0010-0", "大学・専門", "1,600円"),
+        ticketOption("643-1100-0010-0", "高校生", "1,100円"),
+        ticketOption("753-1100-0010-0", "中学・小学", "1,100円"),
+        ticketOption("886-1100-0010-0", "幼児（３才以上）", "1,100円"),
+        ticketOption("986-1400-0010-0", "シニア（６０才以上）", "1,400円"),
+        ticketOption("128-1000-0020-0", "障がい者割引（一般・大専）", "1,000円"),
+        ticketOption("131-1000-0020-0", "障がい者割引（高校生以下）", "1,000円")
+      ],
+      onaVisible: false,
+      onaText: "",
+      onaRadioCount: 0,
+      campaignVisible: false,
+      campaignText: "",
+      movieTicketVisible: false,
+      movieTicketText: "",
+      limitedTicket: "0"
+    }],
+    ...overrides
+  };
+}
+
+function ticketIntent(label = "一般", providerTicketTypeId?: string): CinemaCheckoutIntent {
+  return {
+    provider: "toho",
+    showtime: {
+      theater: theater.name,
+      theaterId: theater.id,
+      date: showtime.date,
+      movie: showtime.movie,
+      startTime: showtime.startTime,
+      screen: showtime.screen
+    },
+    seatIds: ["A-2"],
+    ticketChoices: [{ ...(providerTicketTypeId ? { providerTicketTypeId } : {}), label, quantity: 1 }]
+  };
+}
+
+function b2RuntimeForStages(stages: TohoTicketStageSnapshot[]) {
+  const queue = [...stages];
+  const clicks: Array<Record<string, unknown>> = [];
+  let proofConsumes = 0;
+  const runtime = {
+    evaluateSemanticState: async (_provider: "toho", expression: string) => {
+      if (expression === TOHO_TICKET_STAGE_EXPRESSION) {
+        const value = queue.shift();
+        if (!value) throw new Error("unexpected B2 stage read");
+        return { url: "https://hlo.tohotheater.jp/net/ticket/036/TNPI2010J02.do", value };
+      }
+      if (expression.includes("modal_trigger_ambiguous")) {
+        return { url: "https://hlo.tohotheater.jp/net/ticket/036/TNPI2010J02.do", value: {
+          ok: true, tagName: "A", text: "券種を選択してください", href: "#", dataModal: "modal-target-00", x: 100, y: 200
+        } };
+      }
+      if (expression.includes("ticket_option_ambiguous")) {
+        return { url: "https://hlo.tohotheater.jp/net/ticket/036/TNPI2010J02.do", value: {
+          ok: true,
+          tagName: "A",
+          text: "一般2,100円",
+          href: "javascript:SelectTicket.setTicket('0', '0', '529-2100-0010-0', '一般', '2,100円')",
+          x: 110,
+          y: 210
+        } };
+      }
+      throw new Error("unexpected B2 semantic expression");
+    },
+    clickReviewedElementPoint: async (_point: { x: number; y: number }, _provider: "toho", expectedElement: Record<string, unknown>) => {
+      clicks.push(expectedElement);
+      return { url: "https://hlo.tohotheater.jp/net/ticket/036/TNPI2010J02.do" };
+    },
+    getReviewedBrowserContext: async () => ({ provider: "toho" as const, targetId: "target-b2", host: "hlo.tohotheater.jp", pathname: "/net/ticket/036/TNPI2010J02.do" }),
+    consumeTohoGate1TicketProof: async () => {
+      proofConsumes += 1;
+      return { provider: "toho" as const, targetId: "target-b2", host: "hlo.tohotheater.jp", pathname: "/net/ticket/036/TNPI2010J02.do" };
+    },
+    createCheckoutContinuation: () => { throw new Error("not used in B2"); },
+    requireReviewedHumanIntervention: async (): Promise<never> => { throw new Error("not used in B2"); }
+  };
+  return { runtime, clicks, proofConsumes: () => proofConsumes };
+}
+
+test("TOHO B2 ticket-stage expression is read-only and cannot submit guest continuation", () => {
+  assert.doesNotMatch(TOHO_TICKET_STAGE_EXPRESSION, /\.click\(|dispatchEvent|\.submit\(|submit\(\)/);
+  assert.match(TOHO_TICKET_STAGE_EXPRESSION, /purchaseContentsConfirmIntForm/);
+  assert.match(TOHO_TICKET_STAGE_EXPRESSION, /ログインせず次へ/);
+});
+
+test("TOHO B2 normalizes exact rendered J02 ticket ids/prices and keeps eligibility-bound tickets Human-reviewed", () => {
+  const stage = normalizeTohoTicketStageSnapshot(ticketStageSnapshot(), "A-2");
+  assert.equal(stage.siteId, "036");
+  assert.equal(stage.seatId, "A-2");
+  assert.equal(stage.ticketTypes.length, 8);
+  const general = stage.ticketTypes.find((ticket) => ticket.label === "一般");
+  assert.deepEqual(general, {
+    providerTicketTypeId: "529-2100-0010-0",
+    label: "一般",
+    priceYen: 2100,
+    currency: "JPY",
+    category: "standard",
+    minQuantity: 1,
+    maxQuantity: 1
+  });
+  const student = stage.ticketTypes.find((ticket) => ticket.label === "大学・専門");
+  assert.equal(student?.humanReviewRequired, true);
+  assert.equal(student?.humanReviewReason, "ticket_eligibility");
+  assert.equal(student?.eligibilityText, "大学・専門");
+  assert.equal(stage.totalYen, 0);
+  assert.deepEqual(stage.extraConditionReasons, []);
+});
+
+test("TOHO B2 fails closed on an unreviewed ticket label or guest continuation drift", () => {
+  const unknown = ticketStageSnapshot();
+  const slot = (unknown.slots as Array<Record<string, unknown>>)[0]!;
+  slot.options = [...(slot.options as unknown[]), ticketOption("999-0900-0010-0", "未レビュー割引", "900円")];
+  assert.throws(() => normalizeTohoTicketStageSnapshot(unknown, "A-2"), (error) => error instanceof CheckoutCoreError && error.code === "AMBIGUOUS_RENDERED_STATE");
+
+  const drift = ticketStageSnapshot({ guestControls: [{ label: "ログインせず次へ", href: "#", onclick: "other()" }] });
+  assert.throws(() => normalizeTohoTicketStageSnapshot(drift, "A-2"), (error) => error instanceof CheckoutCoreError && error.code === "AMBIGUOUS_RENDERED_STATE");
+});
+
+test("TOHO B2 selects only exact reviewed general ticket after one-shot Gate 1 proof and stops before guest continuation", async () => {
+  const selected = ticketStageSnapshot({
+    hTotal: "2100",
+    totalText: "合計 2,100円",
+    slots: [{
+      ...(ticketStageSnapshot().slots as Array<Record<string, unknown>>)[0],
+      selectTicketValue: "529-2100-0010-0",
+      selectionText: "一般 2,100円"
+    }]
+  });
+  const { runtime, clicks, proofConsumes } = b2RuntimeForStages([ticketStageSnapshot(), selected]);
+  const adapter = new TohoCheckoutAdapter(runtime as never, {} as never);
+  const result = await adapter.selectExactTicketAfterGate1(ticketIntent("一般", "529-2100-0010-0"));
+  assert.equal(proofConsumes(), 1);
+  assert.equal(clicks.length, 2);
+  assert.deepEqual(clicks[0], { tagName: "A", text: "券種を選択してください", href: "#", dataModal: "modal-target-00" });
+  assert.deepEqual(clicks[1], {
+    tagName: "A",
+    text: "一般2,100円",
+    href: "javascript:SelectTicket.setTicket('0', '0', '529-2100-0010-0', '一般', '2,100円')"
+  });
+  assert.equal(result.stage, "member_or_guest");
+  assert.equal(result.totalYen, 2100);
+  assert.equal(result.guestContinuationReady, true);
+  assert.equal(result.neverReplay, true);
+});
+
+test("TOHO B2 never auto-selects eligibility-bound ticket and does not consume Gate 1 proof", async () => {
+  const { runtime, clicks, proofConsumes } = b2RuntimeForStages([ticketStageSnapshot()]);
+  const adapter = new TohoCheckoutAdapter(runtime as never, {} as never);
+  await assert.rejects(
+    adapter.selectExactTicketAfterGate1(ticketIntent("大学・専門", "631-1600-0010-0")),
+    (error) => error instanceof BrowserRuntimeError && error.code === "HUMAN_ACTION_REQUIRED"
+  );
+  assert.equal(proofConsumes(), 0);
+  assert.deepEqual(clicks, []);
+});
+
+test("TOHO B2 stops after selection when provider Ajax reveals additional ticket conditions", async () => {
+  const selected = ticketStageSnapshot({
+    hTotal: "2100",
+    totalText: "合計 2,100円",
+    slots: [{
+      ...(ticketStageSnapshot().slots as Array<Record<string, unknown>>)[0],
+      selectTicketValue: "529-2100-0010-0",
+      selectionText: "一般 2,100円",
+      campaignVisible: true,
+      campaignText: "追加条件あり"
+    }]
+  });
+  const { runtime, clicks } = b2RuntimeForStages([ticketStageSnapshot(), selected]);
+  const adapter = new TohoCheckoutAdapter(runtime as never, {} as never);
+  await assert.rejects(
+    adapter.selectExactTicketAfterGate1(ticketIntent("一般", "529-2100-0010-0")),
+    (error) => error instanceof BrowserRuntimeError && error.code === "HUMAN_ACTION_REQUIRED" && Array.isArray(error.details?.reasons)
+  );
+  assert.equal(clicks.length, 2);
 });

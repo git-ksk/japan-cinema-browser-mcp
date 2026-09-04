@@ -311,6 +311,38 @@ test("provider-adapter exact element pointer mutation dispatches only after exac
   assert.deepEqual(events.map((event) => event.type), ["mouseMoved", "mousePressed", "mouseReleased"]);
 });
 
+
+test("provider-adapter exact element pointer supports bounded text/href fingerprint without an id", async () => {
+  const runtime = new CinemaBrowserRuntime({} as ChromeProcess, 1_000);
+  const events: Array<{ type: string }> = [];
+  const client = {
+    Runtime: {
+      evaluate: async () => ({ result: { value: {
+        ok: true,
+        id: "",
+        tagName: "A",
+        text: "一般2,100円",
+        href: "javascript:SelectTicket.setTicket('0', '0', '529-2100-0010-0', '一般', '2,100円')",
+        dataModal: "",
+        reason: null
+      } } })
+    },
+    Input: { dispatchMouseEvent: async (event: { type: string }) => { events.push(event); } }
+  };
+  const mutable = runtime as unknown as {
+    assertOfficialCurrentUrl: () => Promise<string>;
+    assertNoIntervention: () => Promise<void>;
+    getClient: () => Promise<unknown>;
+  };
+  mutable.assertOfficialCurrentUrl = async () => "https://hlo.tohotheater.jp/net/ticket/036/TNPI2010J02.do";
+  mutable.assertNoIntervention = async () => undefined;
+  mutable.getClient = async () => client;
+  const href = "javascript:SelectTicket.setTicket('0', '0', '529-2100-0010-0', '一般', '2,100円')";
+  const result = await runtime.clickReviewedElementPoint({ x: 100, y: 200 }, "toho", { tagName: "A", text: "一般2,100円", href });
+  assert.equal(result.clickedElementText, "一般2,100円");
+  assert.deepEqual(events.map((event) => event.type), ["mouseMoved", "mousePressed", "mouseReleased"]);
+});
+
 test("provider-adapter exact element pointer mutation fails before dispatch on hit-test identity drift", async () => {
   const runtime = new CinemaBrowserRuntime({} as ChromeProcess, 1_000);
   let dispatches = 0;
