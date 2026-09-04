@@ -239,7 +239,7 @@ Gate 1 physical acceptance後の `TNPI2010J02.do` を追加操作なしでレビ
 - このrunでは `一般`、大学・専門、高校生、中学・小学、幼児、シニア、障がい者割引2種のprovider ID / label / rendered priceをread-onlyで取得できた
 - `一般`以外は名称そのものに資格条件が含まれるため、Cinemaはeligibilityを推測しない。まず `TICKET_CONFIRMATION_REQUIRED` としてexact provider ticket ID / label / rendered price / eligibility textを返し、会話上のユーザー確認を得た同一factsだけを `eligibilityAcknowledgement` として再投入する。ticket eligibility確認だけではbrowser Handoffしない
 - 券種選択後、TOHOはAjaxで追加料金/3D・キャンペーン/決済限定/MovieTicket等の追加条件を返し得る。B2はAjax settlement後にこれらを再読し、追加条件があればguest continuationへ進まず停止する
-- `ログインせず次へ` はexact `gotoRej(4, '<site>', '', '')` と `TNPI2030J02.do` form actionをread-onlyで検証するだけで、B2ではクリックしない
+- `ログインせず次へ` はB2ではクリックしない。B3aでB2成功後のexact target / seat / intent / resource epoch proofをone-shot消費し、exact `gotoRej(4, '<site>', '', '')` controlを1回だけ操作する
 
 初期implementationはphysical acceptanceと同じ1席vertical sliceに限定します。Gate 1成功時に得たtarget / seat / checkout intent digest / host/path / resource epochのproofをone-shotで消費してからだけ、review済みexact ticketのmodal trigger → exact ticket optionという2つのpointer mutationを許可します。`一般`は追加確認不要、資格条件付き券種はprovider ticket ID / label / rendered price / eligibility textの完全一致した `eligibilityAcknowledgement` が必須です。acknowledgementはGate 1後に得るためGate 1 intent digest自体は変えず、exact provider ticket ID / labelはproofで固定したまま、rendered price / eligibility textをlive再読してacknowledgementと照合します。未確認/価格・文言driftではproof消費前に停止します。proof不一致・既選択・Ajax状態不明・追加条件はすべてfail closedです。`prepare_checkout`公開やcapability変更はこの実装だけでは行いません。
 
@@ -249,7 +249,7 @@ Gate 1 physical acceptance後の `TNPI2010J02.do` を追加操作なしでレビ
 
 初期Phase 4では、氏名・電話番号・メールアドレス・生年月日をMCP inputへ追加しません。
 
-購入者情報画面へ到達した場合は `purchaser_information` としてHuman Handoffします。
+B3a physical acceptanceで `TNPI2030J02.do` へ到達し、購入者情報と支払い方法選択が同じ `purchaseInfoInputForm` に存在することを確認しました。B3bではこのcombined surfaceを `purchaser_information` としてHuman Handoffします。remote Handoffではこの境界だけtext/keyを許可し、入力値はMCP prompt/requestState/log/resultへ取り込みません。Humanはrequired purchaser fieldsと意図した支払い方法をChromeへ直接入力し、exact `次へ` を1回だけ操作して次画面で停止します。
 
 人間がChromeへ直接入力した後、agentは新しい操作として肯定条件を再検証します。入力値そのものを読み取り、ログ出力し、結果へ返すことはしません。
 
@@ -398,7 +398,10 @@ Phase 4では常に `false` です。
    - provider ID `529-2100-0010-0`、`一般 2,100円`、total 2,100円、Ajax settlement=0、追加条件markerなしをpost-selectionで確認
    - 選択後にmodal anchorの表示labelが変わる実DOMをPR #83でstrict normalize対応。PR #84ではexact ticket item内のunique selection summaryへbindingし、同じlive J02でpost-selection factsを再検証。mutation直前のexact未選択label検証は維持
    - `ログインせず次へ`はB2ではクリックしない
-6. **B3 — 購入者情報・支払いhandoffと確認画面境界**
+6. **B3 — guest / 購入者情報・支払いhandoffと確認画面境界**
+   - ✅ B3a guest continuation physical acceptance: exact `ログインせず次へ` 1回で same target `TNPI2030J02.do` へ到達
+   - ✅ J2030 structural review: `purchaseInfoInputForm` / POST / `TNPI2055J02.do`、購入者fieldと支払い方法選択が同一ページ
+   - 🟡 B3b combined purchaser/payment-choice Human Handoff implementation/test済み、physical acceptance待ち
    - provider固有の肯定条件を確認
    - 最終購入は引き続き到達不能
 7. test・docs・限定live evidenceが揃ってからcapability変更を判断する

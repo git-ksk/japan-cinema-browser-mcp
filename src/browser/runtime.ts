@@ -46,6 +46,7 @@ export type CinemaInterventionReason =
   | "access_challenge"
   | "sign_in"
   | "consent"
+  | "purchaser_information"
   | "seat_decision";
 
 export type CinemaHandoffAction =
@@ -66,6 +67,13 @@ export type CinemaHandoffAction =
       kind: "reviewed_gate1_boundary";
       provider: "toho";
       boundary: "toho_terms_advance_gate1";
+      seatId: string;
+      intentDigest: string;
+    }
+  | {
+      kind: "reviewed_purchaser_payment_boundary";
+      provider: "toho";
+      boundary: "toho_purchaser_payment_entry";
       seatId: string;
       intentDigest: string;
     };
@@ -395,6 +403,25 @@ export class CinemaBrowserRuntime {
     sourceHost: string;
     sourcePathname: string;
     resourceEpoch: number;
+  };
+  private b2GuestProof?: {
+    targetId: string;
+    provider: "toho";
+    seatId: string;
+    intentDigest: string;
+    sourceHost: string;
+    sourcePathname: string;
+    resourceEpoch: number;
+  };
+  private purchaserPaymentBinding?: {
+    interventionId: string;
+    targetId: string;
+    provider: "toho";
+    seatId: string;
+    intentDigest: string;
+    sourceHost: string;
+    sourcePathname: string;
+    targetPathname: string;
   };
 
   constructor(
@@ -1060,6 +1087,83 @@ export class CinemaBrowserRuntime {
     return context;
   }
 
+  async markTohoB2GuestProof(input: { seatId: string; intentDigest: string }): Promise<CinemaReviewedBrowserContext> {
+    this.handoff.assertAgentAuthority();
+    if (!/^[A-Z]{1,4}-\d{1,4}$/.test(input.seatId) || !/^sha256:[a-f0-9]{64}$/.test(input.intentDigest)) {
+      this.b2GuestProof = undefined;
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO B3a requires one exact seat identity and bounded checkout intent digest.");
+    }
+    const context = await this.getReviewedBrowserContext("toho");
+    if (!/^\/net\/ticket\/\d{3}\/TNPI2010J02\.do$/.test(context.pathname)) {
+      this.b2GuestProof = undefined;
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO B3a proof can only be created on the reviewed selected-ticket J02 surface.");
+    }
+    this.b2GuestProof = {
+      targetId: context.targetId,
+      provider: "toho",
+      seatId: input.seatId,
+      intentDigest: input.intentDigest,
+      sourceHost: context.host,
+      sourcePathname: context.pathname,
+      resourceEpoch: this.handoff.getResourceEpoch()
+    };
+    return context;
+  }
+
+  async consumeTohoB2GuestProof(input: { seatId: string; intentDigest: string }): Promise<CinemaReviewedBrowserContext> {
+    this.handoff.assertAgentAuthority();
+    const context = await this.getReviewedBrowserContext("toho");
+    const proof = this.b2GuestProof;
+    if (
+      !proof || proof.provider !== "toho" || proof.seatId !== input.seatId || proof.intentDigest !== input.intentDigest ||
+      proof.targetId !== context.targetId || proof.sourceHost !== context.host || proof.sourcePathname !== context.pathname ||
+      proof.resourceEpoch !== this.handoff.getResourceEpoch()
+    ) {
+      this.b2GuestProof = undefined;
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO B3a requires the exact one-shot B2 guest proof from this browser target, seat, intent, and resource epoch.");
+    }
+    this.b2GuestProof = undefined;
+    return context;
+  }
+
+  async requireTohoPurchaserPaymentIntervention(input: {
+    seatId: string;
+    intentDigest: string;
+    targetPathname: string;
+    message: string;
+  }): Promise<never> {
+    this.handoff.assertAgentAuthority();
+    if (!/^[A-Z]{1,4}-\d{1,4}$/.test(input.seatId) || !/^sha256:[a-f0-9]{64}$/.test(input.intentDigest)) {
+      throw new BrowserRuntimeError("UNREVIEWED_INTERACTION", "TOHO purchaser/payment Handoff binding is invalid.");
+    }
+    const context = await this.getReviewedBrowserContext("toho");
+    if (!/^\/net\/ticket\/\d{3}\/TNPI2030J02\.do$/.test(context.pathname) || !/^\/net\/ticket\/\d{3}\/TNPI2055J02\.do$/.test(input.targetPathname)) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO purchaser/payment Handoff must start on the reviewed purchase-information surface with the exact reviewed next target.");
+    }
+    const intervention = this.handoff.begin({
+      reason: "purchaser_information",
+      action: {
+        kind: "reviewed_purchaser_payment_boundary",
+        provider: "toho",
+        boundary: "toho_purchaser_payment_entry",
+        seatId: input.seatId,
+        intentDigest: input.intentDigest
+      },
+      resumePolicy: CINEMA_HANDOFF_POLICY.transaction.resumePolicy
+    });
+    this.purchaserPaymentBinding = {
+      interventionId: intervention.id,
+      targetId: context.targetId,
+      provider: "toho",
+      seatId: input.seatId,
+      intentDigest: input.intentDigest,
+      sourceHost: context.host,
+      sourcePathname: context.pathname,
+      targetPathname: input.targetPathname
+    };
+    throw new BrowserRuntimeError("HUMAN_ACTION_REQUIRED", input.message, undefined, intervention);
+  }
+
   async getReviewedBrowserContext(expectedProvider: CinemaProviderId): Promise<CinemaReviewedBrowserContext> {
     const current = await this.assertOfficialCurrentUrl(expectedProvider);
     if (!this.targetId) {
@@ -1323,6 +1427,35 @@ export class CinemaBrowserRuntime {
       }
     }
 
+    if (active.action?.kind === "reviewed_purchaser_payment_boundary") {
+      const binding = this.purchaserPaymentBinding;
+      if (
+        !binding || binding.interventionId !== active.id || binding.targetId !== this.targetId ||
+        binding.provider !== "toho" || binding.seatId !== active.action.seatId || binding.intentDigest !== active.action.intentDigest
+      ) {
+        this.purchaserPaymentBinding = undefined;
+        throw new BrowserRuntimeError("UI_STATE_CHANGED", "The reviewed TOHO purchaser/payment context changed while Human control was active.", undefined, active);
+      }
+      const current = await this.getReviewedBrowserContext("toho");
+      if (current.targetId !== binding.targetId || current.host !== binding.sourceHost) {
+        this.purchaserPaymentBinding = undefined;
+        throw new BrowserRuntimeError("UI_STATE_CHANGED", "The reviewed TOHO purchaser/payment Handoff left its bound browser target or host.", undefined, active);
+      }
+      if (current.pathname === binding.sourcePathname) {
+        throw new BrowserRuntimeError(
+          "HUMAN_ACTION_REQUIRED",
+          "TOHO purchaser/payment entry is still on the same input page. Complete the required fields, choose a payment method, press the exact provider `次へ` once, then stop on the next page.",
+          undefined,
+          active
+        );
+      }
+      if (current.pathname !== binding.targetPathname) {
+        this.purchaserPaymentBinding = undefined;
+        throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO purchaser/payment Handoff reached an unreviewed continuation route.", { observedPathname: current.pathname }, active);
+      }
+      this.purchaserPaymentBinding = undefined;
+    }
+
     const surface = await this.detectInterventionSurface(client);
     if (surface) {
       throw new BrowserRuntimeError(
@@ -1344,6 +1477,8 @@ export class CinemaBrowserRuntime {
     this.checkoutContinuations.clear();
     this.gate0bProof = undefined;
     this.gate1TicketProof = undefined;
+    this.b2GuestProof = undefined;
+    this.purchaserPaymentBinding = undefined;
     if (this.gate0bBinding?.interventionId === interventionId) this.gate0bBinding = undefined;
     if (this.gate1Binding?.interventionId === interventionId) this.gate1Binding = undefined;
   }
@@ -1354,6 +1489,8 @@ export class CinemaBrowserRuntime {
     this.gate0bProof = undefined;
     this.gate1Binding = undefined;
     this.gate1TicketProof = undefined;
+    this.b2GuestProof = undefined;
+    this.purchaserPaymentBinding = undefined;
     const active = this.handoff.getActive();
     if (active) this.handoff.cancel(active.id);
     const client = this.client;
@@ -1604,6 +1741,10 @@ export class CinemaBrowserRuntime {
           this.client = undefined;
           this.targetId = undefined;
           this.checkoutContinuations.clear();
+          this.gate0bProof = undefined;
+          this.gate1TicketProof = undefined;
+          this.b2GuestProof = undefined;
+          this.purchaserPaymentBinding = undefined;
         }
       }
     }
@@ -1635,6 +1776,10 @@ export class CinemaBrowserRuntime {
           this.client = undefined;
           this.targetId = undefined;
           this.checkoutContinuations.clear();
+          this.gate0bProof = undefined;
+          this.gate1TicketProof = undefined;
+          this.b2GuestProof = undefined;
+          this.purchaserPaymentBinding = undefined;
         }
         throw error;
       }

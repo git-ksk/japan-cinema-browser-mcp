@@ -188,7 +188,9 @@ test("reviewed Handoff dependency is immutable and transaction replay remains st
   assert.ok(semanticVerifyOffset >= 0 && wssVerifiedCompletionOffset > semanticVerifyOffset);
   assert.doesNotMatch(server, /BrowserHandoffAdapter|webrtc_direct|webrtc_relay/);
   assert.match(server, /REVIEWED_POINTER_ONLY_INPUT_POLICY = Object\.freeze\(\{ tap: true, scroll: true, text: false, key: false \}/);
-  assert.match(server, /windowHandoffAdapter\.start\(\{[\s\S]*windowId: targetWindowId[\s\S]*inputPolicy: REVIEWED_POINTER_ONLY_INPUT_POLICY/);
+  assert.match(server, /REVIEWED_PURCHASER_FORM_INPUT_POLICY = Object\.freeze\(\{ tap: true, scroll: true, text: true, key: true \}/);
+  assert.match(server, /const inputPolicy = purchaserForm \? REVIEWED_PURCHASER_FORM_INPUT_POLICY : REVIEWED_POINTER_ONLY_INPUT_POLICY/);
+  assert.match(server, /windowHandoffAdapter\.start\(\{[\s\S]*windowId: targetWindowId[\s\S]*inputPolicy/);
   assert.match(server, /reviewed_gate1_boundary/);
   assert.match(server, /toho_terms_advance_gate1/);
   assert.doesNotMatch(server, /new TakeoverBroker|createLink\(/);

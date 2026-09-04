@@ -272,7 +272,7 @@ Screen 4では画面表示の `113席 + 2車いす席` と、ちょうど2つの
 - Gate 0bでは `利用規約に同意して次へ` / ticket / purchaser PII / payment / final purchaseを操作しない。Gate 1はHuman-onlyで同意後J02まで、B2はJ02内のreview済み券種だけを別のfresh semantic actionとして扱う
 - Human Handoff後に座席変更を自動再実行しない
 
-Gate 0b / Gate 1に加えてB2のphysical acceptanceまで完了しています。Gate 1遷移時のserver-side holdと15分表示、能動解除なしの自然release、さらにcaller明示の`一般` 1枚のexact ticket mutationとpost-selection provider factsを確認しました。ただしB3のguest/purchaser/payment境界はreview中なので対応機能はまだ有効化していません。
+Gate 0b / Gate 1 / B2に加えてB3a guest continuationのphysical acceptanceまで完了しています。Gate 1遷移時のserver-side holdと15分表示、能動解除なしの自然release、さらにcaller明示の`一般` 1枚のexact ticket mutationとpost-selection provider factsを確認しました。B3aではexact `ログインせず次へ` 1回で `TNPI2030J02.do` へ到達し、購入者情報と支払い方法選択が同一ページであることを確認しました。B3b Human Handoffとその後のpre-purchase summaryはreview中なので対応機能はまだ有効化していません。
 
 同意後の継続処理は、同じ呼び出しを再開して座席操作を繰り返す方式ではありません。明示的なHuman Handoffの後に、**新しい意味操作**として現在の画面を再検証し、元の購入意図へ結び直します。
 
@@ -288,7 +288,10 @@ Gate 0b / Gate 1に加えてB2のphysical acceptanceまで完了しています�
 - `一般`は追加確認なしのunconditioned standard ticketとしてexact pointer selection候補にする
 - 大学・専門、高校生、中学・小学、幼児、シニア、障がい者割引は資格を推測しない。まずexact provider ticket ID / label / rendered price / eligibility textを返して会話上でユーザー確認を要求し、そのexact factsへの `eligibilityAcknowledgement` がある場合だけ選択する。ticket eligibilityだけのためにbrowser Handoffは使わない
 - 選択後はprovider Ajax settlementを待ち、3D/追加料金・キャンペーン・MovieTicket・決済限定・provider warningが出れば停止
-- `ログインせず次へ` はidentityをread-only検証するだけでB2からは操作しない
+- B2では `ログインせず次へ` を操作しない。B3aはB2成功後のtarget/seat/intent/resource epochへone-shot proofを作り、そのexact proofを消費してreview済みguest controlを1回だけ操作する
+- B3a physical acceptanceではsame targetで `/net/ticket/036/TNPI2010J02.do` → `/net/ticket/036/TNPI2030J02.do` を確認
+- J2030は `purchaseInfoInputForm` / POST / `/net/ticket/036/TNPI2055J02.do`。氏名・カナ・性別・年齢・電話・メールと支払い方法radioが同じHuman-only surfaceに存在する
+- B3bのremote Handoffだけpointer/scroll/text/keyを許可し、入力値をMCP prompt/state/log/resultへ取り込まない。Gate 0b/Gate 1はtext/key禁止のまま
 - MCP tool公開、`seatSelection` / `checkoutPreparation` / `purchaseSubmission` の変更は行わない
 
 2026-09-05のphysical acceptanceでは、caller明示の`一般` 1枚だけをexact pointerで選択し、provider ID `529-2100-0010-0`、rendered `一般 2,100円`、hidden/rendered total 2,100円、Ajax settlement=0、追加条件markerなしを確認しました。選択後は同じmodal anchorの表示が`券種を選択してください`から選択済み券種へ変わるため、PR #83でstage readだけをlabel非依存のexact `a[data-modal]` identityへ修正し、PR #84で選択summaryをexact `.ticket-item` 内のunique `.ticket-content` へbindしました。修正版は同じretained live J02で `一般 2,100円` / provider ID / total / Ajax settlement / 追加条件なしを再検証済みです。mutation直前の未選択label検証は維持し、B2完了だけをcapability approvalとは扱いません。
