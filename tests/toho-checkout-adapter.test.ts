@@ -507,6 +507,12 @@ test("TOHO B2 stage read keeps modal identity after ticket selection changes the
   assert.doesNotMatch(TOHO_TICKET_STAGE_EXPRESSION, /modalAnchors[^;]*券種を選択してください/);
 });
 
+test("TOHO B2 stage read binds the rendered selection summary to the exact ticket item instead of a guessed element id", () => {
+  assert.match(TOHO_TICKET_STAGE_EXPRESSION, /const selectionRoots = Array\.from\(item\.querySelectorAll\('\.ticket-content'\)\)/);
+  assert.match(TOHO_TICKET_STAGE_EXPRESSION, /selectionRoots\.length === 1/);
+  assert.doesNotMatch(TOHO_TICKET_STAGE_EXPRESSION, /getElementById\('ticket-content'/);
+});
+
 test("TOHO B2 normalizes exact rendered J02 ticket ids/prices and keeps eligibility-bound tickets Human-reviewed", () => {
   const stage = normalizeTohoTicketStageSnapshot(ticketStageSnapshot(), "A-2");
   assert.equal(stage.siteId, "036");
