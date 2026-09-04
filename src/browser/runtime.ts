@@ -387,6 +387,15 @@ export class CinemaBrowserRuntime {
     sourcePathname: string;
     targetPathname: string;
   };
+  private gate1TicketProof?: {
+    targetId: string;
+    provider: "toho";
+    seatId: string;
+    intentDigest: string;
+    sourceHost: string;
+    sourcePathname: string;
+    resourceEpoch: number;
+  };
 
   constructor(
     private readonly chrome: ChromeProcess,
@@ -740,35 +749,72 @@ export class CinemaBrowserRuntime {
   async clickReviewedElementPoint(
     point: { x: number; y: number },
     expectedProvider: CinemaProviderId,
-    expectedElement: { id: string; tagName: string }
+    expectedElement: {
+      tagName: string;
+      id?: string;
+      text?: string;
+      href?: string;
+      dataModal?: string;
+    }
   ): Promise<Record<string, unknown>> {
     const before = await this.assertOfficialCurrentUrl(expectedProvider);
     await this.assertNoIntervention(CINEMA_HANDOFF_POLICY.semantic_mutation.resumePolicy);
-    if (!Number.isFinite(point.x) || !Number.isFinite(point.y) || !expectedElement.id.trim() || !expectedElement.tagName.trim()) {
+    const identityCount = [expectedElement.id, expectedElement.text, expectedElement.href, expectedElement.dataModal]
+      .filter((value) => typeof value === "string" && value.trim().length > 0).length;
+    if (
+      !Number.isFinite(point.x) || !Number.isFinite(point.y) || !expectedElement.tagName.trim() || identityCount < 1 ||
+      [expectedElement.id, expectedElement.text, expectedElement.href, expectedElement.dataModal]
+        .some((value) => typeof value === "string" && value.length > 1_000)
+    ) {
       throw new BrowserRuntimeError("UI_STATE_CHANGED", "Reviewed element click target is incomplete or invalid.");
     }
     const client = await this.getClient();
     const x = Math.round(point.x * 100) / 100;
     const y = Math.round(point.y * 100) / 100;
-    const expectedId = JSON.stringify(expectedElement.id);
+    const expectedId = JSON.stringify(expectedElement.id ?? null);
+    const expectedText = JSON.stringify(expectedElement.text ?? null);
+    const expectedHref = JSON.stringify(expectedElement.href ?? null);
+    const expectedDataModal = JSON.stringify(expectedElement.dataModal ?? null);
     const expectedTag = JSON.stringify(expectedElement.tagName.toUpperCase());
     const inspected = await client.Runtime.evaluate({
       expression: `(() => {
         const x = ${x}; const y = ${y};
-        const expectedId = ${expectedId}; const expectedTag = ${expectedTag};
+        const expectedId = ${expectedId}; const expectedText = ${expectedText};
+        const expectedHref = ${expectedHref}; const expectedDataModal = ${expectedDataModal};
+        const expectedTag = ${expectedTag};
+        const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
         if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) return { ok: false, reason: 'outside_viewport' };
         const hit = document.elementFromPoint(x, y);
         if (!hit) return { ok: false, reason: 'no_hit' };
-        const rect = hit.getBoundingClientRect();
-        const style = getComputedStyle(hit);
+        let candidate = hit;
+        for (let depth = 0; candidate && depth < 5 && String(candidate.tagName || '').toUpperCase() !== expectedTag; depth += 1) {
+          candidate = candidate.parentElement;
+        }
+        if (!candidate) return { ok: false, reason: 'tag_not_found' };
+        const rect = candidate.getBoundingClientRect();
+        const style = getComputedStyle(candidate);
         const visible = rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && style.pointerEvents !== 'none';
-        const exact = String(hit.id || '') === expectedId && String(hit.tagName || '').toUpperCase() === expectedTag;
-        return { ok: visible && exact, reason: visible && exact ? null : 'identity_mismatch', id: String(hit.id || ''), tagName: String(hit.tagName || '') };
+        const observed = {
+          id: String(candidate.id || ''),
+          tagName: String(candidate.tagName || ''),
+          text: normalize(candidate.getAttribute('aria-label') || candidate.textContent),
+          href: String(candidate.getAttribute('href') || ''),
+          dataModal: String(candidate.getAttribute('data-modal') || '')
+        };
+        const exact =
+          String(observed.tagName).toUpperCase() === expectedTag &&
+          (expectedId === null || observed.id === expectedId) &&
+          (expectedText === null || observed.text === expectedText) &&
+          (expectedHref === null || observed.href === expectedHref) &&
+          (expectedDataModal === null || observed.dataModal === expectedDataModal);
+        return { ok: visible && exact, reason: visible && exact ? null : 'identity_mismatch', ...observed };
       })()`,
       returnByValue: true,
       awaitPromise: true
     });
-    const value = inspected.result.value as { ok?: boolean; reason?: unknown; id?: unknown; tagName?: unknown } | undefined;
+    const value = inspected.result.value as {
+      ok?: boolean; reason?: unknown; id?: unknown; tagName?: unknown; text?: unknown; href?: unknown; dataModal?: unknown;
+    } | undefined;
     if (!value?.ok) {
       throw new BrowserRuntimeError(
         "UI_STATE_CHANGED",
@@ -777,6 +823,9 @@ export class CinemaBrowserRuntime {
           expectedElement,
           observedId: typeof value?.id === "string" ? value.id : undefined,
           observedTagName: typeof value?.tagName === "string" ? value.tagName : undefined,
+          observedText: typeof value?.text === "string" ? value.text : undefined,
+          observedHref: typeof value?.href === "string" ? value.href : undefined,
+          observedDataModal: typeof value?.dataModal === "string" ? value.dataModal : undefined,
           reason: value?.reason
         }
       );
@@ -788,7 +837,12 @@ export class CinemaBrowserRuntime {
     await this.assertNoIntervention(CINEMA_HANDOFF_POLICY.semantic_mutation.resumePolicy);
     const after = await this.assertOfficialCurrentUrl(expectedProvider);
     this.handoff.advanceResourceEpoch();
-    return { clickedElementId: expectedElement.id, url: after, previousUrl: before };
+    return {
+      clickedElementId: expectedElement.id,
+      clickedElementText: expectedElement.text,
+      url: after,
+      previousUrl: before
+    };
   }
 
   async clickReviewedIntermediateControl(label: string, expectedProvider: CinemaProviderId): Promise<Record<string, unknown>> {
@@ -855,6 +909,7 @@ export class CinemaBrowserRuntime {
   async beginTohoSeatDecisionGate0b(input: { seatId: string; intentDigest: string }): Promise<CinemaIntervention> {
     this.handoff.assertAgentAuthority();
     this.gate0bProof = undefined;
+    this.gate1TicketProof = undefined;
     if (!/^[A-Z]{1,4}-\d{1,4}$/.test(input.seatId) || !/^sha256:[a-f0-9]{64}$/.test(input.intentDigest)) {
       throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO Gate 0b requires one exact seat identity and bounded intent digest.");
     }
@@ -887,6 +942,7 @@ export class CinemaBrowserRuntime {
 
   async beginTohoTermsAdvanceGate1(input: { seatId: string; intentDigest: string }): Promise<CinemaIntervention> {
     this.handoff.assertAgentAuthority();
+    this.gate1TicketProof = undefined;
     if (!/^[A-Z]{1,4}-\d{1,4}$/.test(input.seatId) || !/^sha256:[a-f0-9]{64}$/.test(input.intentDigest)) {
       throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO Gate 1 requires one exact seat identity and bounded intent digest.");
     }
@@ -975,6 +1031,33 @@ export class CinemaBrowserRuntime {
       targetPathname
     };
     return intervention;
+  }
+
+  async consumeTohoGate1TicketProof(input: { seatId: string; intentDigest: string }): Promise<CinemaReviewedBrowserContext> {
+    this.handoff.assertAgentAuthority();
+    if (!/^[A-Z]{1,4}-\d{1,4}$/.test(input.seatId) || !/^sha256:[a-f0-9]{64}$/.test(input.intentDigest)) {
+      this.gate1TicketProof = undefined;
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO B2 requires one exact seat identity and bounded checkout intent digest.");
+    }
+    const context = await this.getReviewedBrowserContext("toho");
+    if (!/^\/net\/ticket\/\d{3}\/TNPI2010J02\.do$/.test(context.pathname)) {
+      this.gate1TicketProof = undefined;
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO B2 must start on the reviewed Gate 1 ticket-type continuation.");
+    }
+    const proof = this.gate1TicketProof;
+    if (
+      !proof || proof.provider !== "toho" || proof.seatId !== input.seatId || proof.intentDigest !== input.intentDigest ||
+      proof.targetId !== context.targetId || proof.sourceHost !== context.host || proof.sourcePathname !== context.pathname ||
+      proof.resourceEpoch !== this.handoff.getResourceEpoch()
+    ) {
+      this.gate1TicketProof = undefined;
+      throw new BrowserRuntimeError(
+        "UI_STATE_CHANGED",
+        "TOHO B2 requires the exact one-shot Gate 1 proof from this browser target, seat, intent, and resource epoch."
+      );
+    }
+    this.gate1TicketProof = undefined;
+    return context;
   }
 
   async getReviewedBrowserContext(expectedProvider: CinemaProviderId): Promise<CinemaReviewedBrowserContext> {
@@ -1189,8 +1272,18 @@ export class CinemaBrowserRuntime {
           active
         );
       }
+      const verified = this.handoff.markVerified(interventionId);
+      this.gate1TicketProof = {
+        targetId: binding.targetId,
+        provider: binding.provider,
+        seatId: binding.seatId,
+        intentDigest: binding.intentDigest,
+        sourceHost: binding.sourceHost,
+        sourcePathname: binding.targetPathname,
+        resourceEpoch: verified.epoch
+      };
       this.gate1Binding = undefined;
-      return this.handoff.markVerified(interventionId);
+      return verified;
     }
     if (active.action?.kind === "reviewed_checkout_boundary") {
       const binding = this.checkoutContinuations.peek();
@@ -1250,6 +1343,7 @@ export class CinemaBrowserRuntime {
     this.handoff.cancel(interventionId);
     this.checkoutContinuations.clear();
     this.gate0bProof = undefined;
+    this.gate1TicketProof = undefined;
     if (this.gate0bBinding?.interventionId === interventionId) this.gate0bBinding = undefined;
     if (this.gate1Binding?.interventionId === interventionId) this.gate1Binding = undefined;
   }
@@ -1259,6 +1353,7 @@ export class CinemaBrowserRuntime {
     this.gate0bBinding = undefined;
     this.gate0bProof = undefined;
     this.gate1Binding = undefined;
+    this.gate1TicketProof = undefined;
     const active = this.handoff.getActive();
     if (active) this.handoff.cancel(active.id);
     const client = this.client;

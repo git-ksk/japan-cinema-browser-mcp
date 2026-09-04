@@ -66,7 +66,11 @@ Phase 3では、座席表へ入るだけでは選択席が発生しないこと�
 
 2026-08-25のGate 0b v6 physical acceptanceで、この境界を実機確認しました。Humanがexact `A-2` → `確認する` 1回 → provider自身の `terms_check` を明示的にON → Doneまで実行し、CinemaはTOHO自身の `bookSeatIntForm.seat_no` とrendered `#seatList2` がexact seat 1件だけで一致すること、およびcheckbox checkedをread-only検証しました。直後の独立fresh sessionでも同じ `A-2` は `available` でした。このため、**`確認する` とterms acknowledgementまででは、少なくとも別sessionから観測できるserver-side holdは開始していませんでした**。
 
-利用規約欄と `terms_check` checkboxはseat page下部に常設されるため、欄や `利用規約に同意して次へ` の**存在**だけをpostconditionには使いません。seat画像の `選択中` 表示も補助diagnosticだけにし、canonical truthはprovider-owned form + rendered summaryとします。Gate 0bでは `利用規約に同意して次へ` を押していません。次のGate 1では、このcontrolをHumanが1回だけ操作し、直後のprovider route・hold/timer・fresh-session availabilityをread-only観測します。Agentはterms checkbox/advance controlを自動操作しません。
+利用規約欄と `terms_check` checkboxはseat page下部に常設されるため、欄や `利用規約に同意して次へ` の**存在**だけをpostconditionには使いません。seat画像の `選択中` 表示も補助diagnosticだけにし、canonical truthはprovider-owned form + rendered summaryとします。Gate 0bでは `利用規約に同意して次へ` を押していません。
+
+2026-09-04のGate 1 physical acceptanceでは、このcontrolをHumanが1回だけ操作して直後 `TNPI2010J02.do` で停止しました。独立fresh profileではexact `A-2` が `unavailable` となり、Gate 0bまででは観測されなかったserver-side holdがGate 1遷移で始まることを確認しました。J02は「今から15分以内に購入が完了しない場合、自動的に座席は解除されます」と表示し、能動的な取消/戻る/解除を使わず後のfresh profileでA-2が `available` に戻ったため自然releaseも確認済みです。連続pollはしていないため、解除のexact secondは証明していません。
+
+2026-09-05のJ02 read-only reviewでは、seat slot `A2`、hidden `ticket_type_name`、exact modal trigger、TOHO自身の `SelectTicket.setTicket(...)` に埋め込まれたprovider ticket ID / label / price、`ログインせず次へ` のguest continuation identityを確認しました。券種選択後はprovider Ajaxが3D/追加料金・キャンペーン・決済限定・MovieTicket等を返し得るため、B2は選択後にこれらを再読して条件があれば停止します。資格を推測せず、初期1席sliceでagent候補とするのはreview済み`一般`だけです。
 
 また、隔離環境の標準 `756x469` viewportでは横向き表示に関するブロックが出ました。`1280x813` ではその環境要因は解消しましたが、`確認する` は依然として操作可能になりませんでした。
 

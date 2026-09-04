@@ -472,6 +472,61 @@ test("TOHO Gate 1 verification accepts only the immediate reviewed J02 continuat
   assert.equal(decision.action?.kind, "reviewed_gate1_boundary");
 });
 
+
+test("TOHO Gate 1 ticket proof is exact, epoch-bound, and one-shot for B2", async () => {
+  const runtime = new CinemaBrowserRuntime({ close: async () => undefined } as unknown as ChromeProcess, 1_000);
+  const digest = `sha256:${"f".repeat(64)}`;
+  await establishTohoGate0bProof(runtime, { targetId: "target-b2-proof", seatId: "A-2", intentDigest: digest });
+  const mutable = runtime as unknown as {
+    targetId: string;
+    getReviewedBrowserContext: () => Promise<{ provider: "toho"; targetId: string; host: string; pathname: string }>;
+    getClient: () => Promise<unknown>;
+    getVerificationClient: () => Promise<unknown>;
+    currentUrlUnchecked: () => Promise<string>;
+  };
+  mutable.targetId = "target-b2-proof";
+  let pathname = "/net/ticket/066/TNPI2010J01.do";
+  mutable.getReviewedBrowserContext = async () => ({
+    provider: "toho",
+    targetId: "target-b2-proof",
+    host: "hlo.tohotheater.jp",
+    pathname
+  });
+  mutable.getClient = async () => ({
+    Runtime: { evaluate: async () => ({ result: { value: {
+      expectedSeatSelected: true,
+      selectedSeatCount: 1,
+      renderedSeatCount: 1,
+      termsCheckboxCount: 1,
+      termsAcknowledged: true,
+      matchingControls: 1,
+      controlHrefExact: true,
+      formNameExact: true,
+      formMethodExact: true,
+      formTargetExact: true,
+      kakuteiControlCount: 1
+    } } }) }
+  });
+  mutable.getVerificationClient = async () => ({ Runtime: { evaluate: async () => ({ result: { value: {} } }) } });
+  let currentUrl = "https://hlo.tohotheater.jp/net/ticket/066/TNPI2010J01.do";
+  mutable.currentUrlUnchecked = async () => currentUrl;
+  const gate1 = await runtime.beginTohoTermsAdvanceGate1({ seatId: "A-2", intentDigest: digest });
+  runtime.claimHumanControl(gate1.id);
+  runtime.markHumanControlComplete(gate1.id);
+  pathname = "/net/ticket/066/TNPI2010J02.do";
+  currentUrl = "https://hlo.tohotheater.jp/net/ticket/066/TNPI2010J02.do";
+  const verified = await runtime.verifyHumanIntervention(gate1.id);
+  assert.equal(verified.status, "ready_to_resume");
+  runtime.resumeAfterHumanIntervention(gate1.id);
+
+  const proof = await runtime.consumeTohoGate1TicketProof({ seatId: "A-2", intentDigest: digest });
+  assert.equal(proof.pathname, "/net/ticket/066/TNPI2010J02.do");
+  await assert.rejects(
+    runtime.consumeTohoGate1TicketProof({ seatId: "A-2", intentDigest: digest }),
+    (error: unknown) => error instanceof BrowserRuntimeError && error.code === "UI_STATE_CHANGED" && /one-shot Gate 1 proof/.test(error.message)
+  );
+});
+
 test("reviewed TOHO checkout boundary carries only a bounded digest action and remains never_replay", async () => {
   const runtime = new CinemaBrowserRuntime({ close: async () => undefined } as unknown as ChromeProcess, 1_000);
   const mutable = runtime as unknown as { targetId: string };
