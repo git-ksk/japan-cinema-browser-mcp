@@ -261,7 +261,8 @@ export const TOHO_TICKET_STAGE_EXPRESSION = `(() => {
       href: String(el.getAttribute('href') || '')
     })) : [];
     const suffix = '0' + index;
-    const selectionRoot = document.getElementById('ticket-content' + suffix);
+    const selectionRoots = Array.from(item.querySelectorAll('.ticket-content'));
+    const selectionRoot = selectionRoots.length === 1 ? selectionRoots[0] : null;
     const ona = document.getElementById('onaRadioDiv' + suffix);
     const campaign = document.getElementById('kessaiCampaign' + suffix);
     const movieTicket = document.getElementById('movieticket' + suffix);
