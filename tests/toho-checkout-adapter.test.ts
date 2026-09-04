@@ -501,6 +501,12 @@ test("TOHO B2 ticket-stage expression is read-only and cannot submit guest conti
   assert.match(TOHO_TICKET_STAGE_EXPRESSION, /ログインせず次へ/);
 });
 
+test("TOHO B2 stage read keeps modal identity after ticket selection changes the anchor label", () => {
+  assert.match(TOHO_TICKET_STAGE_EXPRESSION, /const modalAnchors = Array\.from\(item\.querySelectorAll\('a\[data-modal\]'\)\)/);
+  assert.match(TOHO_TICKET_STAGE_EXPRESSION, /modalAnchors\.length === 1/);
+  assert.doesNotMatch(TOHO_TICKET_STAGE_EXPRESSION, /modalAnchors[^;]*券種を選択してください/);
+});
+
 test("TOHO B2 normalizes exact rendered J02 ticket ids/prices and keeps eligibility-bound tickets Human-reviewed", () => {
   const stage = normalizeTohoTicketStageSnapshot(ticketStageSnapshot(), "A-2");
   assert.equal(stage.siteId, "036");
