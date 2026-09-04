@@ -139,6 +139,41 @@ test("checkout intent is strict and provides no PII, credential, payment, summar
   }
 });
 
+test("checkout intent accepts only exact bounded ticket eligibility acknowledgement", () => {
+  const acknowledged = parseCinemaCheckoutIntent({
+    provider: "toho",
+    showtime: { theater: "T", date: "2026-08-17", movie: "M", startTime: "21:10" },
+    seatIds: ["A-1"],
+    ticketChoices: [{
+      providerTicketTypeId: "student-provider-id",
+      label: "大学・専門",
+      quantity: 1,
+      eligibilityAcknowledgement: { confirmed: true, renderedPriceYen: 1600, eligibilityText: "大学・専門" }
+    }]
+  });
+  assert.deepEqual(acknowledged.ticketChoices[0]?.eligibilityAcknowledgement, {
+    confirmed: true,
+    renderedPriceYen: 1600,
+    eligibilityText: "大学・専門"
+  });
+
+  for (const ticketChoice of [
+    { label: "大学・専門", quantity: 1, eligibilityAcknowledgement: { confirmed: true, renderedPriceYen: 1600, eligibilityText: "大学・専門" } },
+    { providerTicketTypeId: "student-provider-id", label: "大学・専門", quantity: 1, eligibilityAcknowledgement: { confirmed: false, renderedPriceYen: 1600, eligibilityText: "大学・専門" } },
+    { providerTicketTypeId: "student-provider-id", label: "大学・専門", quantity: 1, eligibilityAcknowledgement: { confirmed: true, renderedPriceYen: 1600, eligibilityText: "大学・専門", extra: true } }
+  ]) {
+    assert.throws(
+      () => parseCinemaCheckoutIntent({
+        provider: "toho",
+        showtime: { theater: "T", date: "2026-08-17", movie: "M", startTime: "21:10" },
+        seatIds: ["A-1"],
+        ticketChoices: [ticketChoice]
+      }),
+      (error) => error instanceof CheckoutCoreError && error.code === "INVALID_INTENT"
+    );
+  }
+});
+
 test("checkout intent rejects duplicate seats and ticket quantities that do not exactly match the intended seats", () => {
   assert.throws(
     () => parseCinemaCheckoutIntent({
@@ -359,6 +394,8 @@ test("Phase 4 core preserves never-replay semantics and does not register prepar
 
   const server = fs.readFileSync(path.join(root, "src/server.ts"), "utf8");
   assert.doesNotMatch(server, /registerTool\(\s*["']prepare_checkout["']/);
+  assert.match(server, /error instanceof CheckoutCoreError/);
+  assert.match(server, /CheckoutCoreError \|\| error instanceof SeatRecommendationError/);
   const checkout = fs.readFileSync(path.join(root, "src/checkout.ts"), "utf8");
   assert.doesNotMatch(checkout, /finalPurchaseClick|confirm_purchase_action|prepare_purchase_confirmation/);
 });

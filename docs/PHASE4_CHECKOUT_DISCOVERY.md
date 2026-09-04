@@ -70,7 +70,7 @@ Phase 3では、座席表へ入るだけでは選択席が発生しないこと�
 
 2026-09-04のGate 1 physical acceptanceでは、このcontrolをHumanが1回だけ操作して直後 `TNPI2010J02.do` で停止しました。独立fresh profileではexact `A-2` が `unavailable` となり、Gate 0bまででは観測されなかったserver-side holdがGate 1遷移で始まることを確認しました。J02は「今から15分以内に購入が完了しない場合、自動的に座席は解除されます」と表示し、能動的な取消/戻る/解除を使わず後のfresh profileでA-2が `available` に戻ったため自然releaseも確認済みです。連続pollはしていないため、解除のexact secondは証明していません。
 
-2026-09-05のJ02 read-only reviewでは、seat slot `A2`、hidden `ticket_type_name`、exact modal trigger、TOHO自身の `SelectTicket.setTicket(...)` に埋め込まれたprovider ticket ID / label / price、`ログインせず次へ` のguest continuation identityを確認しました。券種選択後はprovider Ajaxが3D/追加料金・キャンペーン・決済限定・MovieTicket等を返し得るため、B2は選択後にこれらを再読して条件があれば停止します。資格を推測せず、初期1席sliceでagent候補とするのはreview済み`一般`だけです。
+2026-09-05のJ02 read-only reviewでは、seat slot `A2`、hidden `ticket_type_name`、exact modal trigger、TOHO自身の `SelectTicket.setTicket(...)` に埋め込まれたprovider ticket ID / label / price、`ログインせず次へ` のguest continuation identityを確認しました。券種選択後はprovider Ajaxが3D/追加料金・キャンペーン・決済限定・MovieTicket等を返し得るため、B2は選択後にこれらを再読して条件があれば停止します。資格を推測しません。`一般`は追加確認なしで選択候補とし、資格条件付きのreview済み券種はexact provider ticket ID / label / rendered price / eligibility textを会話上でユーザーへ提示し、同じfactsへの明示確認がcheckout intentへbindされた場合だけ選択候補にします。
 
 同日のB2 physical mutation acceptanceでは、callerが明示した`一般` 1枚のみをexact pointerで選択しました。選択後のprovider IDは`529-2100-0010-0`、表示は`一般 2,100円`、hidden/rendered totalはいずれも2,100円、Ajaxはsettled、追加料金/キャンペーン/MovieTicket/決済限定/provider warningは観測されませんでした。`ログインせず次へ`は未操作です。選択後に同じmodal anchorの表示labelが選択済み券種へ変わるため初回post-readがfail closedしましたが、PR #83でread-only stage normalizationだけを選択済みDOMへ対応し、pointer mutation直前のexact未選択label検証は維持しています。さらに実DOMでは選択summaryの要素IDも事前想定と異なったため、PR #84でexact `.ticket-item` 内のunique `.ticket-content` へbindingし直し、同じretained live J02で `一般 2,100円` / provider ID / total / Ajax / 追加条件なしを再検証しました。
 
@@ -201,7 +201,7 @@ interface CinemaTicketType {
 - 現在画面に表示されたラベル・価格・条件・数量制限を読む
 - 共通カテゴリへ変換しても元ラベルを保持する
 - 年齢、学生、シニア、障害、会員資格を推測しない
-- 資格確認やPINが必要な割引はHumanへ戻す
+- 資格条件付き券種は会話上のexplicit user acknowledgementを要求し、PIN/credential/provider-required manual stepが必要な割引はHuman Handoffまたは安全停止へ戻す
 - 券数と選択席数を一致させる
 
 ## 購入内容要約

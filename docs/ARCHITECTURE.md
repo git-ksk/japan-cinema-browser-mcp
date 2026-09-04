@@ -155,7 +155,7 @@ Phase 4のprovider-neutral checkout contract / safety coreです。#49ではbrow
 - purchaser name / phone / email / birth date、credential、OTP/MFA、payment、consent、caller-supplied total/summary/final-controlはintent schemaへ入れない
 - seat mutation前に2回のread-only observationを比較し、context/layout/state fingerprintが一致したexact intended seatだけを許可する。alternate seatへの自動置換はしない
 - ticket typeはprovider ID/label、rendered price/restriction/eligibility factを保持し、labelからstudent/senior/member等のeligibilityを推測しない
-- providerがHuman reviewを要求するticket pathはcategoryだけを返してHuman Handoffへ止められる
+- providerの `ticket_eligibility` 条件は資格を推測せず、exact ticket ID / label / rendered price / eligibility textを会話側へ返してユーザー確認を要求できる。Gate 1 proofはexact ticket identityまでをbindしたまま維持し、確認はGate 1後のlive rendered price / eligibility textへexact照合してproof消費前に要求する。browser Handoffは使わない。credential/PIN/coupon/provider-required manual stepは引き続きHuman Handoffまたは安全停止
 - checkout summaryはprovider adapterが現在のrendered UIから再取得したbounded factsだけをstrict parseし、caller intentとexact matchした場合だけmaterial SHA-256 fingerprintを生成する
 - missing subtotal / fees / totalはmissingのまま保持し、0や空配列を発明しない
 - arbitrary `providerData` / raw page/dialog / opaque checkout URLをgeneric summaryへ持ち込まない

@@ -238,7 +238,7 @@ Discovery: [`PHASE4_CHECKOUT_DISCOVERY.md`](./PHASE4_CHECKOUT_DISCOVERY.md) / #4
 Implementation split:
 
 - ✅ #49 — provider-neutral checkout contract/core。strict intent、2-read seat freshness、exact-seat validation、ticket normalization、rendered summary/material fingerprintまで実装。`prepare_checkout` tool自体は未登録でtransaction capabilityは全社false
-- 🟡 #50 — TOHO first vertical slice。Gate 0b / Gate 1のhold→15分自然releaseに加え、B2 physical mutation acceptanceまで完了。exact one-shot Gate 1 proofからcaller明示のreview済み`一般` 1枚だけを選択し、provider ID/label/price/total/Ajax settlement/追加条件なしを実機で検証した。資格券はHuman review、guest continuationは未操作。次はB3のguest→購入者情報・支払いHuman-only境界とpre-purchase summary reachabilityをreviewする。`seatSelection=false` / `checkoutPreparation=false` / `purchaseSubmission=false` 維持
+- 🟡 #50 — TOHO first vertical slice。Gate 0b / Gate 1のhold→15分自然releaseに加え、B2 physical mutation acceptanceまで完了。exact one-shot Gate 1 proofからcaller明示のreview済み`一般` 1枚だけを選択し、provider ID/label/price/total/Ajax settlement/追加条件なしを実機で検証した。資格券は資格を推測せず、exact ticket ID / label / price / eligibility textを会話上でユーザー確認してから選択できるcontractへ拡張。ticket eligibility確認にはbrowser Handoffを使わず、Gate 1 proofはexact ticket identityへbindしたまま、確認factsはlive DOMとexact照合してproof消費前に検証する。guest continuationは未操作。次はB3のguest→購入者情報・支払いHuman-only境界とpre-purchase summary reachabilityをreviewする。`seatSelection=false` / `checkoutPreparation=false` / `purchaseSubmission=false` 維持
 - ⬜ #51 — AEON hold/release review + provider adapter。TOHO parityを強制しない
 - ⬜ #52 — 109 explicit 10-minute hold review + provider adapter。TOHO parityを強制しない
 

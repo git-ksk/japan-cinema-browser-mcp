@@ -436,7 +436,11 @@ function ticketStageSnapshot(overrides: Partial<TohoTicketStageSnapshot> = {}): 
   };
 }
 
-function ticketIntent(label = "一般", providerTicketTypeId?: string): CinemaCheckoutIntent {
+function ticketIntent(
+  label = "一般",
+  providerTicketTypeId?: string,
+  eligibilityAcknowledgement?: CinemaCheckoutIntent["ticketChoices"][number]["eligibilityAcknowledgement"]
+): CinemaCheckoutIntent {
   return {
     provider: "toho",
     showtime: {
@@ -448,7 +452,12 @@ function ticketIntent(label = "一般", providerTicketTypeId?: string): CinemaCh
       screen: showtime.screen
     },
     seatIds: ["A-2"],
-    ticketChoices: [{ ...(providerTicketTypeId ? { providerTicketTypeId } : {}), label, quantity: 1 }]
+    ticketChoices: [{
+      ...(providerTicketTypeId ? { providerTicketTypeId } : {}),
+      label,
+      quantity: 1,
+      ...(eligibilityAcknowledgement ? { eligibilityAcknowledgement } : {})
+    }]
   };
 }
 
@@ -469,11 +478,14 @@ function b2RuntimeForStages(stages: TohoTicketStageSnapshot[]) {
         } };
       }
       if (expression.includes("ticket_option_ambiguous")) {
+        const student = expression.includes("631-1600-0010-0");
         return { url: "https://hlo.tohotheater.jp/net/ticket/036/TNPI2010J02.do", value: {
           ok: true,
           tagName: "A",
-          text: "一般2,100円",
-          href: "javascript:SelectTicket.setTicket('0', '0', '529-2100-0010-0', '一般', '2,100円')",
+          text: student ? "大学・専門1,600円" : "一般2,100円",
+          href: student
+            ? "javascript:SelectTicket.setTicket('0', '0', '631-1600-0010-0', '大学・専門', '1,600円')"
+            : "javascript:SelectTicket.setTicket('0', '0', '529-2100-0010-0', '一般', '2,100円')",
           x: 110,
           y: 210
         } };
@@ -573,12 +585,60 @@ test("TOHO B2 selects only exact reviewed general ticket after one-shot Gate 1 p
   assert.equal(result.neverReplay, true);
 });
 
-test("TOHO B2 never auto-selects eligibility-bound ticket and does not consume Gate 1 proof", async () => {
+test("TOHO B2 requests chat-level eligibility confirmation before mutation and does not consume Gate 1 proof", async () => {
   const { runtime, clicks, proofConsumes } = b2RuntimeForStages([ticketStageSnapshot()]);
   const adapter = new TohoCheckoutAdapter(runtime as never, {} as never);
   await assert.rejects(
     adapter.selectExactTicketAfterGate1(ticketIntent("大学・専門", "631-1600-0010-0")),
-    (error) => error instanceof BrowserRuntimeError && error.code === "HUMAN_ACTION_REQUIRED"
+    (error) =>
+      error instanceof CheckoutCoreError &&
+      error.code === "TICKET_CONFIRMATION_REQUIRED" &&
+      error.details?.providerTicketTypeId === "631-1600-0010-0" &&
+      error.details?.label === "大学・専門" &&
+      error.details?.priceYen === 1600 &&
+      error.details?.eligibilityText === "大学・専門"
+  );
+  assert.equal(proofConsumes(), 0);
+  assert.deepEqual(clicks, []);
+});
+
+test("TOHO B2 selects an eligibility-bound ticket only after exact user acknowledgement is bound to id, price, and text", async () => {
+  const selected = ticketStageSnapshot({
+    hTotal: "1600",
+    totalText: "合計 1,600円",
+    slots: [{
+      ...(ticketStageSnapshot().slots as Array<Record<string, unknown>>)[0],
+      selectTicketValue: "631-1600-0010-0",
+      selectionText: "大学・専門 1,600円"
+    }]
+  });
+  const { runtime, clicks, proofConsumes } = b2RuntimeForStages([ticketStageSnapshot(), selected]);
+  const adapter = new TohoCheckoutAdapter(runtime as never, {} as never);
+  const result = await adapter.selectExactTicketAfterGate1(ticketIntent(
+    "大学・専門",
+    "631-1600-0010-0",
+    { confirmed: true, renderedPriceYen: 1600, eligibilityText: "大学・専門" }
+  ));
+  assert.equal(proofConsumes(), 1);
+  assert.equal(clicks.length, 2);
+  assert.deepEqual(clicks[1], {
+    tagName: "A",
+    text: "大学・専門1,600円",
+    href: "javascript:SelectTicket.setTicket('0', '0', '631-1600-0010-0', '大学・専門', '1,600円')"
+  });
+  assert.equal(result.totalYen, 1600);
+});
+
+test("TOHO B2 rejects stale or mismatched eligibility acknowledgement before proof consumption", async () => {
+  const { runtime, clicks, proofConsumes } = b2RuntimeForStages([ticketStageSnapshot()]);
+  const adapter = new TohoCheckoutAdapter(runtime as never, {} as never);
+  await assert.rejects(
+    adapter.selectExactTicketAfterGate1(ticketIntent(
+      "大学・専門",
+      "631-1600-0010-0",
+      { confirmed: true, renderedPriceYen: 1500, eligibilityText: "大学・専門" }
+    )),
+    (error) => error instanceof CheckoutCoreError && error.code === "TICKET_CONFIRMATION_REQUIRED"
   );
   assert.equal(proofConsumes(), 0);
   assert.deepEqual(clicks, []);

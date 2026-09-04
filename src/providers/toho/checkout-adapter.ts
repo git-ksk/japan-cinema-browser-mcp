@@ -618,17 +618,59 @@ export class TohoCheckoutAdapter {
     }
     const resolved = resolveCheckoutTicketChoices(intent, initial.ticketTypes);
     if (resolved.selections.length !== 1) throw new CheckoutCoreError("AMBIGUOUS_RENDERED_STATE", "TOHO B2 did not resolve one exact intended ticket.");
-    if (resolved.humanReviewReasons.length > 0) {
-      throw new BrowserRuntimeError(
-        "HUMAN_ACTION_REQUIRED",
-        "TOHO rendered an eligibility- or condition-bound ticket choice. Review the provider qualification directly; B2 will not infer eligibility or select it automatically.",
-        { reasons: resolved.humanReviewReasons, label: resolved.selections[0]!.ticketType.label }
-      );
-    }
     const selected = resolved.selections[0]!;
     const ticket = selected.ticketType;
-    if (ticket.label !== "一般" || ticket.humanReviewRequired === true || !ticket.providerTicketTypeId || ticket.priceYen === undefined) {
-      throw new BrowserRuntimeError("HUMAN_ACTION_REQUIRED", "TOHO B2 only auto-selects the exact reviewed unconditioned `一般` ticket in the initial slice.");
+    const requestedChoice = intent.ticketChoices[0]!;
+
+    if (resolved.humanReviewReasons.length > 0) {
+      const eligibilityOnly =
+        resolved.humanReviewReasons.every((reason) => reason === "ticket_eligibility") &&
+        ticket.humanReviewRequired === true &&
+        ticket.humanReviewReason === "ticket_eligibility";
+      const acknowledgement = requestedChoice.eligibilityAcknowledgement;
+      const exactEligibilityAcknowledgement =
+        eligibilityOnly &&
+        acknowledgement?.confirmed === true &&
+        typeof ticket.providerTicketTypeId === "string" &&
+        requestedChoice.providerTicketTypeId === ticket.providerTicketTypeId &&
+        ticket.priceYen !== undefined &&
+        acknowledgement.renderedPriceYen === ticket.priceYen &&
+        typeof ticket.eligibilityText === "string" &&
+        acknowledgement.eligibilityText === ticket.eligibilityText;
+
+      if (!exactEligibilityAcknowledgement) {
+        if (
+          eligibilityOnly &&
+          typeof ticket.providerTicketTypeId === "string" &&
+          ticket.priceYen !== undefined &&
+          typeof ticket.eligibilityText === "string"
+        ) {
+          throw new CheckoutCoreError(
+            "TICKET_CONFIRMATION_REQUIRED",
+            "TOHO requires explicit user acknowledgement before selecting this eligibility-bound ticket. Ask the user to confirm this exact rendered ticket; do not infer eligibility and do not start browser Handoff.",
+            {
+              reason: "ticket_eligibility",
+              providerTicketTypeId: ticket.providerTicketTypeId,
+              label: ticket.label,
+              priceYen: ticket.priceYen,
+              eligibilityText: ticket.eligibilityText,
+              acknowledgement: {
+                confirmed: true,
+                renderedPriceYen: ticket.priceYen,
+                eligibilityText: ticket.eligibilityText
+              }
+            }
+          );
+        }
+        throw new BrowserRuntimeError(
+          "HUMAN_ACTION_REQUIRED",
+          "TOHO returned a provider-required manual ticket condition that cannot be satisfied by a simple user eligibility acknowledgement.",
+          { reasons: resolved.humanReviewReasons, label: ticket.label }
+        );
+      }
+    }
+    if (!ticket.providerTicketTypeId || ticket.priceYen === undefined) {
+      throw new BrowserRuntimeError("HUMAN_ACTION_REQUIRED", "TOHO B2 exact reviewed ticket lacks a provider id or rendered price and cannot be selected automatically.");
     }
 
     await this.runtime.consumeTohoGate1TicketProof({ seatId, intentDigest: checkoutIntentDigest(intent) });

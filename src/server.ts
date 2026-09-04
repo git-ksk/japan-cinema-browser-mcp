@@ -14,6 +14,7 @@ import { loadConfig } from "./config.js";
 import { ChromeProcess } from "./browser/chrome-process.js";
 import { BrowserRuntimeError, CinemaBrowserRuntime, type CinemaIntervention } from "./browser/runtime.js";
 import { runTimedBrowserOperation } from "./browser/operation-timeout.js";
+import { CheckoutCoreError } from "./checkout.js";
 import {
   ExecutionHandoffError,
   claimHandoffOwner,
@@ -97,6 +98,7 @@ function jsonResult(value: unknown): CallToolResult {
 function errorResult(error: unknown): CallToolResult {
   const known =
     error instanceof BrowserRuntimeError ||
+    error instanceof CheckoutCoreError ||
     error instanceof ProviderPolicyError ||
     error instanceof PurchaseGateError ||
     error instanceof SeatRecommendationError ||
@@ -106,7 +108,10 @@ function errorResult(error: unknown): CallToolResult {
   const message = known
     ? error.message
     : "The operation failed unexpectedly. Check the local MCP server logs.";
-  const details = error instanceof BrowserRuntimeError || error instanceof SeatRecommendationError ? error.details : undefined;
+  const details =
+    error instanceof BrowserRuntimeError || error instanceof CheckoutCoreError || error instanceof SeatRecommendationError
+      ? error.details
+      : undefined;
   return {
     content: [{ type: "text" as const, text: JSON.stringify({ error: code, message, details }) }],
     isError: true
