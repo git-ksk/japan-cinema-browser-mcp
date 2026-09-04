@@ -74,16 +74,21 @@ test("standalone remote takeover is opt-in, loopback-only, and Cloudflare-Access
     CINEMA_REMOTE_TAKEOVER: "true",
     CINEMA_TAKEOVER_PUBLIC_BASE_URL: "https://cinema-handoff.example",
     CINEMA_TAKEOVER_CLOUDFLARE_ACCESS_EMAIL: "owner@example.com",
-    CINEMA_WEBRTC_TAKEOVER_HOST_EXECUTABLE: "/tmp/handoff-webrtc-host",
+    CINEMA_TAKEOVER_HOST_EXECUTABLE: "/tmp/handoff-window-host",
     MCP_HTTP_HOST: "127.0.0.1",
     CINEMA_ALLOW_EXTERNAL_CDP: "false",
     CINEMA_CDP_PORT: undefined
   }, () => {
+    if (process.platform !== "darwin") {
+      assert.throws(() => loadConfig(), /reviewed macOS exact-Window WSS path only/);
+      return;
+    }
     const config = loadConfig();
     assert.equal(config.takeover.enabled, true);
     assert.equal(config.takeover.publicBaseUrl, "https://cinema-handoff.example");
     assert.equal(config.takeover.cloudflareAccessEmail, "owner@example.com");
-    assert.equal(config.takeover.webRtcRuntime?.hostExecutable, "/tmp/handoff-webrtc-host");
+    assert.equal(config.takeover.localPort, 48_561);
+    assert.equal(config.takeover.hostExecutable, "/tmp/handoff-window-host");
     assert.equal(config.remote.disableHumanHandoff, false);
   });
 
@@ -91,7 +96,7 @@ test("standalone remote takeover is opt-in, loopback-only, and Cloudflare-Access
     CINEMA_REMOTE_TAKEOVER: "true",
     CINEMA_TAKEOVER_PUBLIC_BASE_URL: "https://cinema-handoff.example",
     CINEMA_TAKEOVER_CLOUDFLARE_ACCESS_EMAIL: "owner@example.com",
-    CINEMA_WEBRTC_TAKEOVER_HOST_EXECUTABLE: "/tmp/handoff-webrtc-host",
+    CINEMA_TAKEOVER_HOST_EXECUTABLE: "/tmp/handoff-window-host",
     MCP_HTTP_HOST: "0.0.0.0",
     MCP_ALLOW_NONLOOPBACK: "true"
   }, () => {
@@ -102,7 +107,7 @@ test("standalone remote takeover is opt-in, loopback-only, and Cloudflare-Access
     CINEMA_REMOTE_TAKEOVER: "true",
     CINEMA_TAKEOVER_PUBLIC_BASE_URL: "https://cinema-handoff.example",
     CINEMA_TAKEOVER_CLOUDFLARE_ACCESS_EMAIL: "owner@example.com",
-    CINEMA_WEBRTC_TAKEOVER_HOST_EXECUTABLE: "/tmp/handoff-webrtc-host",
+    CINEMA_TAKEOVER_HOST_EXECUTABLE: "/tmp/handoff-window-host",
     CINEMA_HEADLESS: "true",
     MCP_HTTP_HOST: "127.0.0.1"
   }, () => {
@@ -113,10 +118,10 @@ test("standalone remote takeover is opt-in, loopback-only, and Cloudflare-Access
     CINEMA_REMOTE_TAKEOVER: "true",
     CINEMA_TAKEOVER_PUBLIC_BASE_URL: "https://cinema-handoff.example",
     CINEMA_TAKEOVER_CLOUDFLARE_ACCESS_EMAIL: "owner@example.com",
-    CINEMA_WEBRTC_TAKEOVER_HOST_EXECUTABLE: undefined,
+    CINEMA_TAKEOVER_HOST_EXECUTABLE: undefined,
     MCP_HTTP_HOST: "127.0.0.1"
   }, () => {
-    assert.throws(() => loadConfig(), /requires absolute CINEMA_WEBRTC_TAKEOVER_HOST_EXECUTABLE/);
+    assert.throws(() => loadConfig(), /requires absolute CINEMA_TAKEOVER_HOST_EXECUTABLE/);
   });
 
   withEnv({ CINEMA_REMOTE_TAKEOVER: "true", MCP_HTTP_HOST: "127.0.0.1" }, () => {

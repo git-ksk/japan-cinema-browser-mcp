@@ -356,7 +356,7 @@ Phase 4では常に `false` です。
 
 2026-08-25のphysical Gate 0b v6では、exact `A-2` に対してHumanが `確認する` を1回だけ実行し、provider自身の `terms_check` をONにした後、Cinemaのcanonical verifierが `bookSeatIntForm.seat_no` とrendered `#seatList2` のexact-seat一致を確認しました。直後の独立fresh sessionでも `A-2` は `available` のままでした。したがって、**`確認する` + terms checkboxまででは、別sessionから観測できるserver-side holdは発生しませんでした**。この結果だけから15分holdの開始点やrelease semanticsは断定しません。
 
-次のmaterial候補はHuman-onlyの `利用規約に同意して次へ` です。2026-09-04時点でGate 1 acceptance plumbingを実装し、Handoffはv0.4.1 release commitへ固定しています。Gate 1はGate 0b成功proofをtarget / provider / exact seat / intent digest / host / pathname / resource epochへone-shot bindingし、途中に別resource操作が入れば失効します。開始前にcanonical seat、terms acknowledgement、exact form/action/controlをread-onlyで再検証し、Human操作後は同一hostの直後 `TNPI2010J02.do` だけを受理します。券種選択は行わず、seat mutationのreplayもありません。
+次のmaterial候補はHuman-onlyの `利用規約に同意して次へ` です。2026-09-04時点でGate 1 acceptance plumbingを実装し、Handoffはv0.4.1 release commitへ固定しています。Gate 1はGate 0b成功proofをtarget / provider / exact seat / intent digest / host / pathname / resource epochへone-shot bindingし、途中に別resource操作が入れば失効します。開始前にcanonical seat、terms acknowledgement、exact form/action/controlをread-onlyで再検証し、Human操作後は同一hostの直後 `TNPI2010J02.do` だけを受理します。券種選択は行わず、seat mutationのreplayもありません。physical Gate 1ではHandoff `WindowWebSocketHandoffAdapter` のWSS-only pathを使い、Cinema専用hostname + Access appを、同じMacで稼働中のhealthyなCloudflare Tunnel connectorへrouteし、専用loopback listenerへ接続します。dedicated Chrome PIDに対してvisible layer-0 macOS windowがexactly oneである場合だけCGWindowIDをbindingし、WebRTC/ICE/STUN/TURNは起動しません。
 
 1. **A1 — レビュー済み境界専用のintervention基盤** — ✅ 実装済み
    - 型付き `CinemaHandoffAction`

@@ -12,7 +12,7 @@ upstreamが担当するのは再利用可能なcontrol-planeだけです。
 - generic execution-adapter contract
 - principal + invocation + canonical args ownership binding
 - MCP MRTR `input_required` requestState helper
-- optional durable checkpoint / first-class Browser Handoff module
+- optional durable checkpoint / first-class Browser / Window Handoff module
 
 Japan Cinema側には次を残します。
 
@@ -24,9 +24,9 @@ Japan Cinema側には次を残します。
 - transaction / purchase-confirmation policy
 - どのoperation classをreplay可能にするかの判断
 
-通常のHuman interventionは引き続きdedicated local Chromeで直接完了できます。加えてPhase 4 TOHO Gate 0bだけは、upstreamのfirst-class `BrowserHandoffAdapter` を使うopt-in WebRTC経路を持ちます。Cinemaはintervention/principal、exact managed Chrome PID、明示input policyだけを渡し、WebRTC signaling/media/TURN、route ownership、exact-window/focus fencing、disconnect/reload generation recovery、revokeをHandoffへ委譲します。Cinema側でCDP screenshot/input takeoverを再実装しません。
+通常のHuman interventionは引き続きdedicated local Chromeで直接完了できます。2026-08-25のTOHO Gate 0b physical acceptanceはupstream `BrowserHandoffAdapter` のWebRTC経路で実施しました。現在のGate 1 physical acceptanceは、WebRTC/ICE/STUN/TURNを一切起動しないfirst-class `WindowWebSocketHandoffAdapter` のWSS-only経路へ切り替えています。Cinemaはintervention/principal、exact managed Chrome PID + macOS CGWindowID、明示input policyだけを渡し、WSS session/generation、exact-window capture/input、reconnect、fence/revokeをHandoffへ委譲します。Cinema側でCDP screenshot/input takeoverやWebSocket brokerを再実装しません。
 
-Gate 0bのinput policyは `tap=true / scroll=true / text=false / key=false` です。座席決定の物理検証以外へこのsurfaceを一般化せず、credential/PII/payment dataの入力経路として使いません。Browser Handoffはheadedなowned Chrome processとvisible OS windowを必須とし、`CINEMA_HEADLESS=true` やexternal CDPとの併用はfail closedします。
+Gate 0b / Gate 1のremote acceptance input policyは `tap=true / scroll=true / text=false / key=false` です。物理検証以外へこのsurfaceを一般化せず、credential/PII/payment dataの入力経路として使いません。WSS-only Window Handoffはheadedなowned Chrome processとexactly one visible layer-0 macOS windowを必須とし、`CINEMA_HEADLESS=true` やexternal CDPとの併用はfail closedします。公開HTTPS/WSSは専用loopback listenerの前段に置くCloudflare Tunnel + Accessだけが提供します。
 
 ## Intervention detection
 
@@ -72,19 +72,19 @@ Human completionはpurchase approvalではありません。将来final purchase
 
 Phase 4 TOHO checkout continuationでは、reviewed consent boundaryでexplicit interventionを作り、Human完了後も元のsemantic mutationをretryしません。A1/A2ではbounded `reviewed_checkout_boundary` action（provider/boundary/continuation digestのみ）とprocess-local one-shot bindingを実装済みです。bindingはexact browser target / provider / intent / showtime / selected seats / pre-Human fingerprintsへbindし、cancel、browser reset、TTL、owned context mismatchで破棄します。HumanがContinueだけ返してpre-consent controlが残っている場合はverificationでHumanへ戻します。fresh `prepare_checkout`がcurrent rendered stageをpositiveに再検証できるまでbindingはconsumeしません。詳細は [`PHASE4_TOHO_CONTINUATION_DESIGN.md`](./PHASE4_TOHO_CONTINUATION_DESIGN.md) を参照してください。
 
-2026-08-17のB1 preflightでは、TOHOのcurrent rendered flowにlegal consentより前の `確認する` seat-decision stepがあることを再確認しました。Agent側の座席画像直接activationをそのstepと同一視せず、current adapterは通常automationでは引き続き`UNREVIEWED_INTERACTION`で停止します。Gate 0bではone exact seat intentにbindingしたHuman-only `seat_decision` interventionを作り、Handoff WebRTC surface上でpointer/scrollだけ許可します。physical sequenceは `exact seat選択 → 確認するを1回 → サイト自身の terms_check をHumanが明示的にON → Handoff Done` に固定し、`利用規約に同意して次へ` は押しません。Done後、Cinemaはread-onlyでTOHO自身の購入フォーム `bookSeatIntForm.seat_no` がexact seat 1件だけを保持し、rendered `#seatList2` も同じ1席を表示していること、さらにreview済み `terms_check` が1個だけ存在してcheckedであることを再検証します。seat画像の `alt=...選択中` は補助diagnosticに留め、visibility依存の成功条件にはしません。Doneそのものはterms consent・seat hold成立・購入承認の証明ではなく、terms acknowledgementの証拠はprovider controlのchecked stateだけです。元のsemantic mutationは自動replayしません。物理Gate 0b acceptanceが完了するまで `seatSelection=false` / `checkoutPreparation=false` を維持します。
+2026-08-17のB1 preflightでは、TOHOのcurrent rendered flowにlegal consentより前の `確認する` seat-decision stepがあることを再確認しました。Agent側の座席画像直接activationをそのstepと同一視せず、current adapterは通常automationでは引き続き`UNREVIEWED_INTERACTION`で停止します。Gate 0bではone exact seat intentにbindingしたHuman-only `seat_decision` interventionを作り、当時はHandoff WebRTC surface上でpointer/scrollだけ許可してphysical acceptanceを完了しました。Gate 1では同じsemantic boundaryをWSS-only Window Handoffへ載せ替えます。physical sequenceは `exact seat選択 → 確認するを1回 → サイト自身の terms_check をHumanが明示的にON → Handoff Done` に固定し、`利用規約に同意して次へ` は押しません。Done後、Cinemaはread-onlyでTOHO自身の購入フォーム `bookSeatIntForm.seat_no` がexact seat 1件だけを保持し、rendered `#seatList2` も同じ1席を表示していること、さらにreview済み `terms_check` が1個だけ存在してcheckedであることを再検証します。seat画像の `alt=...選択中` は補助diagnosticに留め、visibility依存の成功条件にはしません。Doneそのものはterms consent・seat hold成立・購入承認の証明ではなく、terms acknowledgementの証拠はprovider controlのchecked stateだけです。元のsemantic mutationは自動replayしません。Gate 1のhold/timer/release semanticsと後続ticket boundaryがphysical reviewを通るまで `seatSelection=false` / `checkoutPreparation=false` を維持します。
 
-## Browser Handoff — TOHO Gate 0b
+## Remote Window Handoff — TOHO Gate 1 WSS acceptance
 
-このremote surfaceは一般purpose browser takeoverではなく、#50 Gate 0bのbounded physical validation用です。
+このremote surfaceは一般purpose browser takeoverではなく、#50 Gate 1のbounded physical validation用です。Gate 0bのWebRTC acceptance evidenceは履歴として保持し、current runはWSS-onlyです。
 
-- `CINEMA_REMOTE_TAKEOVER=true` はloopback HTTP server + authenticated HTTPS gatewayを必須とする。
+- `CINEMA_REMOTE_TAKEOVER=true` はdedicated loopback takeover listener + authenticated HTTPS/WSS gatewayを必須とする。default local portは `48561`。
 - Cloudflare Accessのexact email + Access JWTをnon-secret principal bindingへ変換し、locatorを別principalへ再利用させない。
-- `CINEMA_WEBRTC_TAKEOVER_HOST_EXECUTABLE` はabsolute path必須。macOS/Linuxのみで、headed Chrome + server-owned child PIDが必要。
-- Handoffへ渡すtargetはcurrent dedicated Chrome PIDだけ。Cinemaはwindow discovery、framebuffer、SDP/ICE/RTP、raw Human inputを扱わない。
-- Gate 0b input policyはpointer/scrollのみ。text/keyはHandoff server policyで拒否する。
-- Done/revoke後、Cinemaはcurrent provider/action binding、provider-owned `bookSeatIntForm.seat_no` とrendered `#seatList2` のexact-seat一致、review済み `terms_check` のchecked stateをfresh read-only verificationし、失敗時はHumanへ戻すかfail closedする。`terms_check` はHumanだけが操作し、Cinemaはclick/change eventを発行しない。
-- Cloud Run `CINEMA_REMOTE_MODE=true` はheadless必須なので、このheaded Browser Handoffとは意図的に両立しない。
+- `CINEMA_TAKEOVER_HOST_EXECUTABLE` はabsolute path必須。current reviewed WSS pathはmacOSのみで、headed Chrome + server-owned child PIDが必要。helperはHandoff v0.4.1のreview済み `takeover-webrtc-host` binaryをWSS exact-window backendとして再利用する。
+- CinemaはmacOS WindowServerをread-onlyで照合し、dedicated Chrome PIDが所有するvisible layer-0 windowがexactly oneの場合だけCGWindowIDを採用する。0件/複数件はfail closed。Handoffへはexact PID + CGWindowIDを渡し、framebuffer/raw Human inputはCinemaへ戻さない。WSS-onlyなのでSDP/ICE/STUN/TURNは存在しない。
+- Gate 1 input policyはpointer/scrollのみ。text/keyはHandoff server policyで拒否する。
+- HumanがDoneしてもWSS generationを完了扱いにしない。Cinemaがfresh semantic verificationを行い、Gate 0bではprovider-owned `bookSeatIntForm.seat_no` + rendered `#seatList2` + Human-checked `terms_check`、Gate 1ではsame-host immediate `TNPI2010J02.do` を確認した後だけHandoff `completeAfterVerification` を呼ぶ。verification失敗時はHumanへ戻すかfail closedし、Cinemaは`terms_check`やadvance controlへclick/change eventを発行しない。
+- Cloud Run `CINEMA_REMOTE_MODE=true` はheadless必須なので、このheaded Window Handoffとは意図的に両立しない。
 
 ## Invocation ownership
 

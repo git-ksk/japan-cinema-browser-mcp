@@ -30,7 +30,7 @@ import {
   handoffStateMatchesInvocation,
   type HandoffRequestState
 } from "mcp-execution-handoff/mcp";
-import { BrowserHandoffAdapter } from "mcp-execution-handoff/browser-takeover";
+import { WindowWebSocketHandoffAdapter } from "mcp-execution-handoff/window-takeover";
 import { createCinemaExecutionAdapter } from "./cinema-execution-adapter.js";
 import { OperationQueue } from "./operation-queue.js";
 import { CINEMA_HANDOFF_POLICY } from "./handoff-policy.js";
@@ -57,12 +57,19 @@ const SERVER_VERSION = "0.1.0";
 export const config = loadConfig();
 const chrome = new ChromeProcess(config.browser);
 const runtime = new CinemaBrowserRuntime(chrome, config.policy.maxReadChars);
-const browserHandoffAdapter = config.takeover.enabled && config.takeover.webRtcRuntime
-  ? new BrowserHandoffAdapter({
-      takeover: config.takeover,
-      runtime: config.takeover.webRtcRuntime
-    })
-  : undefined;
+const windowHandoffAdapter =
+  config.takeover.enabled && config.takeover.publicBaseUrl && config.takeover.hostExecutable
+    ? new WindowWebSocketHandoffAdapter({
+        takeover: {
+          enabled: true,
+          publicBaseUrl: config.takeover.publicBaseUrl,
+          ttlMs: config.takeover.ttlMs,
+          reconnectIdleMs: 2_000
+        },
+        allowedOrigins: [config.takeover.publicBaseUrl],
+        host: { platform: "macos", hostExecutable: config.takeover.hostExecutable }
+      })
+    : undefined;
 const REVIEWED_POINTER_ONLY_INPUT_POLICY = Object.freeze({ tap: true, scroll: true, text: false, key: false } as const);
 const executionAdapter = createCinemaExecutionAdapter(runtime);
 const operationQueue = new OperationQueue();
@@ -178,7 +185,7 @@ function cinemaInterventionPrompt(intervention: CinemaIntervention): string {
   ].join(" ");
 }
 
-function handoffPrompt(intervention: CinemaIntervention): string {
+async function handoffPrompt(intervention: CinemaIntervention): Promise<string> {
   const base = cinemaInterventionPrompt(intervention);
   const reviewedRemoteBoundary =
     intervention.action?.provider === "toho" && (
@@ -187,30 +194,43 @@ function handoffPrompt(intervention: CinemaIntervention): string {
     );
   if (!reviewedRemoteBoundary) return base;
   const accessEmail = config.takeover.cloudflareAccessEmail;
-  if (!browserHandoffAdapter || !accessEmail) return base;
+  if (!windowHandoffAdapter || !accessEmail) return base;
   const targetProcessId = chrome.getPid();
   if (!targetProcessId) {
     throw new BrowserRuntimeError(
       "BROWSER_UNAVAILABLE",
-      "TOHO reviewed Browser Handoff requires the current process to own the dedicated headed Chrome process."
+      "TOHO reviewed Window Handoff requires the current process to own the dedicated headed Chrome process."
     );
   }
-  const takeoverUrl = browserHandoffAdapter.start({
+  const targetWindowId = await chrome.getExactWindowId();
+  if (!targetWindowId) {
+    throw new BrowserRuntimeError(
+      "BROWSER_UNAVAILABLE",
+      "TOHO reviewed Window Handoff requires exactly one visible Chrome window owned by the dedicated process."
+    );
+  }
+  const takeoverUrl = windowHandoffAdapter.start({
     intervention: { id: intervention.id, epoch: intervention.epoch },
     principalBinding: takeoverPrincipalBindingForEmail(accessEmail),
-    target: { processId: targetProcessId },
+    target: { processId: targetProcessId, windowId: targetWindowId },
     inputPolicy: REVIEWED_POINTER_ONLY_INPUT_POLICY
   });
   return [
     base,
     "Remote Human takeover is available through the configured authenticated HTTPS gateway:",
     takeoverUrl,
-    "Open that short-lived URL on your phone. This reviewed Cinema Handoff permits pointer/scroll only; text and keyboard input are server-blocked. Operate only the exact bounded TOHO step described above, press Done, then return here and choose Continue. The locator is bound to this intervention and must not be forwarded."
+    "Open that short-lived URL on your phone. This reviewed Cinema Window Handoff uses WSS only and permits pointer/scroll only; text and keyboard input are server-blocked. Operate only the exact bounded TOHO step described above, press Done, then return here and choose Continue. The locator is bound to this intervention and must not be forwarded."
   ].join("\n\n");
 }
 
 async function revokeBrowserHandoff(interventionId: string): Promise<void> {
-  await browserHandoffAdapter?.revoke(interventionId);
+  windowHandoffAdapter?.revoke(interventionId);
+}
+
+async function completeBrowserHandoffAfterVerification(interventionId: string, epoch: number): Promise<void> {
+  if (!windowHandoffAdapter) return;
+  const completed = await windowHandoffAdapter.completeAfterVerification({ id: interventionId, epoch });
+  if (!completed) throw new BrowserRuntimeError("UI_STATE_CHANGED", "The WSS Human generation could not be completed after fresh semantic verification.");
 }
 
 async function humanInputRequired(
@@ -258,7 +278,7 @@ async function humanInputRequired(
     requestState,
     inputRequests: {
       [HANDOFF_INPUT_KEY]: inputRequired.elicit({
-        message: handoffPrompt(active),
+        message: await handoffPrompt(active),
         requestedSchema: HUMAN_INTERVENTION_SCHEMA
       })
     }
@@ -399,9 +419,9 @@ async function runToolWithHandoff<T>(input: {
   if (content.decision === "cancel") return cancelIntervention(state.interventionId);
 
   try {
-    await revokeBrowserHandoff(state.interventionId);
     executionAdapter.control.markHumanControlComplete(state.interventionId);
     await operationQueue.run(() => executionAdapter.control.verifyHumanIntervention(state.interventionId));
+    await completeBrowserHandoffAfterVerification(state.interventionId, state.epoch);
   } catch (error) {
     const stillActive = executionAdapter.control.getActiveIntervention();
     if (
@@ -410,6 +430,10 @@ async function runToolWithHandoff<T>(input: {
       stillActive?.id === state.interventionId &&
       stillActive.status === "verifying"
     ) {
+      // Human Done has already fenced the WSS generation. If fresh semantic verification says the
+      // reviewed Human step is still incomplete, retire that spent locator before issuing a new
+      // explicit Human generation. No Human input is replayed across the retry boundary.
+      await revokeBrowserHandoff(state.interventionId);
       const returned = executionAdapter.control.claimHumanControl(state.interventionId);
       return humanInputRequired(returned, owner, input.args);
     }
@@ -923,17 +947,26 @@ export function buildServer(): McpServer {
 }
 
 export function isTakeoverHttpPath(pathname: string): boolean {
-  return browserHandoffAdapter?.ownsPath(pathname) ?? false;
+  return windowHandoffAdapter?.ownsPath(pathname) ?? false;
 }
 
 export async function handleTakeoverHttpRequest(request: Request, boundPrincipal: string): Promise<Response> {
-  if (!browserHandoffAdapter?.ownsPath(new URL(request.url).pathname)) {
+  if (!windowHandoffAdapter?.ownsPath(new URL(request.url).pathname)) {
     return new Response(JSON.stringify({ error: "not_found" }), {
       status: 404,
       headers: { "content-type": "application/json; charset=utf-8" }
     });
   }
-  return browserHandoffAdapter.handle(request, boundPrincipal);
+  return windowHandoffAdapter.handle(request, boundPrincipal);
+}
+
+
+export function handleTakeoverUpgrade(
+  request: import("node:http").IncomingMessage,
+  socket: import("node:stream").Duplex,
+  head: Buffer
+): boolean {
+  return windowHandoffAdapter?.handleUpgrade(request, socket, head) ?? false;
 }
 
 export async function probeBrowserReady(): Promise<void> {
@@ -946,4 +979,5 @@ export async function shutdownRuntime(): Promise<void> {
   const active = runtime.getActiveIntervention();
   if (active) await revokeBrowserHandoff(active.id);
   await runtime.close();
+  await windowHandoffAdapter?.close().catch(() => undefined);
 }

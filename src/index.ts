@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { once } from "node:events";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import {
   bearerAuthChallengeResponse,
   createMcpHandler,
@@ -13,6 +13,7 @@ import {
   buildServer,
   config,
   handleTakeoverHttpRequest,
+  handleTakeoverUpgrade,
   isTakeoverHttpPath,
   probeBrowserReady,
   shutdownRuntime
@@ -150,8 +151,67 @@ function makeAbortController(req: IncomingMessage, res: ServerResponse): AbortCo
   return controller;
 }
 
+async function startTakeoverIngress(): Promise<Server | undefined> {
+  if (!config.takeover.enabled) return undefined;
+  const server = createServer((req, res) => {
+    if (!hostAllowed(req.headers.host, ["localhost", "127.0.0.1", "::1"])) {
+      reject(res, 403, "host_not_allowed");
+      return;
+    }
+    const requestUrl = new URL(req.url ?? "/", "http://localhost");
+    if (!isTakeoverHttpPath(requestUrl.pathname)) {
+      reject(res, 404, "not_found");
+      return;
+    }
+    const boundPrincipal = cloudflareAccessTakeoverPrincipalBinding(req.headers, config.takeover);
+    if (!boundPrincipal) {
+      reject(res, 403, "takeover_access_denied");
+      return;
+    }
+    const controller = makeAbortController(req, res);
+    void (async () => {
+      try {
+        const request = await toWebRequest(req, controller.signal);
+        const response = await handleTakeoverHttpRequest(request, boundPrincipal);
+        await writeWebResponse(response, res);
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          console.error("[japan-cinema-browser-mcp] WSS takeover HTTP error", {
+            errorName: error instanceof Error ? error.name : "UnknownError"
+          });
+          reject(res, 500, "takeover_handler_error");
+        }
+      }
+    })();
+  });
+  server.on("upgrade", (req, socket, head) => {
+    if (!hostAllowed(req.headers.host, ["localhost", "127.0.0.1", "::1"])) { socket.destroy(); return; }
+    const requestUrl = new URL(req.url ?? "/", "http://localhost");
+    if (!isTakeoverHttpPath(requestUrl.pathname)) { socket.destroy(); return; }
+    const boundPrincipal = cloudflareAccessTakeoverPrincipalBinding(req.headers, config.takeover);
+    if (!boundPrincipal || !handleTakeoverUpgrade(req, socket, head)) socket.destroy();
+  });
+  server.maxHeadersCount = 64;
+  server.headersTimeout = 10_000;
+  server.requestTimeout = 30_000;
+  server.keepAliveTimeout = 5_000;
+  await new Promise<void>((resolve, rejectPromise) => {
+    server.once("error", rejectPromise);
+    server.listen(config.takeover.localPort, "127.0.0.1", () => resolve());
+  });
+  console.error(`[japan-cinema-browser-mcp] WSS Human takeover listening on http://127.0.0.1:${config.takeover.localPort}`);
+  return server;
+}
+
+async function closeServer(server: Server | undefined): Promise<void> {
+  if (!server) return;
+  server.closeIdleConnections();
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+}
+
 async function startHttp(): Promise<void> {
   if (!config.auth || !config.oauth) throw new Error("HTTP mode requires Firebase Auth and MCP OAuth configuration");
+  const takeoverIngress = await startTakeoverIngress();
   const firebaseAuth = new FirebaseAuthVerifier(config.auth);
   const { firestoreProjectId, ...oauthRuntimeConfig } = config.oauth;
   const oauthStore = new FirestoreCinemaOAuthStore(firestoreProjectId);
@@ -306,6 +366,7 @@ async function startHttp(): Promise<void> {
     await mcpHandler.close().catch(() => undefined);
     await oauth.close().catch(() => undefined);
     await shutdownRuntime().catch(() => undefined);
+    await closeServer(takeoverIngress).catch(() => undefined);
     httpServer.closeIdleConnections();
     await new Promise<void>((resolve) => httpServer.close(() => resolve()));
   };
@@ -314,11 +375,13 @@ async function startHttp(): Promise<void> {
 }
 
 async function startStdio(): Promise<void> {
+  const takeoverIngress = await startTakeoverIngress();
   const handle = serveStdio(() => buildServer());
   console.error("[japan-cinema-browser-mcp] listening on stdio");
   const shutdown = async () => {
     await handle.close().catch(() => undefined);
     await shutdownRuntime().catch(() => undefined);
+    await closeServer(takeoverIngress).catch(() => undefined);
   };
   process.once("SIGINT", () => void shutdown().finally(() => process.exit(0)));
   process.once("SIGTERM", () => void shutdown().finally(() => process.exit(0)));

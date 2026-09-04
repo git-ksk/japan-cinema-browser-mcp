@@ -238,7 +238,7 @@ Discovery: [`PHASE4_CHECKOUT_DISCOVERY.md`](./PHASE4_CHECKOUT_DISCOVERY.md) / #4
 Implementation split:
 
 - ✅ #49 — provider-neutral checkout contract/core。strict intent、2-read seat freshness、exact-seat validation、ticket normalization、rendered summary/material fingerprintまで実装。`prepare_checkout` tool自体は未登録でtransaction capabilityは全社false
-- 🟡 #50 — TOHO first vertical slice。Gate 0b physical acceptance完了。exact seat → `確認する` 1回 → Human `terms_check` → Doneをprovider-owned `seat_no` + rendered `seatList2` で検証し、直後fresh sessionでもseat availableを確認。Handoff first-class `BrowserHandoffAdapter`はv0.4.1へ更新済み。次のGate 1 acceptance plumbingはGate 0b proofをtarget / provider / exact seat / intent / host/path / resource epochへone-shot bindingし、pointer/scroll-only Human Handoffで `利用規約に同意して次へ` を1回だけ扱い、直後 `TNPI2010J02.do` 以外をfail closed。ticket操作・seat replayなし。physical Gate 1とhold/timer/fresh-session観測待ち。capability false維持
+- 🟡 #50 — TOHO first vertical slice。Gate 0b physical acceptance完了。exact seat → `確認する` 1回 → Human `terms_check` → Doneをprovider-owned `seat_no` + rendered `seatList2` で検証し、直後fresh sessionでもseat availableを確認。Handoff v0.4.1固定。Gate 0bのhistorical runは`BrowserHandoffAdapter` + WebRTC、current Gate 1 physical acceptanceは`WindowWebSocketHandoffAdapter` + macOS exact-window WSS-onlyへ移行。Gate 0b proofをtarget / provider / exact seat / intent / host/path / resource epochへone-shot bindingし、pointer/scroll-only Human Handoffで `利用規約に同意して次へ` を1回だけ扱い、直後 `TNPI2010J02.do` 以外をfail closed。ticket操作・seat replayなし。physical Gate 1とhold/timer/fresh-session観測待ち。capability false維持
 - ⬜ #51 — AEON hold/release review + provider adapter。TOHO parityを強制しない
 - ⬜ #52 — 109 explicit 10-minute hold review + provider adapter。TOHO parityを強制しない
 
@@ -251,7 +251,7 @@ Implementation split:
 - ✅ Human操作後のofficial provider / challenge state再検証
 - ✅ semantic mutation / transactionのautomatic replay禁止
 - ✅ Human intervention開始時のprepared purchase confirmation破棄
-- ✅ TOHO Gate 0b / Gate 1 acceptanceのWebRTC Browser Handoffをconsumer-local transport実装なしでHandoff first-class adapterへ接続。Handoff v0.4.1固定、pointer/scroll-only、text/key server-block、exact managed Chrome PID binding、Done後fresh verification
+- ✅ TOHO Gate 0bはWebRTC Browser Handoffでphysical acceptance済み。current Gate 1はHandoff v0.4.1 `WindowWebSocketHandoffAdapter`へ移行し、既存Mac Tunnel上のCinema専用hostname / Access / origin port、WSS-only、exact managed Chrome PID + macOS CGWindowID binding、pointer/scroll-only、text/key server-block、Done後fresh verificationをconsumer-local transport再実装なしで構成
 
 TOHO / AEON / 109のread-only `seatMap` はtrueです。`seatSelection` / `checkoutPreparation` / `purchaseSubmission` は引き続き全providerでfalseです。Human Handoff実装はtransaction capabilityの解禁を意味しません。
 

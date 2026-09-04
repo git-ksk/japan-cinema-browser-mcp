@@ -180,9 +180,15 @@ test("reviewed Handoff dependency is immutable and transaction replay remains st
   assert.match(server, /TOHO checkout is waiting at the reviewed terms-consent boundary/);
   assert.match(server, /利用規約に同意して次へ/);
   const runtime = fs.readFileSync(path.join(root, "src/browser/runtime.ts"), "utf8");
-  assert.match(server, /new BrowserHandoffAdapter/);
+  assert.match(server, /new WindowWebSocketHandoffAdapter/);
+  assert.match(server, /host: \{ platform: "macos", hostExecutable: config\.takeover\.hostExecutable \}/);
+  assert.match(server, /completeAfterVerification\(\{ id: interventionId, epoch \}\)/);
+  const semanticVerifyOffset = server.indexOf("verifyHumanIntervention(state.interventionId)");
+  const wssVerifiedCompletionOffset = server.indexOf("completeBrowserHandoffAfterVerification(state.interventionId, state.epoch)");
+  assert.ok(semanticVerifyOffset >= 0 && wssVerifiedCompletionOffset > semanticVerifyOffset);
+  assert.doesNotMatch(server, /BrowserHandoffAdapter|webrtc_direct|webrtc_relay/);
   assert.match(server, /REVIEWED_POINTER_ONLY_INPUT_POLICY = Object\.freeze\(\{ tap: true, scroll: true, text: false, key: false \}/);
-  assert.match(server, /browserHandoffAdapter\.start\(\{[\s\S]*inputPolicy: REVIEWED_POINTER_ONLY_INPUT_POLICY/);
+  assert.match(server, /windowHandoffAdapter\.start\(\{[\s\S]*windowId: targetWindowId[\s\S]*inputPolicy: REVIEWED_POINTER_ONLY_INPUT_POLICY/);
   assert.match(server, /reviewed_gate1_boundary/);
   assert.match(server, /toho_terms_advance_gate1/);
   assert.doesNotMatch(server, /new TakeoverBroker|createLink\(/);
