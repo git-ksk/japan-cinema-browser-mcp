@@ -232,7 +232,7 @@ Discovery: [`PHASE4_CHECKOUT_DISCOVERY.md`](./PHASE4_CHECKOUT_DISCOVERY.md) / #4
 - ✅ TOHOをconditional first vertical sliceに維持。Gate 0でhold/release semanticsを証明できなければcapabilityを上げずblocked扱い
 - ✅ #50 Gate 0 / Gate 0b実測: exact ordinary seat activationはrendered local/session selectionだけを変更。さらにphysical Gate 0b v6でexact seat → `確認する` → Human `terms_check` をcanonical verifierで確認し、直後fresh sessionでもexact seatはavailable。`確認する` までにexternally visible holdは観測されなかった
 - ✅ Gate 1 physical acceptance完了。`利用規約に同意して次へ` のHuman-only 1回遷移でJ02へ到達し、fresh profileでexact seatがunavailable化。J02の15分自動解除表示と、その後の自然releaseによるavailable復帰も確認。exact解除秒は未計測
-- ✅ internal TOHO adapterのB2 ticket-stage physical acceptance完了。Gate 1のtarget/seat/intent/epoch one-shot proof後、callerが明示したreview済み`一般` 1枚だけをexact pointerで選択し、provider ID `529-2100-0010-0`、表示 `一般 2,100円`、hidden/rendered total 2,100円、Ajax settlement=0、追加条件markerなしを実機確認。選択後にanchor labelが変わるDOMもPR #83でstrict normalize対応。`ログインせず次へ`は検証だけで未操作、MCP tool未登録
+- ✅ internal TOHO adapterのB2 ticket-stage physical acceptance完了。Gate 1のtarget/seat/intent/epoch one-shot proof後、callerが明示したreview済み`一般` 1枚だけをexact pointerで選択し、provider ID `529-2100-0010-0`、表示 `一般 2,100円`、hidden/rendered total 2,100円、Ajax settlement=0、追加条件markerなしを実機確認。選択後にanchor labelが変わるDOMをPR #83、exact ticket item内のselection summary bindingをPR #84でstrict normalize対応し、同じlive J02でpost-selection factsを再検証。`ログインせず次へ`は検証だけで未操作、MCP tool未登録
 - ✅ #49 generic core: checkout intentからPII/credential/payment/consent/caller-supplied summaryを除外し、missing amount factはmissingのまま保持。arbitrary provider data / raw page-dialog / opaque checkout URLもgeneric summaryへ持ち込まない
 
 Implementation split:

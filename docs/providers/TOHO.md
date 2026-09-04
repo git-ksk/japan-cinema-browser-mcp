@@ -291,7 +291,7 @@ Gate 0b / Gate 1に加えてB2のphysical acceptanceまで完了しています�
 - `ログインせず次へ` はidentityをread-only検証するだけでB2からは操作しない
 - MCP tool公開、`seatSelection` / `checkoutPreparation` / `purchaseSubmission` の変更は行わない
 
-2026-09-05のphysical acceptanceでは、caller明示の`一般` 1枚だけをexact pointerで選択し、provider ID `529-2100-0010-0`、rendered `一般 2,100円`、hidden/rendered total 2,100円、Ajax settlement=0、追加条件markerなしを確認しました。選択後は同じmodal anchorの表示が`券種を選択してください`から選択済み券種へ変わるため、PR #83でstage readだけをlabel非依存のexact `a[data-modal]` identityへ修正し、mutation直前の未選択label検証は維持しています。B2完了だけをcapability approvalとは扱いません。
+2026-09-05のphysical acceptanceでは、caller明示の`一般` 1枚だけをexact pointerで選択し、provider ID `529-2100-0010-0`、rendered `一般 2,100円`、hidden/rendered total 2,100円、Ajax settlement=0、追加条件markerなしを確認しました。選択後は同じmodal anchorの表示が`券種を選択してください`から選択済み券種へ変わるため、PR #83でstage readだけをlabel非依存のexact `a[data-modal]` identityへ修正し、PR #84で選択summaryをexact `.ticket-item` 内のunique `.ticket-content` へbindしました。修正版は同じretained live J02で `一般 2,100円` / provider ID / total / Ajax settlement / 追加条件なしを再検証済みです。mutation直前の未選択label検証は維持し、B2完了だけをcapability approvalとは扱いません。
 
 ### 人間だけが扱う境界
 
