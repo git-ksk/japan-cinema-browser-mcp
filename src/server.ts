@@ -72,6 +72,7 @@ const windowHandoffAdapter =
       })
     : undefined;
 const REVIEWED_POINTER_ONLY_INPUT_POLICY = Object.freeze({ tap: true, scroll: true, text: false, key: false } as const);
+const REVIEWED_PURCHASER_FORM_INPUT_POLICY = Object.freeze({ tap: true, scroll: true, text: true, key: true } as const);
 const executionAdapter = createCinemaExecutionAdapter(runtime);
 const operationQueue = new OperationQueue();
 const tohoReadAdapter = new TohoReadAdapter(runtime);
@@ -173,6 +174,19 @@ function cinemaInterventionPrompt(intervention: CinemaIntervention): string {
     ].join(" ");
   }
 
+  if (
+    intervention.action?.kind === "reviewed_purchaser_payment_boundary" &&
+    intervention.action.provider === "toho" &&
+    intervention.action.boundary === "toho_purchaser_payment_entry"
+  ) {
+    return [
+      `TOHO purchaser/payment entry is waiting for Human input for exact seat ${intervention.action.seatId}.`,
+      "Enter the purchaser information and choose the intended payment method directly in the dedicated Chrome window. These values must not be pasted into the MCP prompt.",
+      "Press the exact provider `次へ` once and stop immediately on the next page. Do not click any final purchase/payment confirmation.",
+      "Press Handoff Done there. The agent will verify only the provider route and non-sensitive structure; it will not read or return the entered purchaser/payment values."
+    ].join(" ");
+  }
+
   const label = intervention.reason === "access_challenge"
     ? "an access challenge or CAPTCHA"
     : intervention.reason === "sign_in"
@@ -195,7 +209,8 @@ async function handoffPrompt(intervention: CinemaIntervention): Promise<string> 
   const reviewedRemoteBoundary =
     intervention.action?.provider === "toho" && (
       (intervention.action.kind === "reviewed_gate0b_boundary" && intervention.action.boundary === "toho_seat_decision_gate0b") ||
-      (intervention.action.kind === "reviewed_gate1_boundary" && intervention.action.boundary === "toho_terms_advance_gate1")
+      (intervention.action.kind === "reviewed_gate1_boundary" && intervention.action.boundary === "toho_terms_advance_gate1") ||
+      (intervention.action.kind === "reviewed_purchaser_payment_boundary" && intervention.action.boundary === "toho_purchaser_payment_entry")
     );
   if (!reviewedRemoteBoundary) return base;
   const accessEmail = config.takeover.cloudflareAccessEmail;
@@ -214,17 +229,21 @@ async function handoffPrompt(intervention: CinemaIntervention): Promise<string> 
       "TOHO reviewed Window Handoff requires exactly one visible Chrome window owned by the dedicated process."
     );
   }
+  const purchaserForm = intervention.action?.kind === "reviewed_purchaser_payment_boundary";
+  const inputPolicy = purchaserForm ? REVIEWED_PURCHASER_FORM_INPUT_POLICY : REVIEWED_POINTER_ONLY_INPUT_POLICY;
   const takeoverUrl = windowHandoffAdapter.start({
     intervention: { id: intervention.id, epoch: intervention.epoch },
     principalBinding: takeoverPrincipalBindingForEmail(accessEmail),
     target: { processId: targetProcessId, windowId: targetWindowId },
-    inputPolicy: REVIEWED_POINTER_ONLY_INPUT_POLICY
+    inputPolicy
   });
   return [
     base,
     "Remote Human takeover is available through the configured authenticated HTTPS gateway:",
     takeoverUrl,
-    "Open that short-lived URL on your phone. This reviewed Cinema Window Handoff uses WSS only and permits pointer/scroll only; text and keyboard input are server-blocked. Operate only the exact bounded TOHO step described above, press Done, then return here and choose Continue. The locator is bound to this intervention and must not be forwarded."
+    purchaserForm
+      ? "Open that short-lived URL on your phone. This reviewed purchaser/payment form Handoff permits pointer/scroll/text/key input directly to the bounded Chrome window. Do not paste purchaser or payment values into the MCP prompt. Press Done only after the exact provider `次へ` transition and stop before any final purchase control."
+      : "Open that short-lived URL on your phone. This reviewed Cinema Window Handoff uses WSS only and permits pointer/scroll only; text and keyboard input are server-blocked. Operate only the exact bounded TOHO step described above, press Done, then return here and choose Continue. The locator is bound to this intervention and must not be forwarded."
   ].join("\n\n");
 }
 

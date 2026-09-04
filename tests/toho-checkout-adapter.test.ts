@@ -16,6 +16,7 @@ import {
 } from "../src/providers/toho/adapter.js";
 import {
   TOHO_TICKET_STAGE_EXPRESSION,
+  TOHO_PURCHASER_PAYMENT_SURFACE_EXPRESSION,
   TohoCheckoutAdapter,
   normalizeTohoTicketStageSnapshot,
   type TohoTicketStageSnapshot
@@ -501,6 +502,9 @@ function b2RuntimeForStages(stages: TohoTicketStageSnapshot[]) {
       proofConsumes += 1;
       return { provider: "toho" as const, targetId: "target-b2", host: "hlo.tohotheater.jp", pathname: "/net/ticket/036/TNPI2010J02.do" };
     },
+    markTohoB2GuestProof: async () => ({ provider: "toho" as const, targetId: "target-b2", host: "hlo.tohotheater.jp", pathname: "/net/ticket/036/TNPI2010J02.do" }),
+    consumeTohoB2GuestProof: async () => ({ provider: "toho" as const, targetId: "target-b2", host: "hlo.tohotheater.jp", pathname: "/net/ticket/036/TNPI2010J02.do" }),
+    requireTohoPurchaserPaymentIntervention: async (): Promise<never> => { throw new Error("not used in B2"); },
     createCheckoutContinuation: () => { throw new Error("not used in B2"); },
     requireReviewedHumanIntervention: async (): Promise<never> => { throw new Error("not used in B2"); }
   };
@@ -663,4 +667,80 @@ test("TOHO B2 stops after selection when provider Ajax reveals additional ticket
     (error) => error instanceof BrowserRuntimeError && error.code === "HUMAN_ACTION_REQUIRED" && Array.isArray(error.details?.reasons)
   );
   assert.equal(clicks.length, 2);
+});
+
+
+test("TOHO B3a purchaser/payment surface reader is structural and never reads entered field values", () => {
+  assert.match(TOHO_PURCHASER_PAYMENT_SURFACE_EXPRESSION, /purchaseInfoInputForm/);
+  assert.match(TOHO_PURCHASER_PAYMENT_SURFACE_EXPRESSION, /sur_name/);
+  assert.match(TOHO_PURCHASER_PAYMENT_SURFACE_EXPRESSION, /payment-01/);
+  assert.doesNotMatch(TOHO_PURCHASER_PAYMENT_SURFACE_EXPRESSION, /\.value\b/);
+  assert.doesNotMatch(TOHO_PURCHASER_PAYMENT_SURFACE_EXPRESSION, /localStorage|sessionStorage|document\.cookie/);
+});
+
+test("TOHO B3a consumes exact B2 proof, clicks only exact guest continuation, validates purchaser/payment structure, then starts Human Handoff", async () => {
+  const selected = ticketStageSnapshot({
+    hTotal: "2100",
+    totalText: "合計 2,100円",
+    slots: [{
+      ...(ticketStageSnapshot().slots as Array<Record<string, unknown>>)[0],
+      selectTicketValue: "529-2100-0010-0",
+      selectionText: "一般 2,100円"
+    }]
+  });
+  const clicks: Array<Record<string, unknown>> = [];
+  let proofConsumes = 0;
+  let handoff: Record<string, unknown> | undefined;
+  const runtime = {
+    evaluateSemanticState: async (_provider: "toho", expression: string) => {
+      if (expression === TOHO_TICKET_STAGE_EXPRESSION) {
+        return { url: "https://hlo.tohotheater.jp/net/ticket/036/TNPI2010J02.do", value: selected };
+      }
+      if (expression.includes("gotoRej(4")) {
+        return { url: "https://hlo.tohotheater.jp/net/ticket/036/TNPI2010J02.do", value: {
+          ok: true, tagName: "A", text: "ログインせず次へ", href: "javascript:void(0)", onclick: "gotoRej(4, '036', '', '');", x: 100, y: 200
+        } };
+      }
+      if (expression === TOHO_PURCHASER_PAYMENT_SURFACE_EXPRESSION) {
+        return { url: "https://hlo.tohotheater.jp/net/ticket/036/TNPI2030J02.do", value: {
+          pathname: "/net/ticket/036/TNPI2030J02.do",
+          title: "購入情報の入力 || TOHOシネマズ",
+          formNameExact: true,
+          formMethodExact: true,
+          formTargetPathname: "/net/ticket/036/TNPI2055J02.do",
+          nextControlCount: 1,
+          fieldCounts: { surName: 1, firstName: 1, surNameKana: 1, firstNameKana: 1, sex: 3, age: 1, tel: 1, mail1: 1, mail2: 1, payment: 7 },
+          headingsExact: true
+        } };
+      }
+      throw new Error("unexpected B3 semantic expression");
+    },
+    clickReviewedElementPoint: async (_point: { x: number; y: number }, _provider: "toho", expectedElement: Record<string, unknown>) => {
+      clicks.push(expectedElement);
+      return {};
+    },
+    getReviewedBrowserContext: async () => ({ provider: "toho" as const, targetId: "target-b3", host: "hlo.tohotheater.jp", pathname: "/net/ticket/036/TNPI2030J02.do" }),
+    consumeTohoGate1TicketProof: async () => { throw new Error("not used"); },
+    markTohoB2GuestProof: async () => { throw new Error("not used"); },
+    consumeTohoB2GuestProof: async () => {
+      proofConsumes += 1;
+      return { provider: "toho" as const, targetId: "target-b3", host: "hlo.tohotheater.jp", pathname: "/net/ticket/036/TNPI2010J02.do" };
+    },
+    requireTohoPurchaserPaymentIntervention: async (input: Record<string, unknown>): Promise<never> => {
+      handoff = input;
+      throw new BrowserRuntimeError("HUMAN_ACTION_REQUIRED", "purchaser/payment handoff");
+    },
+    createCheckoutContinuation: () => { throw new Error("not used"); },
+    requireReviewedHumanIntervention: async (): Promise<never> => { throw new Error("not used"); }
+  };
+  const adapter = new TohoCheckoutAdapter(runtime as never, {} as never);
+  await assert.rejects(
+    adapter.advanceGuestToPurchaserPaymentBoundary(ticketIntent("一般", "529-2100-0010-0")),
+    (error) => error instanceof BrowserRuntimeError && error.code === "HUMAN_ACTION_REQUIRED"
+  );
+  assert.equal(proofConsumes, 1);
+  assert.deepEqual(clicks, [{ tagName: "A", text: "ログインせず次へ", href: "javascript:void(0)" }]);
+  assert.equal(handoff?.seatId, "A-2");
+  assert.equal(handoff?.targetPathname, "/net/ticket/036/TNPI2055J02.do");
+  assert.match(String(handoff?.message), /do not provide those values through MCP/i);
 });

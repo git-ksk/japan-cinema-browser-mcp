@@ -38,6 +38,9 @@ interface TohoCheckoutRuntime {
   ): Promise<Record<string, unknown>>;
   getReviewedBrowserContext(expectedProvider: "toho"): Promise<CinemaReviewedBrowserContext>;
   consumeTohoGate1TicketProof(input: { seatId: string; intentDigest: string }): Promise<CinemaReviewedBrowserContext>;
+  markTohoB2GuestProof(input: { seatId: string; intentDigest: string }): Promise<CinemaReviewedBrowserContext>;
+  consumeTohoB2GuestProof(input: { seatId: string; intentDigest: string }): Promise<CinemaReviewedBrowserContext>;
+  requireTohoPurchaserPaymentIntervention(input: { seatId: string; intentDigest: string; targetPathname: string; message: string }): Promise<never>;
   createCheckoutContinuation(input: CheckoutContinuationBindingInput): CheckoutContinuationBinding;
   requireReviewedHumanIntervention(input: {
     reason: "consent";
@@ -466,6 +469,73 @@ export function normalizeTohoTicketStageSnapshot(
   };
 }
 
+export const TOHO_PURCHASER_PAYMENT_SURFACE_EXPRESSION = `(() => {
+  const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+  const visible = (el) => {
+    const rect = el.getBoundingClientRect();
+    const style = getComputedStyle(el);
+    return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && style.pointerEvents !== 'none';
+  };
+  const form = document.forms.purchaseInfoInputForm;
+  let action = null;
+  try { action = form ? new URL(form.action, location.href) : null; } catch {}
+  const fieldCount = (selector) => Array.from(document.querySelectorAll(selector)).filter(visible).length;
+  const nextControls = Array.from(document.querySelectorAll('button,a,input[type="button"],input[type="submit"]'))
+    .filter(visible)
+    .filter((el) => normalize(el.getAttribute('aria-label') || el.getAttribute('value') || el.textContent) === '次へ');
+  const body = normalize(document.body?.innerText || '');
+  return {
+    pathname: location.pathname,
+    title: document.title,
+    formNameExact: form?.getAttribute('name') === 'purchaseInfoInputForm',
+    formMethodExact: String(form?.method || '').toLowerCase() === 'post',
+    formTargetPathname: action?.origin === location.origin ? action.pathname : '',
+    nextControlCount: nextControls.length,
+    fieldCounts: {
+      surName: fieldCount('input[name="sur_name"]'),
+      firstName: fieldCount('input[name="first_name"]'),
+      surNameKana: fieldCount('input[name="sur_name_kana"]'),
+      firstNameKana: fieldCount('input[name="first_name_kana"]'),
+      sex: fieldCount('input[name="sex"][type="radio"]'),
+      age: fieldCount('select[name="age"]'),
+      tel: fieldCount('input[name="tel"]'),
+      mail1: fieldCount('input[name="mail1"]'),
+      mail2: fieldCount('input[name="mail-02"]'),
+      payment: fieldCount('input[name="payment-01"][type="radio"]')
+    },
+    headingsExact: [
+      'ご購入に必要な情報を入力してください。',
+      'お名前（※必須項目）',
+      'お電話番号（※必須項目）',
+      'メールアドレス（※必須項目）',
+      'お支払い方法（※必須項目）',
+      'ご購入内容'
+    ].every((text) => body.includes(text))
+  };
+})()`;
+
+function guestContinuationTargetExpression(siteId: string): string {
+  const onclick = `gotoRej(4, '${siteId}', '', '');`;
+  return `(() => {
+    const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+    const visible = (el) => {
+      const rect = el.getBoundingClientRect();
+      const style = getComputedStyle(el);
+      return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && style.pointerEvents !== 'none';
+    };
+    const matches = Array.from(document.querySelectorAll('a'))
+      .filter(visible)
+      .filter((el) => normalize(el.textContent) === 'ログインせず次へ' && el.getAttribute('href') === 'javascript:void(0)' && el.getAttribute('onclick') === ${JSON.stringify(onclick)});
+    if (matches.length !== 1) return { ok: false, count: matches.length };
+    const el = matches[0];
+    el.scrollIntoView({ block: 'center', inline: 'center' });
+    const rect = el.getBoundingClientRect();
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
+    const hit = document.elementFromPoint(x, y);
+    return { ok: hit === el || el.contains(hit), tagName: el.tagName, text: normalize(el.textContent), href: el.getAttribute('href'), onclick: el.getAttribute('onclick'), x, y };
+  })()`;
+}
 function ticketModalTriggerExpression(expectedSeatId: string): string {
   const compactSeat = compactTohoSeatId(expectedSeatId);
   return `(() => {
@@ -737,6 +807,7 @@ export class TohoCheckoutAdapter {
         { reasons: after.extraConditionReasons, label: ticket.label }
       );
     }
+    await this.runtime.markTohoB2GuestProof({ seatId, intentDigest: checkoutIntentDigest(intent) });
     return {
       provider: "toho",
       stage: "member_or_guest",
@@ -746,6 +817,85 @@ export class TohoCheckoutAdapter {
       guestContinuationReady: true,
       neverReplay: true
     };
+  }
+
+  async advanceGuestToPurchaserPaymentBoundary(rawIntent: CinemaCheckoutIntent): Promise<never> {
+    const intent = parseCinemaCheckoutIntent(rawIntent);
+    if (intent.provider !== "toho" || intent.seatIds.length !== 1 || intent.ticketChoices.length !== 1 || intent.ticketChoices[0]!.quantity !== 1) {
+      throw new CheckoutCoreError("INVALID_INTENT", "TOHO B3a requires one seat and one exact ticket choice with quantity 1.");
+    }
+    const seatId = intent.seatIds[0]!;
+    const digest = checkoutIntentDigest(intent);
+    const stage = await this.readTicketStageAfterGate1(intent);
+    const resolved = resolveCheckoutTicketChoices(intent, stage.ticketTypes);
+    if (resolved.selections.length !== 1) throw new CheckoutCoreError("AMBIGUOUS_RENDERED_STATE", "TOHO B3a did not resolve one exact intended ticket.");
+    const ticket = resolved.selections[0]!.ticketType;
+    if (
+      !ticket.providerTicketTypeId || ticket.priceYen === undefined || stage.ajaxActive !== 0 ||
+      stage.selectedProviderTicketTypeId !== ticket.providerTicketTypeId || stage.totalYen !== ticket.priceYen ||
+      !stage.selectionText.includes(ticket.label) || stage.extraConditionReasons.length > 0
+    ) {
+      throw new CheckoutCoreError("STALE_CONTEXT", "TOHO B3a requires the exact settled B2 ticket selection before guest continuation.");
+    }
+    await this.runtime.consumeTohoB2GuestProof({ seatId, intentDigest: digest });
+    const target = await this.runtime.evaluateSemanticState<{ ok?: unknown; tagName?: unknown; text?: unknown; href?: unknown; onclick?: unknown; x?: unknown; y?: unknown }>(
+      "toho",
+      guestContinuationTargetExpression(stage.siteId)
+    );
+    const expectedOnclick = `gotoRej(4, '${stage.siteId}', '', '');`;
+    if (
+      target.value.ok !== true || target.value.tagName !== "A" || target.value.text !== "ログインせず次へ" ||
+      target.value.href !== "javascript:void(0)" || target.value.onclick !== expectedOnclick ||
+      typeof target.value.x !== "number" || typeof target.value.y !== "number"
+    ) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO B3a guest continuation changed before reviewed pointer dispatch.");
+    }
+    await this.runtime.clickReviewedElementPoint(
+      { x: target.value.x, y: target.value.y },
+      "toho",
+      { tagName: "A", text: "ログインせず次へ", href: "javascript:void(0)" }
+    );
+
+    const expectedPurchaserPath = `/net/ticket/${stage.siteId}/TNPI2030J02.do`;
+    let purchaserContext: CinemaReviewedBrowserContext | undefined;
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      const current = await this.runtime.getReviewedBrowserContext("toho");
+      if (current.pathname === expectedPurchaserPath) { purchaserContext = current; break; }
+      if (current.pathname !== `/net/ticket/${stage.siteId}/TNPI2010J02.do`) {
+        throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO B3a guest continuation reached an unreviewed route.", { observedPathname: current.pathname });
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    if (!purchaserContext) throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO B3a guest continuation did not settle on the reviewed purchase-information route.");
+
+    const surface = await this.runtime.evaluateSemanticState<{
+      pathname?: unknown; title?: unknown; formNameExact?: unknown; formMethodExact?: unknown; formTargetPathname?: unknown;
+      nextControlCount?: unknown; fieldCounts?: Record<string, unknown>; headingsExact?: unknown;
+    }>("toho", TOHO_PURCHASER_PAYMENT_SURFACE_EXPRESSION);
+    const counts = surface.value.fieldCounts ?? {};
+    const expectedTargetPath = `/net/ticket/${stage.siteId}/TNPI2055J02.do`;
+    if (
+      surface.value.pathname !== expectedPurchaserPath || surface.value.title !== "購入情報の入力 || TOHOシネマズ" ||
+      surface.value.formNameExact !== true || surface.value.formMethodExact !== true || surface.value.formTargetPathname !== expectedTargetPath ||
+      surface.value.nextControlCount !== 1 || surface.value.headingsExact !== true ||
+      counts.surName !== 1 || counts.firstName !== 1 || counts.surNameKana !== 1 || counts.firstNameKana !== 1 ||
+      counts.sex !== 3 || counts.age !== 1 || counts.tel !== 1 || counts.mail1 !== 1 || counts.mail2 !== 1 ||
+      typeof counts.payment !== "number" || counts.payment < 1
+    ) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO B3 purchaser/payment surface changed before Human Handoff.");
+    }
+
+    return this.runtime.requireTohoPurchaserPaymentIntervention({
+      seatId,
+      intentDigest: digest,
+      targetPathname: expectedTargetPath,
+      message: [
+        "TOHO purchaser information and payment-method choice are on the same reviewed page.",
+        "Enter the required purchaser details and choose the intended payment method directly in Chrome; do not provide those values through MCP.",
+        "Press the exact provider `次へ` once and stop immediately on the next page. Do not click any final purchase/payment confirmation.",
+        "After Handoff Done, the agent will verify only the provider route and non-sensitive structure; it will not read or return the entered purchaser/payment values."
+      ].join(" ")
+    });
   }
 
   async selectExactSeatsToConsentBoundary(rawIntent: CinemaCheckoutIntent): Promise<never> {
