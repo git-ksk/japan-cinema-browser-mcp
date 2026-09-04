@@ -64,9 +64,9 @@ Phase 3では、座席表へ入るだけでは選択席が発生しないこと�
 
 座席画像が `選択中` になっても、選択座席の要約は先へ進まず、`確認する` も操作可能な状態になりませんでした。そのため、座席画像の選択と「希望座席を決定」は同じ状態とみなしません。
 
-現在は `確認する` を、15分制限が始まる可能性のある重要境界として別途確認する方針です。
+2026-08-25のGate 0b v6 physical acceptanceで、この境界を実機確認しました。Humanがexact `A-2` → `確認する` 1回 → provider自身の `terms_check` を明示的にON → Doneまで実行し、CinemaはTOHO自身の `bookSeatIntForm.seat_no` とrendered `#seatList2` がexact seat 1件だけで一致すること、およびcheckbox checkedをread-only検証しました。直後の独立fresh sessionでも同じ `A-2` は `available` でした。このため、**`確認する` とterms acknowledgementまででは、少なくとも別sessionから観測できるserver-side holdは開始していませんでした**。
 
-利用規約欄と `terms_check` checkboxはseat page下部に常設されるため、欄や `利用規約に同意して次へ` の**存在**だけを `確認する` 後のpostconditionには使いません。Gate 0bのphysical proofではHumanがexact seat → `確認する` 1回 → provider自身の `terms_check` を明示的にONにし、CinemaはDone後にTOHO自身の `bookSeatIntForm.seat_no` とrendered `#seatList2` がexact seat 1件だけで一致すること、およびcheckbox checkedをread-only検証します。seat画像の `選択中` 表示は補助diagnosticだけにします。`利用規約に同意して次へ` は押しません。Agentはcheckbox/advance controlを自動操作しません。
+利用規約欄と `terms_check` checkboxはseat page下部に常設されるため、欄や `利用規約に同意して次へ` の**存在**だけをpostconditionには使いません。seat画像の `選択中` 表示も補助diagnosticだけにし、canonical truthはprovider-owned form + rendered summaryとします。Gate 0bでは `利用規約に同意して次へ` を押していません。次のGate 1では、このcontrolをHumanが1回だけ操作し、直後のprovider route・hold/timer・fresh-session availabilityをread-only観測します。Agentはterms checkbox/advance controlを自動操作しません。
 
 また、隔離環境の標準 `756x469` viewportでは横向き表示に関するブロックが出ました。`1280x813` ではその環境要因は解消しましたが、`確認する` は依然として操作可能になりませんでした。
 

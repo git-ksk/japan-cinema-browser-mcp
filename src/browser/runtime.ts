@@ -61,6 +61,13 @@ export type CinemaHandoffAction =
       boundary: "toho_seat_decision_gate0b";
       seatId: string;
       intentDigest: string;
+    }
+  | {
+      kind: "reviewed_gate1_boundary";
+      provider: "toho";
+      boundary: "toho_terms_advance_gate1";
+      seatId: string;
+      intentDigest: string;
     };
 
 export interface CinemaReviewedBrowserContext {
@@ -177,6 +184,42 @@ function tohoGate0bVerifyExpression(expectedSeatId: string): string {
     termsAcknowledged
   };
 })()`;
+}
+
+function tohoGate1StartVerifyExpression(expectedSeatId: string, expectedTargetPathname: string): string {
+  const expectedSeat = JSON.stringify(expectedSeatId);
+  const expectedTarget = JSON.stringify(expectedTargetPathname);
+  return `(() => {
+    const expectedSeatId = ${expectedSeat};
+    const expectedSeatDisplay = expectedSeatId.replace('-', '');
+    const expectedTargetPathname = ${expectedTarget};
+    const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+    const visible = (el) => {
+      const rect = el.getBoundingClientRect();
+      const style = getComputedStyle(el);
+      return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && style.pointerEvents !== 'none';
+    };
+    const form = document.forms.namedItem('bookSeatIntForm');
+    const seatNo = form?.elements.namedItem('seat_no');
+    const canonicalSeatIds = normalize(seatNo?.value).split(',').map((value) => normalize(value)).filter(Boolean);
+    const renderedSeatLabels = Array.from(document.querySelectorAll('#seatList2 span')).filter(visible).map((el) => normalize(el.textContent)).filter(Boolean);
+    const terms = Array.from(document.querySelectorAll('input#terms_check[type="checkbox"][name="terms_check"]')).filter(visible);
+    const controls = Array.from(document.querySelectorAll('a#confirm')).filter(visible).filter((el) => normalize(el.textContent) === '利用規約に同意して次へ');
+    const action = form ? new URL(form.action, location.href) : null;
+    return {
+      expectedSeatSelected: canonicalSeatIds.length === 1 && canonicalSeatIds[0] === expectedSeatId && renderedSeatLabels.length === 1 && renderedSeatLabels[0] === expectedSeatDisplay,
+      selectedSeatCount: canonicalSeatIds.length,
+      renderedSeatCount: renderedSeatLabels.length,
+      termsCheckboxCount: terms.length,
+      termsAcknowledged: terms.length === 1 && terms[0].disabled !== true && terms[0].checked === true,
+      matchingControls: controls.length,
+      controlHrefExact: controls.length === 1 && controls[0].getAttribute('href') === 'javascript:bookSeat();',
+      formNameExact: form?.getAttribute('name') === 'bookSeatIntForm',
+      formMethodExact: String(form?.method || '').toLowerCase() === 'post',
+      formTargetExact: Boolean(action && action.origin === location.origin && action.pathname === expectedTargetPathname),
+      kakuteiControlCount: form ? Array.from(form.elements).filter((el) => el.getAttribute?.('name') === 'kakutei_flg').length : 0
+    };
+  })()`;
 }
 
 const TOHO_REVIEWED_CONSENT_BOUNDARY_VERIFY_EXPRESSION = `(() => {
@@ -324,6 +367,25 @@ export class CinemaBrowserRuntime {
     intentDigest: string;
     sourceHost: string;
     sourcePathname: string;
+  };
+  private gate0bProof?: {
+    targetId: string;
+    provider: "toho";
+    seatId: string;
+    intentDigest: string;
+    sourceHost: string;
+    sourcePathname: string;
+    resourceEpoch: number;
+  };
+  private gate1Binding?: {
+    interventionId: string;
+    targetId: string;
+    provider: "toho";
+    seatId: string;
+    intentDigest: string;
+    sourceHost: string;
+    sourcePathname: string;
+    targetPathname: string;
   };
 
   constructor(
@@ -792,6 +854,7 @@ export class CinemaBrowserRuntime {
 
   async beginTohoSeatDecisionGate0b(input: { seatId: string; intentDigest: string }): Promise<CinemaIntervention> {
     this.handoff.assertAgentAuthority();
+    this.gate0bProof = undefined;
     if (!/^[A-Z]{1,4}-\d{1,4}$/.test(input.seatId) || !/^sha256:[a-f0-9]{64}$/.test(input.intentDigest)) {
       throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO Gate 0b requires one exact seat identity and bounded intent digest.");
     }
@@ -818,6 +881,98 @@ export class CinemaBrowserRuntime {
       intentDigest: input.intentDigest,
       sourceHost: context.host,
       sourcePathname: context.pathname
+    };
+    return intervention;
+  }
+
+  async beginTohoTermsAdvanceGate1(input: { seatId: string; intentDigest: string }): Promise<CinemaIntervention> {
+    this.handoff.assertAgentAuthority();
+    if (!/^[A-Z]{1,4}-\d{1,4}$/.test(input.seatId) || !/^sha256:[a-f0-9]{64}$/.test(input.intentDigest)) {
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO Gate 1 requires one exact seat identity and bounded intent digest.");
+    }
+    const context = await this.getReviewedBrowserContext("toho");
+    const route = /^\/net\/ticket\/(\d{3})\/TNPI2010J01\.do$/.exec(context.pathname);
+    if (!route) {
+      this.gate0bProof = undefined;
+      throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO Gate 1 must start on the reviewed seat-map surface after Gate 0b verification.");
+    }
+    const proof = this.gate0bProof;
+    if (
+      !proof || proof.provider !== "toho" || proof.seatId !== input.seatId || proof.intentDigest !== input.intentDigest ||
+      proof.targetId !== context.targetId || proof.sourceHost !== context.host || proof.sourcePathname !== context.pathname ||
+      proof.resourceEpoch !== this.handoff.getResourceEpoch()
+    ) {
+      this.gate0bProof = undefined;
+      throw new BrowserRuntimeError(
+        "UI_STATE_CHANGED",
+        "TOHO Gate 1 requires the exact one-shot Gate 0b proof from this browser target, intent, and resource epoch."
+      );
+    }
+    this.gate0bProof = undefined;
+    const targetPathname = `/net/ticket/${route[1]}/TNPI2010J02.do`;
+    const client = await this.getClient();
+    const evaluated = await client.Runtime.evaluate({
+      expression: tohoGate1StartVerifyExpression(input.seatId, targetPathname),
+      returnByValue: true,
+      awaitPromise: true
+    });
+    const state = evaluated.result.value as {
+      expectedSeatSelected?: boolean;
+      selectedSeatCount?: number;
+      renderedSeatCount?: number;
+      termsCheckboxCount?: number;
+      termsAcknowledged?: boolean;
+      matchingControls?: number;
+      controlHrefExact?: boolean;
+      formNameExact?: boolean;
+      formMethodExact?: boolean;
+      formTargetExact?: boolean;
+      kakuteiControlCount?: number;
+    } | undefined;
+    if (
+      state?.expectedSeatSelected !== true || state.selectedSeatCount !== 1 || state.renderedSeatCount !== 1 ||
+      state.termsCheckboxCount !== 1 || state.termsAcknowledged !== true || state.matchingControls !== 1 ||
+      state.controlHrefExact !== true || state.formNameExact !== true || state.formMethodExact !== true ||
+      state.formTargetExact !== true || state.kakuteiControlCount !== 1
+    ) {
+      throw new BrowserRuntimeError(
+        "UI_STATE_CHANGED",
+        "TOHO Gate 1 precondition changed after Gate 0b; the exact seat, Human terms acknowledgement, or reviewed provider continuation is no longer bound.",
+        {
+          expectedSeatSelected: state?.expectedSeatSelected === true,
+          selectedSeatCount: state?.selectedSeatCount,
+          renderedSeatCount: state?.renderedSeatCount,
+          termsCheckboxCount: state?.termsCheckboxCount,
+          termsAcknowledged: state?.termsAcknowledged === true,
+          matchingControls: state?.matchingControls,
+          controlHrefExact: state?.controlHrefExact === true,
+          formNameExact: state?.formNameExact === true,
+          formMethodExact: state?.formMethodExact === true,
+          formTargetExact: state?.formTargetExact === true,
+          kakuteiControlCount: state?.kakuteiControlCount
+        }
+      );
+    }
+    const intervention = this.handoff.begin({
+      reason: "consent",
+      action: {
+        kind: "reviewed_gate1_boundary",
+        provider: "toho",
+        boundary: "toho_terms_advance_gate1",
+        seatId: input.seatId,
+        intentDigest: input.intentDigest
+      },
+      resumePolicy: CINEMA_HANDOFF_POLICY.semantic_mutation.resumePolicy
+    });
+    this.gate1Binding = {
+      interventionId: intervention.id,
+      targetId: context.targetId,
+      provider: "toho",
+      seatId: input.seatId,
+      intentDigest: input.intentDigest,
+      sourceHost: context.host,
+      sourcePathname: context.pathname,
+      targetPathname
     };
     return intervention;
   }
@@ -983,7 +1138,58 @@ export class CinemaBrowserRuntime {
           active
         );
       }
+      const verified = this.handoff.markVerified(interventionId);
+      this.gate0bProof = {
+        targetId: binding.targetId,
+        provider: binding.provider,
+        seatId: binding.seatId,
+        intentDigest: binding.intentDigest,
+        sourceHost: binding.sourceHost,
+        sourcePathname: binding.sourcePathname,
+        resourceEpoch: verified.epoch
+      };
       this.gate0bBinding = undefined;
+      return verified;
+    }
+    if (active.action?.kind === "reviewed_gate1_boundary") {
+      const binding = this.gate1Binding;
+      if (
+        active.action.provider !== "toho" || active.action.boundary !== "toho_terms_advance_gate1" ||
+        !binding || binding.interventionId !== active.id || binding.provider !== active.action.provider ||
+        binding.seatId !== active.action.seatId || binding.intentDigest !== active.action.intentDigest ||
+        !this.targetId || binding.targetId !== this.targetId
+      ) {
+        this.gate1Binding = undefined;
+        throw new BrowserRuntimeError(
+          "UI_STATE_CHANGED",
+          "The TOHO Gate 1 browser/seat intent binding changed while Human control was active.",
+          undefined,
+          active
+        );
+      }
+      const current = new URL(url);
+      if (current.host !== binding.sourceHost) {
+        this.gate1Binding = undefined;
+        throw new BrowserRuntimeError("UI_STATE_CHANGED", "TOHO Gate 1 left its bound provider host.", undefined, active);
+      }
+      if (current.pathname === binding.sourcePathname) {
+        throw new BrowserRuntimeError(
+          "HUMAN_ACTION_REQUIRED",
+          "TOHO Gate 1 is still on the reviewed seat/terms page. If you agree to the provider terms, press `利用規約に同意して次へ` exactly once and stop immediately on the next page before choosing any ticket type.",
+          undefined,
+          active
+        );
+      }
+      if (current.pathname !== binding.targetPathname) {
+        this.gate1Binding = undefined;
+        throw new BrowserRuntimeError(
+          "UI_STATE_CHANGED",
+          "TOHO Gate 1 reached an unexpected provider route instead of the reviewed immediate continuation.",
+          { reachedExpectedRoute: false },
+          active
+        );
+      }
+      this.gate1Binding = undefined;
       return this.handoff.markVerified(interventionId);
     }
     if (active.action?.kind === "reviewed_checkout_boundary") {
@@ -1043,12 +1249,16 @@ export class CinemaBrowserRuntime {
   cancelHumanIntervention(interventionId: string): void {
     this.handoff.cancel(interventionId);
     this.checkoutContinuations.clear();
+    this.gate0bProof = undefined;
     if (this.gate0bBinding?.interventionId === interventionId) this.gate0bBinding = undefined;
+    if (this.gate1Binding?.interventionId === interventionId) this.gate1Binding = undefined;
   }
 
   async close(): Promise<void> {
     this.checkoutContinuations.clear();
     this.gate0bBinding = undefined;
+    this.gate0bProof = undefined;
+    this.gate1Binding = undefined;
     const active = this.handoff.getActive();
     if (active) this.handoff.cancel(active.id);
     const client = this.client;
