@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
+import { resolveExactMacOSWindowId } from "./macos-window-resolver.js";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -118,6 +119,12 @@ export class ChromeProcess {
     if (this.isExternal()) return undefined;
     const pid = this.child?.pid;
     return this.child?.exitCode === null && Number.isSafeInteger(pid) && pid! > 0 ? pid : undefined;
+  }
+
+  async getExactWindowId(): Promise<number | undefined> {
+    const pid = this.getPid();
+    if (!pid || process.platform !== "darwin") return undefined;
+    return resolveExactMacOSWindowId(pid);
   }
 
   async start(): Promise<number> {

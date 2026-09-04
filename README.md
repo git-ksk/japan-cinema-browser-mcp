@@ -144,7 +144,7 @@ npm start
 
 ## Human Handoff
 
-ログイン、アクセスチャレンジ、同意画面など、人間が操作すべき場面では `mcp-execution-handoff` を利用して実行権限を人間へ移します。Phase 4 TOHO Gate 0bでは、headedな専用Chromeのexact process/windowへHandoffのfirst-class `BrowserHandoffAdapter`を接続する実験的WebRTC経路も用意しています。Cinemaはseat intent / provider policy / postcondition verificationだけを所有し、WebRTC runtime、route ownership、exact-window binding、reconnect/revokeはHandoffへ委譲します。Gate 0bのHuman inputはpointer/scrollだけで、text/keyはserver-sideで拒否します。この経路はCloud Run headless runtimeや一般的なremote browser hostingを有効化するものではありません。
+ログイン、アクセスチャレンジ、同意画面など、人間が操作すべき場面では `mcp-execution-handoff` を利用して実行権限を人間へ移します。Phase 4 TOHOのGate 0b physical acceptanceは `BrowserHandoffAdapter` + WebRTCで完了済みです。current Gate 1と今後のGate 0b再実行は、headedな専用Chromeのexact macOS windowへHandoffのfirst-class `WindowWebSocketHandoffAdapter`を接続するWSS-only経路を使います。Cinemaはseat intent / provider policy / postcondition verificationと、専用Chrome PIDからexactly oneのCGWindowIDを選ぶ境界だけを所有し、WSS session/capture/input/focus fencing/reconnect/revokeはHandoffへ委譲します。Human inputはpointer/scrollだけで、text/keyはserver-sideで拒否します。current WSS pathではICE/STUN/TURNを構成せず、この経路はCloud Run headless runtimeや一般的なremote browser hostingを有効化するものではありません。
 
 重要なのは、**人間が操作を終えたからといって、中断した操作をそのまま再実行しない**ことです。
 
