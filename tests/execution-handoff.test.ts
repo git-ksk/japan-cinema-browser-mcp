@@ -128,7 +128,7 @@ test("reviewed Handoff dependency is immutable and transaction replay remains st
   const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")) as { dependencies?: Record<string, string> };
   assert.equal(
     pkg.dependencies?.["mcp-execution-handoff"],
-    "https://github.com/git-ksk/mcp-execution-handoff/archive/a56cdf22ae6fcf6201c08de7974e01ef5795f6b3.tar.gz"
+    "https://github.com/git-ksk/mcp-execution-handoff/archive/19692aba691249dbff6e09c39da0e8cde4b803b6.tar.gz"
   );
   const server = fs.readFileSync(path.join(root, "src/server.ts"), "utf8");
   assert.match(server, /Human browser activity invalidates every prepared transaction confirmation/);
