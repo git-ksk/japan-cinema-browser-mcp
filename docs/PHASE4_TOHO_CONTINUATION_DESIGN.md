@@ -396,7 +396,7 @@ Phase 4では常に `false` です。
    - Gate 1 proofをtarget / seat / intent / path / resource epochへone-shot binding
    - caller明示のreview済み`一般` 1枚だけをexact pointerで実機選択済み。資格券はHuman review
    - provider ID `529-2100-0010-0`、`一般 2,100円`、total 2,100円、Ajax settlement=0、追加条件markerなしをpost-selectionで確認
-   - 選択後にmodal anchorの表示labelが変わる実DOMをPR #83でstrict normalize対応。mutation直前のexact未選択label検証は維持
+   - 選択後にmodal anchorの表示labelが変わる実DOMをPR #83でstrict normalize対応。PR #84ではexact ticket item内のunique selection summaryへbindingし、同じlive J02でpost-selection factsを再検証。mutation直前のexact未選択label検証は維持
    - `ログインせず次へ`はB2ではクリックしない
 6. **B3 — 購入者情報・支払いhandoffと確認画面境界**
    - provider固有の肯定条件を確認
