@@ -253,8 +253,8 @@ export const TOHO_TICKET_STAGE_EXPRESSION = `(() => {
   const selectTickets = Array.from(document.querySelectorAll('.select_ticket'));
   const slots = slotElements.map((item, index) => {
     const seatLabel = normalize(item.innerText).split(' ')[0] || '';
-    const triggers = Array.from(item.querySelectorAll('a[data-modal]')).filter((el) => normalize(el.textContent) === '券種を選択してください');
-    const modalTarget = triggers.length === 1 ? String(triggers[0].getAttribute('data-modal') || '') : '';
+    const modalAnchors = Array.from(item.querySelectorAll('a[data-modal]'));
+    const modalTarget = modalAnchors.length === 1 ? String(modalAnchors[0].getAttribute('data-modal') || '') : '';
     const modal = modalTarget ? document.querySelector('[data-modal-content="' + modalTarget.replace(/"/g, '\\"') + '"]') : null;
     const options = modal ? Array.from(modal.querySelectorAll('a[href^="javascript:SelectTicket.setTicket"]')).map((el) => ({
       text: normalize(el.textContent),
