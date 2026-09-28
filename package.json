@@ -23,15 +23,15 @@
   },
   "dependencies": {
     "@google-cloud/firestore": "^8.7.0",
-    "@modelcontextprotocol/server": "2.0.0",
+    "@modelcontextprotocol/server": "2.1.0",
     "chrome-remote-interface": "0.34.0",
     "mcp-execution-handoff": "https://github.com/git-ksk/mcp-execution-handoff/archive/19692aba691249dbff6e09c39da0e8cde4b803b6.tar.gz",
-    "zod": "4.4.3"
+    "zod": "4.6.5"
   },
   "devDependencies": {
     "@types/chrome-remote-interface": "0.34.0",
-    "@types/node": "26.2.0",
-    "tsx": "4.23.12",
+    "@types/node": "26.6.2",
+    "tsx": "4.23.15",
     "typescript": "7.0.2"
   },
   "keywords": [
